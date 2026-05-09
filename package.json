@@ -1,0 +1,30 @@
+{
+  "name": "we-print-n-pack",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "node ./scripts/clean-next.mjs && node ./scripts/free-port-3000.mjs",
+    "dev": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next dev",
+    "build": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next build",
+    "start": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next start",
+    "lint": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next lint",
+    "seed": "/usr/local/opt/node@22/bin/node ./scripts/seed-templates.mjs",
+    "postinstall": "PATH=/usr/local/opt/node@22/bin:$PATH npm rebuild better-sqlite3 --build-from-source"
+  },
+  "dependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/nodemailer": "^8.0.0",
+    "better-sqlite3": "^12.9.0",
+    "lucide-react": "^1.11.0",
+    "next": "15.3.1",
+    "nodemailer": "^8.0.7",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.0",
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "typescript": "5.8.3"
+  }
+}
