@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "predev": "node ./scripts/clean-next.mjs && node ./scripts/free-port-3000.mjs",
-    "dev": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next dev",
-    "build": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next build",
-    "start": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next start",
-    "lint": "/usr/local/opt/node@22/bin/node ./node_modules/next/dist/bin/next lint",
-    "seed": "/usr/local/opt/node@22/bin/node ./scripts/seed-templates.mjs",
-    "postinstall": "PATH=/usr/local/opt/node@22/bin:$PATH npm rebuild better-sqlite3 --build-from-source"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "seed": "node ./scripts/seed-templates.mjs",
+    "postinstall": "npm rebuild better-sqlite3 --build-from-source"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",
