@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 
 /* ── CONFIG — update these ───────────────────────────────── */
-const CONTACT_EMAIL   = "";
+const CONTACT_EMAIL   = "rajandob88@gmail.com";
 
 const PRODUCTS = [
   "Business Cards", "Flyers", "Yard Signs",
