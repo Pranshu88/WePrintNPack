@@ -481,7 +481,7 @@ export default function DesignEditorShell({
     front: initialFrontBgColor ?? "#ffffff",
     back: initialBackBgColor ?? "#ffffff",
   });
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(1.5);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<GalleryTemplate[]>([]);
@@ -507,8 +507,48 @@ export default function DesignEditorShell({
     id: string; side: Side; corner: "nw" | "ne" | "sw" | "se";
     sx: number; sy: number; ox: number; oy: number; ow: number; oh: number;
   } | null>(null);
+  const textResizeRef = useRef<{
+    id: string; side: Side; edge: "n" | "s" | "e" | "w";
+    sx: number; sy: number; ox: number; oy: number; ow: number;
+  } | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
+
+  // ─── Undo / Redo ──────────────────────────────────────────────────────────
+  const historyRef = useRef<Record<Side, SideData>[]>([]);
+  const futureRef  = useRef<Record<Side, SideData>[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  function pushHistory(snapshot: Record<Side, SideData>) {
+    historyRef.current.push(snapshot);
+    if (historyRef.current.length > 100) historyRef.current.shift();
+    futureRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }
+
+  function undo() {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    setSides((current) => {
+      futureRef.current.push(current);
+      setCanRedo(true);
+      setCanUndo(historyRef.current.length > 0);
+      return prev;
+    });
+  }
+
+  function redo() {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    setSides((current) => {
+      historyRef.current.push(current);
+      setCanUndo(true);
+      setCanRedo(futureRef.current.length > 0);
+      return next;
+    });
+  }
 
   // Helper: parse an SVG design, apply to state
   function applySVGDesign(
@@ -641,6 +681,19 @@ export default function DesignEditorShell({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItemId, editingItemId]);
 
+  // Keyboard undo/redo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName.toLowerCase();
+      if (["input", "textarea", "select"].includes(tag)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "y") { e.preventDefault(); redo(); }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Item helpers ─────────────────────────────────────────────────────────
 
   function addTextItem(text: string) {
@@ -651,10 +704,10 @@ export default function DesignEditorShell({
       w: 160, font: "Arial, sans-serif",
       size: 20, bold: false, color: "#000000", align: "center",
     };
-    setSides((prev) => ({
-      ...prev,
-      [activeSide]: { ...prev[activeSide], items: [...prev[activeSide].items, item] },
-    }));
+    setSides((prev) => {
+      pushHistory(prev);
+      return { ...prev, [activeSide]: { ...prev[activeSide], items: [...prev[activeSide].items, item] } };
+    });
     setSelectedItemId(item.id);
     setActiveTool("text");
   }
@@ -666,10 +719,10 @@ export default function DesignEditorShell({
       y: Math.max(0, Math.min(PRINT_H - h, PRINT_H / 2 - h / 2)),
       w, h,
     };
-    setSides((prev) => ({
-      ...prev,
-      [activeSide]: { ...prev[activeSide], items: [...prev[activeSide].items, item] },
-    }));
+    setSides((prev) => {
+      pushHistory(prev);
+      return { ...prev, [activeSide]: { ...prev[activeSide], items: [...prev[activeSide].items, item] } };
+    });
     setSelectedItemId(item.id);
   }
 
@@ -686,13 +739,16 @@ export default function DesignEditorShell({
   }
 
   function removeItem(id: string) {
-    setSides((prev) => ({
-      ...prev,
-      [activeSide]: {
-        ...prev[activeSide],
-        items: prev[activeSide].items.filter((it) => it.id !== id),
-      },
-    }));
+    setSides((prev) => {
+      pushHistory(prev);
+      return {
+        ...prev,
+        [activeSide]: {
+          ...prev[activeSide],
+          items: prev[activeSide].items.filter((it) => it.id !== id),
+        },
+      };
+    });
   }
 
   function handleShapeClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -775,34 +831,39 @@ export default function DesignEditorShell({
     const capturedSide = activeSide;
     const capturedZoom = zoom;
     dragRef.current = { id, side: capturedSide, sx: e.clientX, sy: e.clientY, ox, oy };
+    let snapshot: Record<Side, SideData> | null = null;
 
     const onMove = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
       const dx = (ev.clientX - d.sx) / capturedZoom;
       const dy = (ev.clientY - d.sy) / capturedZoom;
-      setSides((prev) => ({
-        ...prev,
-        [d.side]: {
-          ...prev[d.side],
-          items: prev[d.side].items.map((it) => {
-            if (it.id !== d.id) return it;
-            const maxX = it.kind === "image" ? PRINT_W - (it as ImageItem).w : PRINT_W;
-            const maxY = it.kind === "image" ? PRINT_H - (it as ImageItem).h : PRINT_H;
-            // For business cards allow items to sit anywhere on the full card (bleed area)
-            const minX = isBusinessCard ? -PRINT_X : 0;
-            const minY = isBusinessCard ? -PRINT_Y : 0;
-            return {
-              ...it,
-              x: Math.max(minX, Math.min(maxX, d.ox + dx)),
-              y: Math.max(minY, Math.min(maxY, d.oy + dy)),
-            };
-          }),
-        },
-      }));
+      setSides((prev) => {
+        if (!snapshot) snapshot = prev;
+        return {
+          ...prev,
+          [d.side]: {
+            ...prev[d.side],
+            items: prev[d.side].items.map((it) => {
+              if (it.id !== d.id) return it;
+              const maxX = it.kind === "image" ? PRINT_W - (it as ImageItem).w : PRINT_W;
+              const maxY = it.kind === "image" ? PRINT_H - (it as ImageItem).h : PRINT_H;
+              // For business cards allow items to sit anywhere on the full card (bleed area)
+              const minX = isBusinessCard ? -PRINT_X : 0;
+              const minY = isBusinessCard ? -PRINT_Y : 0;
+              return {
+                ...it,
+                x: Math.max(minX, Math.min(maxX, d.ox + dx)),
+                y: Math.max(minY, Math.min(maxY, d.oy + dy)),
+              };
+            }),
+          },
+        };
+      });
     };
 
     const onUp = () => {
+      if (snapshot) pushHistory(snapshot);
       dragRef.current = null;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -830,6 +891,8 @@ export default function DesignEditorShell({
       ox: item.x, oy: item.y, ow: item.w, oh: item.h,
     };
 
+    let snapshotR: Record<Side, SideData> | null = null;
+
     const onMove = (ev: PointerEvent) => {
       const r = resizeRef.current;
       if (!r) return;
@@ -851,23 +914,87 @@ export default function DesignEditorShell({
       if (r.corner === "nw" || r.corner === "sw") newX = r.ox + r.ow - newW;
       if (r.corner === "nw" || r.corner === "ne") newY = r.oy + r.oh - newH;
 
-      setSides((prev) => ({
-        ...prev,
-        [r.side]: {
-          ...prev[r.side],
-          items: prev[r.side].items.map((it) =>
-            it.id === r.id ? { ...it, x: newX, y: newY, w: newW, h: newH } : it
-          ),
-        },
-      }));
+      setSides((prev) => {
+        if (!snapshotR) snapshotR = prev;
+        return {
+          ...prev,
+          [r.side]: {
+            ...prev[r.side],
+            items: prev[r.side].items.map((it) =>
+              it.id === r.id ? { ...it, x: newX, y: newY, w: newW, h: newH } : it
+            ),
+          },
+        };
+      });
     };
 
     const onUp = () => {
+      if (snapshotR) pushHistory(snapshotR);
       resizeRef.current = null;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
 
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  // ─── Resize (text edges) ─────────────────────────────────────────────────
+
+  function startTextResize(
+    e: React.PointerEvent,
+    id: string,
+    edge: "n" | "s" | "e" | "w",
+    item: TextItem
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const capturedSide = activeSide;
+    const capturedZoom = zoom;
+    textResizeRef.current = {
+      id, side: capturedSide, edge,
+      sx: e.clientX, sy: e.clientY,
+      ox: item.x, oy: item.y, ow: item.w,
+    };
+
+    let snapshotT: Record<Side, SideData> | null = null;
+
+    const onMove = (ev: PointerEvent) => {
+      const r = textResizeRef.current;
+      if (!r) return;
+      const dx = (ev.clientX - r.sx) / capturedZoom;
+      const dy = (ev.clientY - r.sy) / capturedZoom;
+      const MIN_W = 40;
+      let newX = r.ox, newY = r.oy, newW = r.ow;
+      if (r.edge === "e") {
+        newW = Math.max(MIN_W, r.ow + dx);
+      } else if (r.edge === "w") {
+        newW = Math.max(MIN_W, r.ow - dx);
+        newX = r.ox + r.ow - newW;
+      } else if (r.edge === "n") {
+        newY = r.oy + dy;
+      }
+      // "s" — no-op for auto-height text
+      setSides((prev) => {
+        if (!snapshotT) snapshotT = prev;
+        return {
+          ...prev,
+          [r.side]: {
+            ...prev[r.side],
+            items: prev[r.side].items.map((it) =>
+              it.id === r.id ? { ...it, x: newX, y: newY, w: newW } : it
+            ),
+          },
+        };
+      });
+    };
+
+    const onUp = () => {
+      if (snapshotT) pushHistory(snapshotT);
+      textResizeRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }
@@ -1389,7 +1516,7 @@ export default function DesignEditorShell({
             }}>Bleed</span>
           </div>
 
-          {/* Canvas with zoom transform */}
+          {/* Canvas with zoom transform — wrapper includes dimension lines so they scale together */}
           <div style={{
             transform: `scale(${zoom})`,
             transformOrigin: "center",
@@ -1397,8 +1524,66 @@ export default function DesignEditorShell({
             width: CANVAS_W,
             height: CANVAS_H,
             flexShrink: 0,
-            ...(isBusinessCard ? { borderRadius: "10px", overflow: "hidden" } : {}),
           }}>
+
+            {/* Vertical dimension line — left of card, outside */}
+            <div style={{
+              position: "absolute", right: "100%", top: 0,
+              height: CANVAS_H, width: 20,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              marginRight: 10, pointerEvents: "none",
+            }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", height: "100%", width: "100%", position: "relative" }}>
+                {/* Top tick */}
+                <div style={{ width: 10, height: "1.5px", background: "rgba(107,114,128,0.8)", flexShrink: 0 }} />
+                {/* Top line */}
+                <div style={{ flex: 1, width: "1.5px", background: "rgba(107,114,128,0.6)" }} />
+                {/* Label */}
+                <span style={{
+                  fontSize: "0.6rem", color: "rgba(80,80,80,0.9)", fontWeight: 600,
+                  writingMode: "vertical-rl", transform: "rotate(180deg)",
+                  whiteSpace: "nowrap", margin: "5px 0", letterSpacing: "0.02em",
+                }}>
+                  {isBusinessCard ? "5.08cm" : "30.48cm"}
+                </span>
+                {/* Bottom line */}
+                <div style={{ flex: 1, width: "1.5px", background: "rgba(107,114,128,0.6)" }} />
+                {/* Bottom tick */}
+                <div style={{ width: 10, height: "1.5px", background: "rgba(107,114,128,0.8)", flexShrink: 0 }} />
+              </div>
+            </div>
+
+            {/* Horizontal dimension line — below card, outside */}
+            <div style={{
+              position: "absolute", top: "100%", left: 0,
+              width: CANVAS_W, height: 24,
+              display: "flex", alignItems: "center",
+              marginTop: 10, pointerEvents: "none",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", width: "100%", height: "100%" }}>
+                {/* Left tick */}
+                <div style={{ width: "1.5px", height: 10, background: "rgba(107,114,128,0.8)", flexShrink: 0 }} />
+                {/* Left line */}
+                <div style={{ flex: 1, height: "1.5px", background: "rgba(107,114,128,0.6)" }} />
+                {/* Label */}
+                <span style={{
+                  fontSize: "0.6rem", color: "rgba(80,80,80,0.9)", fontWeight: 600,
+                  whiteSpace: "nowrap", margin: "0 6px", letterSpacing: "0.02em",
+                }}>
+                  {isBusinessCard ? "8.89cm" : "30.48cm"}
+                </span>
+                {/* Right line */}
+                <div style={{ flex: 1, height: "1.5px", background: "rgba(107,114,128,0.6)" }} />
+                {/* Right tick */}
+                <div style={{ width: "1.5px", height: 10, background: "rgba(107,114,128,0.8)", flexShrink: 0 }} />
+              </div>
+            </div>
+
+            {/* Inner canvas — has borderRadius + overflow clipping for BC */}
+            <div style={{
+              position: "absolute", inset: 0,
+              ...(isBusinessCard ? { borderRadius: "10px", overflow: "hidden" } : {}),
+            }}>
             {/* Canvas background for business card */}
             {isBusinessCard && (
               <div style={{
@@ -1480,45 +1665,6 @@ export default function DesignEditorShell({
                 borderRadius: "2px", pointerEvents: "none",
               }} />
 
-              {/* Length measurement (vertical) */}
-              <div style={{
-                position: "absolute", left: 4, top: 6,
-                height: "calc(100% - 12px)", width: "20px",
-                display: "flex", alignItems: "center",
-                pointerEvents: "none", zIndex: 5,
-              }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", height: "100%", width: "100%" }}>
-                  <div style={{ flex: 1, width: "1px", background: "rgba(59,130,246,0.5)" }} />
-                  <span style={{
-                    fontSize: "0.55rem", color: "rgba(59,130,246,0.85)", fontWeight: 700,
-                    writingMode: "vertical-rl", transform: "rotate(180deg)",
-                    whiteSpace: "nowrap", margin: "3px 0",
-                  }}>
-                    {isBusinessCard ? "5.08cm" : "30.48cm"}
-                  </span>
-                  <div style={{ flex: 1, width: "1px", background: "rgba(59,130,246,0.5)" }} />
-                </div>
-              </div>
-
-              {/* Width measurement (horizontal) */}
-              <div style={{
-                position: "absolute", left: 6, bottom: 4,
-                width: "calc(100% - 12px)", height: "20px",
-                display: "flex", alignItems: "center",
-                pointerEvents: "none", zIndex: 5,
-              }}>
-                <div style={{ display: "flex", alignItems: "center", width: "100%", height: "100%" }}>
-                  <div style={{ flex: 1, height: "1px", background: "rgba(59,130,246,0.5)" }} />
-                  <span style={{
-                    fontSize: "0.55rem", color: "rgba(59,130,246,0.85)", fontWeight: 700,
-                    whiteSpace: "nowrap", margin: "0 4px",
-                  }}>
-                    {isBusinessCard ? "8.89cm" : "30.48cm"}
-                  </span>
-                  <div style={{ flex: 1, height: "1px", background: "rgba(59,130,246,0.5)" }} />
-                </div>
-              </div>
-
               {/* Design items */}
               {currentSide.items.map((item) => {
                 const isSelected = selectedItemId === item.id;
@@ -1564,12 +1710,33 @@ export default function DesignEditorShell({
                         setEditingItemId(item.id);
                       }}
                       onBlur={(e) => {
-                        updateItem(item.id, { text: e.currentTarget.textContent ?? item.text });
+                        const newText = e.currentTarget.textContent ?? item.text;
+                        if (newText !== item.text) {
+                          setSides((prev) => { pushHistory(prev); return prev; });
+                        }
+                        updateItem(item.id, { text: newText });
                         setEditingItemId(null);
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       {item.text}
+                      {/* Edge resize handles — visible when selected and not editing */}
+                      {isSelected && !isEditing && (["e", "w", "n", "s"] as const).map((edge) => (
+                        <div
+                          key={edge}
+                          onPointerDown={(e) => { e.stopPropagation(); startTextResize(e, item.id, edge, item); }}
+                          style={{
+                            position: "absolute",
+                            background: "#3b82f6",
+                            borderRadius: 3,
+                            zIndex: 20,
+                            ...(edge === "e" ? { right: -5, top: "50%", transform: "translateY(-50%)", width: 8, height: 28, cursor: "ew-resize" } :
+                                edge === "w" ? { left: -5, top: "50%", transform: "translateY(-50%)", width: 8, height: 28, cursor: "ew-resize" } :
+                                edge === "n" ? { top: -5, left: "50%", transform: "translateX(-50%)", width: 28, height: 8, cursor: "ns-resize" } :
+                                              { bottom: -5, left: "50%", transform: "translateX(-50%)", width: 28, height: 8, cursor: "ns-resize" }),
+                          }}
+                        />
+                      ))}
                     </div>
                   );
                 }
@@ -1644,36 +1811,55 @@ export default function DesignEditorShell({
               })}
             </div>
 
-          </div>
+            </div> {/* end inner canvas */}
 
-          {/* Zoom controls */}
+          </div> {/* end zoom wrapper */}
+
+          {/* Zoom + Undo/Redo controls */}
           <div style={{
             position: "absolute", bottom: "16px", left: "50%",
             transform: "translateX(-50%)",
-            display: "flex", alignItems: "center", gap: "2px",
+            display: "flex", alignItems: "center", gap: "4px",
             background: "rgba(255,255,255,0.96)",
-            border: "1px solid #e5e7eb", borderRadius: "10px",
-            padding: "4px 8px", boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+            border: "1px solid #e5e7eb", borderRadius: "14px",
+            padding: "6px 12px", boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
           }}>
             <button
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              style={{ width: 38, height: 38, border: "none", background: "none", cursor: canUndo ? "pointer" : "default", fontSize: "1.15rem", fontWeight: 700, color: canUndo ? "#374151" : "#d1d5db", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              ↩
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Y)"
+              style={{ width: 38, height: 38, border: "none", background: "none", cursor: canRedo ? "pointer" : "default", fontSize: "1.15rem", fontWeight: 700, color: canRedo ? "#374151" : "#d1d5db", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              ↪
+            </button>
+            <div style={{ width: "1px", height: "24px", background: "#e5e7eb", margin: "0 4px" }} />
+            <button
               onClick={() => setZoom((z) => parseFloat(Math.max(0.5, z - 0.1).toFixed(1)))}
-              style={{ width: 28, height: 28, border: "none", background: "none", cursor: "pointer", fontSize: "1.1rem", fontWeight: 700, color: "#374151" }}
+              style={{ width: 38, height: 38, border: "none", background: "none", cursor: "pointer", fontSize: "1.4rem", fontWeight: 700, color: "#374151" }}
             >
               −
             </button>
-            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#374151", minWidth: "44px", textAlign: "center" }}>
+            <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "#374151", minWidth: "52px", textAlign: "center" }}>
               {Math.round(zoom * 100)}%
             </span>
             <button
               onClick={() => setZoom((z) => parseFloat(Math.min(2, z + 0.1).toFixed(1)))}
-              style={{ width: 28, height: 28, border: "none", background: "none", cursor: "pointer", fontSize: "1.1rem", fontWeight: 700, color: "#374151" }}
+              style={{ width: 38, height: 38, border: "none", background: "none", cursor: "pointer", fontSize: "1.4rem", fontWeight: 700, color: "#374151" }}
             >
               +
             </button>
-            <div style={{ width: "1px", height: "18px", background: "#e5e7eb", margin: "0 2px" }} />
+            <div style={{ width: "1px", height: "24px", background: "#e5e7eb", margin: "0 4px" }} />
             <button
               onClick={() => setZoom(1)}
-              style={{ padding: "0 8px", height: 28, border: "none", background: "none", cursor: "pointer", fontSize: "0.75rem", fontWeight: 600, color: "#6b7280" }}
+              style={{ padding: "0 10px", height: 38, border: "none", background: "none", cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, color: "#6b7280" }}
             >
               Reset
             </button>

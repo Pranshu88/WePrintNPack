@@ -6,8 +6,6 @@ import type { GalleryTemplate } from "@/lib/template-data";
 import { categories } from "@/lib/data";
 import type { Product } from "@/lib/types";
 
-const SUPPORTED_CATEGORIES = new Set(["dress-shirts", "t-shirts", "hoodies", "business-cards"]);
-
 async function readFile(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const r = new FileReader();
@@ -22,7 +20,7 @@ type Props = { products: Product[] };
 export function AdminTemplateSection({ products }: Props) {
   const router = useRouter();
   const [productList] = useState<Product[]>(products);
-  const apparelProducts = productList.filter((p) => SUPPORTED_CATEGORIES.has(p.category));
+  const apparelProducts = productList;
 
   const [selectedSlug, setSelectedSlug] = useState<string>(apparelProducts[0]?.slug ?? "");
   const [galleryList, setGalleryList] = useState<GalleryTemplate[]>([]);

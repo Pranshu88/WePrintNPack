@@ -143,12 +143,6 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   /* seed designs */
   const [seeding, setSeeding] = useState(false);
 
-  /* bulk import */
-  const [bulkOpen, setBulkOpen]       = useState(false);
-  const [bulkItems, setBulkItems]     = useState<{ file: File; dataUrl: string; name: string }[]>([]);
-  const [bulkUploading, setBulkUploading] = useState(false);
-  const bulkFileRef = useRef<HTMLInputElement>(null);
-
   /* overlay editor */
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorDesign, setEditorDesign] = useState<DesignTemplateItem | null>(null);
@@ -224,55 +218,6 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       flash(e instanceof Error ? e.message : "Seed failed.", true);
     } finally {
       setSeeding(false);
-    }
-  }
-
-  async function handleBulkFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (!files.length) return;
-    const loaded = await Promise.all(
-      files.map(async (file) => ({
-        file,
-        dataUrl: await readFile(file),
-        name: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-      }))
-    );
-    setBulkItems((prev) => [...prev, ...loaded]);
-    e.target.value = "";
-  }
-
-  function updateBulkName(idx: number, name: string) {
-    setBulkItems((prev) => prev.map((it, i) => (i === idx ? { ...it, name } : it)));
-  }
-
-  function removeBulkItem(idx: number) {
-    setBulkItems((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  async function submitBulkImport() {
-    if (!bulkItems.length) return;
-    setBulkUploading(true);
-    try {
-      const res = await fetch(
-        `/api/products/${productSlug}/templates/${galleryId}/bulk-import`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            designs: bulkItems.map((it) => ({ name: it.name, frontImage: it.dataUrl })),
-          }),
-        }
-      );
-      const data = (await res.json()) as { added?: number; failed?: number; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Bulk import failed.");
-      flash(`${data.added} design${(data.added ?? 0) !== 1 ? "s" : ""} imported${data.failed ? `, ${data.failed} failed` : ""}.`);
-      setBulkItems([]);
-      setBulkOpen(false);
-      await loadData();
-    } catch (e) {
-      flash(e instanceof Error ? e.message : "Bulk import failed.", true);
-    } finally {
-      setBulkUploading(false);
     }
   }
 
@@ -526,16 +471,6 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
             </svg>
             {seeding ? "Seeding…" : "Seed Designs"}
-          </button>
-          <button
-            type="button"
-            onClick={() => { setBulkItems([]); setBulkOpen(true); }}
-            style={{ padding: "0.6rem 1.1rem", background: "#fff7ed", color: "#c2410c", border: "1.5px solid #fdba74", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.4rem" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            Bulk Import
           </button>
           <button type="button" onClick={openAddDesign}
             style={{ padding: "0.6rem 1.15rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
@@ -1043,98 +978,6 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       </div>
     )}
 
-    {/* ── Bulk Import Modal ─────────────────────────────────────────────── */}
-    {bulkOpen && (
-      <div
-        style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
-        onClick={(e) => { if (e.target === e.currentTarget && !bulkUploading) setBulkOpen(false); }}
-      >
-        <div style={{ background: "#fff", borderRadius: "16px", width: "min(900px,100%)", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
-
-          {/* Modal header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.1rem 1.4rem", borderBottom: "1px solid #f3f4f6", flexShrink: 0 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#111827" }}>Bulk Import Designs</h3>
-              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "#6b7280" }}>Upload multiple PNG / JPG / SVG images at once</p>
-            </div>
-            <button onClick={() => { if (!bulkUploading) setBulkOpen(false); }} style={{ width: 30, height: 30, border: "1px solid #e5e7eb", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: "1rem", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-          </div>
-
-          {/* Drop zone / file picker */}
-          <div style={{ padding: "1rem 1.4rem 0", flexShrink: 0 }}>
-            <div
-              style={{ border: "2px dashed #fdba74", borderRadius: "10px", padding: "1.5rem", textAlign: "center", background: "#fff7ed", cursor: "pointer" }}
-              onClick={() => bulkFileRef.current?.click()}
-            >
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2" style={{ margin: "0 auto 0.5rem", display: "block" }}>
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-              <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "#c2410c" }}>Click to select images</p>
-              <p style={{ margin: "4px 0 0", fontSize: "0.75rem", color: "#9ca3af" }}>PNG, JPG, SVG — you can select multiple files at once</p>
-            </div>
-            <input
-              ref={bulkFileRef}
-              type="file"
-              multiple
-              accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
-              style={{ display: "none" }}
-              onChange={(e) => void handleBulkFileChange(e)}
-            />
-          </div>
-
-          {/* Preview grid */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "1rem 1.4rem" }}>
-            {bulkItems.length === 0 ? (
-              <p style={{ color: "#9ca3af", fontSize: "0.85rem", textAlign: "center", margin: "1rem 0" }}>No images selected yet.</p>
-            ) : (
-              <>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
-                  <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#374151" }}>{bulkItems.length} image{bulkItems.length !== 1 ? "s" : ""} ready to import</span>
-                  <button onClick={() => setBulkItems([])} style={{ fontSize: "0.75rem", color: "#ef4444", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Clear all</button>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "0.75rem" }}>
-                  {bulkItems.map((item, idx) => (
-                    <div key={idx} style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden", background: "#f9fafb", position: "relative" }}>
-                      <button
-                        onClick={() => removeBulkItem(idx)}
-                        style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(0,0,0,0.5)", border: "none", color: "#fff", fontSize: "0.7rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, zIndex: 1 }}
-                      >✕</button>
-                      <div style={{ background: "#fff", height: 100, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                        <img src={item.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
-                      </div>
-                      <div style={{ padding: "0.4rem 0.5rem" }}>
-                        <input
-                          value={item.name}
-                          onChange={(e) => updateBulkName(idx, e.target.value)}
-                          style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "5px", padding: "4px 6px", fontSize: "0.75rem", fontWeight: 600, color: "#111827", boxSizing: "border-box" }}
-                          placeholder="Design name"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Footer actions */}
-          <div style={{ padding: "1rem 1.4rem", borderTop: "1px solid #f3f4f6", display: "flex", gap: "0.75rem", justifyContent: "flex-end", flexShrink: 0 }}>
-            <button
-              onClick={() => { if (!bulkUploading) setBulkOpen(false); }}
-              disabled={bulkUploading}
-              style={{ padding: "0.6rem 1.2rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: "8px", fontWeight: 600, fontSize: "0.875rem", cursor: "pointer", color: "#374151" }}
-            >Cancel</button>
-            <button
-              onClick={() => void submitBulkImport()}
-              disabled={bulkUploading || bulkItems.length === 0}
-              style={{ padding: "0.6rem 1.4rem", background: bulkUploading || bulkItems.length === 0 ? "#e5e7eb" : "#f97316", color: bulkUploading || bulkItems.length === 0 ? "#9ca3af" : "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: bulkUploading || bulkItems.length === 0 ? "not-allowed" : "pointer" }}
-            >
-              {bulkUploading ? "Importing…" : `Import ${bulkItems.length} Design${bulkItems.length !== 1 ? "s" : ""}`}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
     </>
   );
 }

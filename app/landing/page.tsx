@@ -310,7 +310,7 @@ export default function LandingPage() {
                 </div>
                 <div className="lp-foot-contact">
                   <span className="lp-foot-contact-ico">✉️</span>
-                  <span></span>
+                  <span>info@weprintnpack.ca</span>
                 </div>
                 <div className="lp-foot-contact">
                   <span className="lp-foot-contact-ico">📍</span>

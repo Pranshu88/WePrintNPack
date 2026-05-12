@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { Footer } from "@/components/footer";
-import { Header } from "@/components/header";
+import { SiteShell } from "@/components/site-shell";
 
 export const metadata: Metadata = {
   title: "We Print N Pack",
@@ -25,13 +24,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <div className="site-shell">
-         
-          <Header />
-      
-          <main>{children}</main>
-          <Footer />
-        </div>
+        <SiteShell>{children}</SiteShell>
       </body>
     </html>
   );
