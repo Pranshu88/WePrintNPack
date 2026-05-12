@@ -67,6 +67,7 @@ const ALLOWED_CATEGORIES = new Set([
   "business-cards", "flyers", "posters", "banners",
   "yard-signs", "stickers", "labels",
   "pizza-boxes", "mailer-boxes", "shipping-boxes",
+  "t-shirts",
 ]);
 
 const recentOrders = [
@@ -379,10 +380,6 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
           <button style={{ width: 40, height: 40, borderRadius: 10, border: "1px solid #f0f0f0", background: "#fff", cursor: "pointer", fontSize: "1.1rem", position: "relative" }}>
             🔔
             <span style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, borderRadius: "50%", background: "#ef4444", border: "2px solid #fff" }} />
-          </button>
-          <button onClick={startCreate} style={S.btnPrimary}>
-            <span style={{ fontSize: "1.1rem", lineHeight: 1 }}>+</span>
-            New Product
           </button>
         </header>
 
