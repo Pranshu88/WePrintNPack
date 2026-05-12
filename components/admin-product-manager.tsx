@@ -204,7 +204,8 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     setForm((current) => ({ ...current, image: dataUrl, imageName: file.name }));
   }
 
-  const visibleProducts = products.filter((p) => ALLOWED_CATEGORIES.has(p.category));
+  const EXCLUDED_SLUGS = new Set(["retractable-banner"]);
+  const visibleProducts = products.filter((p) => ALLOWED_CATEGORIES.has(p.category) && !EXCLUDED_SLUGS.has(p.slug));
   const productCount = visibleProducts.length;
   const groupedProducts = groupProductsByCatalog(visibleProducts);
   const latestUpdatedAt = products
