@@ -392,20 +392,6 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
       ]
     },
     {
-      slug: "retractable-banner",
-      name: "Retractable Banner",
-      category: "banners",
-      image: "/images/cardingprint.jpg",
-      description: "Portable banner stands for trade shows and retail displays.",
-      startingPrice: "$145",
-      specs: [
-        { label: "Format", value: "Retractable" },
-        { label: "Base", value: "Silver aluminum" },
-        { label: "Turnaround", value: "4-6 business days" },
-        { label: "Min quantity", value: "1 unit" }
-      ]
-    },
-    {
       slug: "campaign-yard-sign",
       name: "Campaign Yard Sign",
       category: "yard-signs",
