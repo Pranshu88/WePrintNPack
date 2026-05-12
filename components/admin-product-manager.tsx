@@ -204,7 +204,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     setForm((current) => ({ ...current, image: dataUrl, imageName: file.name }));
   }
 
-  const EXCLUDED_SLUGS = new Set(["retractable-banner"]);
+  const EXCLUDED_SLUGS = new Set(["retractable-banner", "gloss-stickers", "waterproof-labels", "die-cut-stickers", "product-label-rolls"]);
   const visibleProducts = products.filter((p) => ALLOWED_CATEGORIES.has(p.category) && !EXCLUDED_SLUGS.has(p.slug));
   const productCount = visibleProducts.length;
   const groupedProducts = groupProductsByCatalog(visibleProducts);

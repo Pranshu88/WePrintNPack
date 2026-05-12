@@ -201,59 +201,18 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
   ],
   "branding-labels": [
     {
-      slug: "gloss-stickers",
-      name: "Gloss Stickers",
+      slug: "stickers-and-labels",
+      name: "Stickers & Labels",
       category: "stickers",
       image: "/images/cardprint.jpg",
-      description: "Bright, glossy stickers for packaging, promotions, and giveaways.",
+      description: "Custom stickers and labels for packaging, promotions, bottles, and giveaways.",
       startingPrice: "$28",
       specs: [
-        { label: "Material", value: "Paper gloss" },
-        { label: "Cut", value: "Die-cut" },
-        { label: "Turnaround", value: "3-5 business days" },
-        { label: "Min quantity", value: "100 units" }
-      ]
-    },
-    {
-      slug: "waterproof-labels",
-      name: "Waterproof Labels",
-      category: "labels",
-      image: "/images/cardingprint.jpg",
-      description: "Durable labels for bottles, jars, and product packaging.",
-      startingPrice: "$65",
-      specs: [
-        { label: "Material", value: "BOPP" },
+        { label: "Material", value: "Paper gloss / BOPP / Vinyl" },
+        { label: "Cut", value: "Die-cut / Roll" },
         { label: "Finish", value: "Matte / Gloss" },
-        { label: "Turnaround", value: "4-6 business days" },
-        { label: "Min quantity", value: "100 units" }
-      ]
-    },
-    {
-      slug: "die-cut-stickers",
-      name: "Die-Cut Stickers",
-      category: "stickers",
-      image: "/images/card2.jpg",
-      description: "Custom shaped stickers for brand packs and event swag.",
-      startingPrice: "$34",
-      specs: [
-        { label: "Material", value: "Premium vinyl" },
-        { label: "Cut", value: "Die-cut" },
         { label: "Turnaround", value: "3-5 business days" },
         { label: "Min quantity", value: "50 units" }
-      ]
-    },
-    {
-      slug: "product-label-rolls",
-      name: "Product Label Rolls",
-      category: "labels",
-      image: "/images/cardprint.jpg",
-      description: "Roll labels for streamlined application on bottles and boxes.",
-      startingPrice: "$72",
-      specs: [
-        { label: "Format", value: "Roll" },
-        { label: "Core", value: "3 inch" },
-        { label: "Turnaround", value: "4-6 business days" },
-        { label: "Min quantity", value: "250 units" }
       ]
     }
   ],
