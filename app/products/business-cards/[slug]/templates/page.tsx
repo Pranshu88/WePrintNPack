@@ -12,14 +12,20 @@ export default async function BusinessCardTemplatesPage({
   const { slug } = await params;
   const product = getProductBySlug(slug);
 
-  if (!product || product.category !== "business-cards") notFound();
+  if (!product || (product.category !== "business-cards" && product.category !== "flyers")) notFound();
+
+  const isFlyer = slug === "bold-flyers";
+  const allowedNames = isFlyer
+    ? ["Express Flyers", "Prime Flyers"]
+    : ["Business Cards", "Premium Business Cards", "Luxury Business Cards"];
 
   return (
     <GalleryTemplatePage
       productSlug={slug}
       productName={product.name}
       productBasePath="/products/business-cards"
-      categoryLabel="Business Cards"
+      categoryLabel={isFlyer ? "Flyers" : "Business Cards"}
+      allowedNames={allowedNames}
     />
   );
 }

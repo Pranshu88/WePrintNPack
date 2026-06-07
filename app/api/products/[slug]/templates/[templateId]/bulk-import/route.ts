@@ -16,7 +16,7 @@ export async function POST(
 ) {
   const { slug, templateId } = await params;
 
-  const gallery = getGalleryTemplate(templateId);
+  const gallery = await getGalleryTemplate(templateId);
   if (!gallery || gallery.productSlug !== slug) {
     return NextResponse.json({ error: "Gallery not found." }, { status: 404 });
   }
@@ -38,7 +38,7 @@ export async function POST(
       continue;
     }
     try {
-      addDesign(templateId, {
+      await addDesign(templateId, {
         name: item.name.trim(),
         frontImage: item.frontImage,
         frontBgColor: item.frontBgColor ?? "#ffffff",
@@ -52,7 +52,7 @@ export async function POST(
 
   const added   = results.filter((r) => r.ok).length;
   const failed  = results.filter((r) => !r.ok).length;
-  const updated = getGalleryTemplate(templateId);
+  const updated = await getGalleryTemplate(templateId);
 
   return NextResponse.json({ added, failed, results, gallery: updated }, { status: 201 });
 }

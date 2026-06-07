@@ -6,7 +6,7 @@ import type { Product } from "@/lib/types";
 import { getProductLink } from "@/lib/product-link";
 import PackagingBoxEditor from "./packaging-box-editor";
 
-const PACKAGING_CATEGORIES = new Set(["pizza-boxes", "mailer-boxes", "shipping-boxes"]);
+const PACKAGING_CATEGORIES = new Set(["packaging-box"]);
 
 function getPastelFrameBackground(seed: string) {
   const palettes = [

@@ -45,6 +45,8 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
   // Fetch the selected gallery to know if it has designs
   const [activeGallery, setActiveGallery] = useState<GalleryTemplate | null>(null);
   const [checkingDesigns, setCheckingDesigns] = useState(!!galleryId);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [sizeError, setSizeError] = useState(false);
 
   useEffect(() => {
     if (!galleryId) { setCheckingDesigns(false); return; }
@@ -74,6 +76,10 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
   }, []);
 
   if (view === "editor") {
+    // Parse admin price string (e.g. "$50 + tax") to a number for cart calculation
+    const rawPrice = activeGallery?.price?.trim() ?? "";
+    const parsedPrice = rawPrice ? parseFloat(rawPrice.replace(/[^0-9.]/g, "")) || undefined : undefined;
+
     return (
       <DesignEditorShell
         shirt={shirt}
@@ -81,6 +87,8 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
         selectedTechnology="Full Color Printing"
         templateId={selectedTemplate}
         templateOverlayColor={selectedTemplateColor}
+        productName={activeGallery?.name ?? shirt.name}
+        pricePerUnit={parsedPrice ?? (shirt.quantities[0]?.pricePerUnit)}
         onClose={() => setView("order")}
       />
     );
@@ -108,7 +116,7 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
           <div className="container container-wide" style={{ display: "flex", gap: "0.5rem", fontSize: "0.875rem", color: "#6b7280", alignItems: "center" }}>
             <Link href="/" style={{ color: "#6b7280", textDecoration: "none" }}>Home</Link>
             <span>/</span>
-            <Link href="/products/dress-shirts" style={{ color: "#6b7280", textDecoration: "none" }}>Dress Shirts</Link>
+            <Link href="/#lp-products" style={{ color: "#6b7280", textDecoration: "none" }}>{shirt.categoryName ?? "Products"}</Link>
             <span>/</span>
             <span style={{ color: "#374151" }}>{shirt.name}</span>
           </div>
@@ -122,7 +130,7 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
             <div>
               <div
                 ref={imageContainerRef}
-                style={{ position: "relative", background: "#f9fafb", borderRadius: "16px", overflow: "hidden", aspectRatio: "1 / 1", border: "1px solid #e5e7eb", cursor: lensPos ? "crosshair" : "zoom-in" }}
+                style={{ position: "relative", background: "#f9fafb", borderRadius: "16px", overflow: "hidden", aspectRatio: "4 / 3", border: "1px solid #e5e7eb", cursor: lensPos ? "crosshair" : "zoom-in" }}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={() => setLensPos(null)}
               >
@@ -161,18 +169,10 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
             {/* RIGHT: Product info */}
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
 
-              {/* Bold product title */}
+              {/* Bold product title — show gallery name if available */}
               <h1 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-                {shirt.name}
+                {activeGallery?.name ?? shirt.name}
               </h1>
-
-              {/* Selected template label */}
-              {activeGallery && (
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.825rem", color: "#0891b2", fontWeight: 600 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
-                  Template: {activeGallery.name}
-                </div>
-              )}
 
               {/* Rating */}
               {shirt.rating !== undefined && (
@@ -184,84 +184,121 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
               )}
 
               {/* Tagline */}
-              <p style={{ margin: 0, fontSize: "1rem", color: "#374151", borderBottom: "1px solid #e5e7eb", paddingBottom: "1rem" }}>
+              <p style={{ margin: 0, fontSize: "1rem", color: "#374151" }}>
                 {shirt.tagline}
               </p>
 
-              {/* Price */}
-              <div>
-                <p style={{ margin: "0 0 4px", fontSize: "0.875rem", color: "#6b7280" }}>{shirt.priceNote}</p>
-                <div style={{ fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>
-                  ₹{selectedQty.pricePerUnit.toLocaleString("en-IN")}.00
-                </div>
-                <div style={{ fontSize: "0.875rem", color: "#6b7280", marginTop: "2px" }}>1 unit · No setup fee</div>
-              </div>
-
-              {/* Delivery */}
-              <div style={{ fontSize: "0.875rem", color: "#374151", borderTop: "1px solid #f3f4f6", paddingTop: "0.75rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                  <span>Delivery to {shirt.pincode}</span>
-                  <a href="#delivery" style={{ color: "#374151", textDecoration: "underline" }}>More information</a>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 500 }}>
-                  <span>🚚</span><span>{shirt.deliveryDate}</span>
-                  <span style={{ color: "#16a34a", fontWeight: 700 }}>FREE</span>
-                </div>
-              </div>
-
-              {/* Substrate Color */}
+              {/* Price — from gallery or fallback to shirt data */}
               <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "1rem" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#111827" }}>Substrate Color</p>
-                  <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>{selectedColor.name}</span>
-                </div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  {shirt.colors.map((color) => (
-                    <button key={color.name} onClick={() => setSelectedColor(color)} title={color.name}
-                      style={{ width: "30px", height: "30px", borderRadius: "50%", background: color.hex, border: `2px solid ${selectedColor.name === color.name ? "#3b82f6" : "#d1d5db"}`, cursor: "pointer", outline: selectedColor.name === color.name ? "2px solid #bfdbfe" : "none", outlineOffset: "2px", padding: 0, transition: "all 0.15s ease" }}
-                      aria-label={color.name} />
-                  ))}
-                </div>
+                {activeGallery?.price ? (
+                  <>
+                    <div style={{ fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>
+                      {/[$+]/.test(activeGallery.price) ? activeGallery.price : `$${activeGallery.price} + tax`}
+                    </div>
+                    <div style={{ fontSize: "0.875rem", color: "#6b7280", marginTop: "2px" }}>per set · No setup fee</div>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ margin: "0 0 4px", fontSize: "0.875rem", color: "#6b7280" }}>{shirt.priceNote}</p>
+                    <div style={{ fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>
+                      {shirt.startingPrice ?? `₹${selectedQty.pricePerUnit.toLocaleString("en-IN")}.00`}
+                    </div>
+                    <div style={{ fontSize: "0.875rem", color: "#6b7280", marginTop: "2px" }}>per set · No setup fee</div>
+                  </>
+                )}
               </div>
 
-              {/* Quantity */}
-              <div>
-                <p style={{ margin: "0 0 0.6rem", fontWeight: 700, fontSize: "0.9rem", color: "#111827" }}>Quantity</p>
-                <div style={{ position: "relative" }}>
-                  <select value={selectedQty.qty}
-                    onChange={(e) => { const found = shirt.quantities.find(q => q.qty === Number(e.target.value)); if (found) setSelectedQty(found); }}
-                    style={{ width: "100%", padding: "0.75rem 2.5rem 0.75rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "10px", background: "#fff", fontSize: "0.9rem", fontWeight: 500, color: "#111827", cursor: "pointer", appearance: "none" }}>
-                    {shirt.quantities.map(q => (
-                      <option key={q.qty} value={q.qty}>{q.qty} (₹{q.pricePerUnit.toLocaleString("en-IN")}.00 / unit)</option>
-                    ))}
-                  </select>
-                  <span style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#6b7280" }}>▾</span>
-                </div>
-              </div>
+
+              {/* Specs from gallery — size + fabric */}
+              {activeGallery?.specs && activeGallery.specs.length > 0 && (() => {
+                const sizeSpec = activeGallery.specs!.find((s) => s.toLowerCase().startsWith("size:"));
+                const sizes = sizeSpec
+                  ? sizeSpec.replace(/^size:\s*/i, "").replace(/\(.*?\)/g, "").split(",").map((s) => s.trim()).filter(Boolean)
+                  : [];
+                const otherSpecs = activeGallery.specs!.filter((s) => !s.toLowerCase().startsWith("size:"));
+                return (
+                  <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "1rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    {/* Size selector */}
+                    {sizes.length > 0 && (
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#111827" }}>Size</p>
+                          {selectedSize && <span style={{ fontSize: "0.8rem", color: "#3b82f6", fontWeight: 600 }}>{selectedSize}</span>}
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                          {sizes.map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => { setSelectedSize(s === selectedSize ? null : s); setSizeError(false); }}
+                              style={{
+                                minWidth: 44, padding: "6px 14px",
+                                borderRadius: 8,
+                                border: `2px solid ${selectedSize === s ? "#3b82f6" : "#e5e7eb"}`,
+                                background: selectedSize === s ? "#eff6ff" : "#fff",
+                                color: selectedSize === s ? "#1d4ed8" : "#374151",
+                                fontWeight: selectedSize === s ? 700 : 500,
+                                fontSize: "0.875rem", cursor: "pointer",
+                                transition: "all 0.15s ease",
+                              }}
+                            >{s}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Other specs */}
+                    {otherSpecs.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        {otherSpecs.map((s, i) => (
+                          <div key={i} style={{ fontSize: "0.85rem", color: "#6b7280", display: "flex", alignItems: "flex-start", gap: 6 }}>
+                            <span style={{ color: "#3b82f6", fontWeight: 700, flexShrink: 0 }}>✓</span>
+                            <span>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
 
               {/* CTA Buttons */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "0.5rem" }}>
 
                 {/* Browse designs — only shown if this gallery has design templates */}
                 {!checkingDesigns && hasDesigns && (
-                  <button
-                    onClick={() => setView("templates")}
-                    style={{ width: "100%", padding: "0.875rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "10px", fontSize: "1rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
-                    </svg>
-                    Browse designs
-                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <button
+                      onClick={() => {
+                        if (!selectedSize) { setSizeError(true); return; }
+                        setView("templates");
+                      }}
+                      style={{
+                        width: "100%", padding: "0.875rem",
+                        background: selectedSize
+                          ? "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)"
+                          : "#d1d5db",
+                        color: selectedSize ? "#fff" : "#9ca3af",
+                        border: "none", borderRadius: "999px",
+                        fontSize: "1rem", fontWeight: 700,
+                        cursor: selectedSize ? "pointer" : "not-allowed",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+                        boxShadow: selectedSize ? "0 4px 18px rgba(124,58,237,0.35)" : "none",
+                        transition: "background 0.2s, box-shadow 0.2s",
+                      }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
+                      </svg>
+                      Browse Designs ({activeGallery?.designs.length ?? 0})
+                    </button>
+                    {sizeError && (
+                      <p style={{ margin: 0, fontSize: "0.8rem", color: "#ef4444", fontWeight: 600, textAlign: "center" }}>
+                        Please select a size first
+                      </p>
+                    )}
+                  </div>
                 )}
 
-                {/* Upload design — always shown */}
-                <button style={{ width: "100%", padding: "0.875rem", background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: "10px", fontSize: "1rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
-                  </svg>
-                  Upload design
-                </button>
               </div>
             </div>
           </div>

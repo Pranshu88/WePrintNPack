@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import styles from "./header.module.css";
 
 const navLinks = [
@@ -16,6 +17,7 @@ const navLinks = [
 
 export function Header() {
   const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <header className={styles.header}>
@@ -58,7 +60,41 @@ export function Header() {
           ↑ Upload Design
         </Link>
 
+        {/* ── Hamburger (mobile only) ───────────────────── */}
+        <button
+          className={styles.hamburger}
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label="Toggle menu"
+          aria-expanded={menuOpen}
+        >
+          <span className={`${styles.hLine} ${menuOpen ? styles.hLineTop : ""}`} />
+          <span className={`${styles.hLine} ${menuOpen ? styles.hLineMid : ""}`} />
+          <span className={`${styles.hLine} ${menuOpen ? styles.hLineBot : ""}`} />
+        </button>
+
       </div>
+
+      {/* ── Mobile drawer ────────────────────────────── */}
+      {menuOpen && (
+        <nav className={styles.mobileNav} aria-label="Mobile">
+          {navLinks.map((link) => {
+            const active = pathname === link.href || (link.href !== "/" && (pathname ?? "").startsWith(link.href));
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`${styles.mobileNavLink} ${active ? styles.navActive : ""}`}
+                onClick={() => setMenuOpen(false)}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+          <Link href="/landing#quote-form" className={styles.mobileCta} onClick={() => setMenuOpen(false)}>
+            ↑ Upload Design
+          </Link>
+        </nav>
+      )}
     </header>
   );
 }

@@ -31,7 +31,7 @@ export const catalogGroups = [
 export const categories: Category[] = [
   {
     slug: "business-cards",
-    name: "Business Cards",
+    name: "Business Printing",
     shortTitle: "Everyday branded essentials",
     description: "Professional cards ready for repeat orders.",
     groupSlug: "print-essentials"
@@ -58,17 +58,17 @@ export const categories: Category[] = [
     groupSlug: "print-essentials"
   },
   {
-    slug: "stickers",
-    name: "Stickers",
-    shortTitle: "Short-run and bulk labels",
-    description: "Custom stickers for product packs, packaging, and giveaways.",
-    groupSlug: "branding-labels"
+    slug: "marketing-material",
+    name: "Marketing Material",
+    shortTitle: "Posters, banners & signs",
+    description: "Posters, banners, and yard signs for events, storefronts, and promotions.",
+    groupSlug: "signage"
   },
   {
-    slug: "labels",
-    name: "Labels",
-    shortTitle: "Product and packaging labels",
-    description: "Printed labels for bottles, jars, mailers, and retail packs.",
+    slug: "promotional-products",
+    name: "Promotional Products",
+    shortTitle: "Stickers, labels & promo items",
+    description: "Custom stickers, labels, and promotional products for events and giveaways.",
     groupSlug: "branding-labels"
   },
   {
@@ -93,38 +93,10 @@ export const categories: Category[] = [
     groupSlug: "apparel"
   },
   {
-    slug: "banners",
-    name: "Banners",
-    shortTitle: "Large-format visibility",
-    description: "Indoor and outdoor banners for events, storefronts, and promotions.",
-    groupSlug: "signage"
-  },
-  {
-    slug: "yard-signs",
-    name: "Yard Signs",
-    shortTitle: "Outdoor display signs",
-    description: "Weather-ready yard signs for directions, campaigns, and events.",
-    groupSlug: "signage"
-  },
-  {
-    slug: "pizza-boxes",
-    name: "Pizza Boxes",
-    shortTitle: "Food packaging boxes",
-    description: "Custom pizza boxes for pizzerias and food delivery packaging.",
-    groupSlug: "packaging-boxes"
-  },
-  {
-    slug: "mailer-boxes",
-    name: "Mailer Boxes",
-    shortTitle: "Custom shipping mailers",
-    description: "Branded mailer boxes for e-commerce and subscription packaging.",
-    groupSlug: "packaging-boxes"
-  },
-  {
-    slug: "shipping-boxes",
-    name: "Shipping Boxes",
-    shortTitle: "Durable shipping cartons",
-    description: "Shipping boxes for storage, transport, and branded fulfillment.",
+    slug: "packaging-box",
+    name: "Packaging Box",
+    shortTitle: "Custom packaging boxes",
+    description: "Custom printed packaging boxes for retail, e-commerce, and food delivery.",
     groupSlug: "packaging-boxes"
   }
 ];
@@ -144,7 +116,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
   "print-essentials": [
     {
       slug: "premium-business-cards",
-      name: "Premium Business Cards",
+      name: "Business Printing",
       category: "business-cards",
       image: "https://images.unsplash.com/photo-1545239351-1141bd82e8a6?auto=format&fit=crop&w=1200&q=80",
       description: "Heavy stock business cards with a clean premium finish for everyday networking.",
@@ -158,7 +130,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
     },
     {
       slug: "bold-flyers",
-      name: "Bold Flyers",
+      name: "Flyers",
       category: "flyers",
       image: "/images/cardprint.jpg",
       description: "Single-sided flyers for launches, promotions, and event handouts.",
@@ -201,11 +173,11 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
   ],
   "branding-labels": [
     {
-      slug: "stickers-and-labels",
-      name: "Stickers & Labels",
-      category: "stickers",
+      slug: "promotional-products",
+      name: "Promotional Products",
+      category: "promotional-products",
       image: "/images/cardprint.jpg",
-      description: "Custom stickers and labels for packaging, promotions, bottles, and giveaways.",
+      description: "Custom stickers, labels, and promotional items for packaging, events, and giveaways.",
       startingPrice: "$28",
       specs: [
         { label: "Material", value: "Paper gloss / BOPP / Vinyl" },
@@ -263,33 +235,35 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
       ]
     },
     {
-      slug: "classic-tshirt",
-      name: "Classic T-Shirt",
+      slug: "round-neck-tshirt",
+      name: "Round Neck T-Shirt",
       category: "t-shirts",
       image: "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=1200&q=80",
-      description: "Soft cotton tees for events, staff, and everyday branded wear.",
+      description: "Soft cotton round neck tees for events, staff, and everyday branded wear.",
       startingPrice: "$18",
       colors: ["#ffffff", "#111827", "#2563eb", "#9ca3af", "#ef4444"],
       specs: [
         { label: "Fabric", value: "100% cotton" },
+        { label: "Neck", value: "Round neck" },
         { label: "Print", value: "DTF / Screen print" },
         { label: "Turnaround", value: "5-8 business days" },
         { label: "Min quantity", value: "20 units" }
       ]
     },
     {
-      slug: "unisex-tee-bundle",
-      name: "Unisex Tee Bundle",
+      slug: "collar-tshirt",
+      name: "Collar T-Shirt",
       category: "t-shirts",
-      image: "/images/tshirt.jpg",
-      description: "Budget-friendly tee bundles for teams and pop-up events.",
+      image: "https://images.unsplash.com/photo-1620012253295-c15cc3e65df4?auto=format&fit=crop&w=1200&q=80",
+      description: "Polo-style collar tees for corporate branding and smart casual wear.",
       startingPrice: "$22",
-      colors: ["#ffffff", "#6b7280", "#1e3a8a", "#111827"],
+      colors: ["#ffffff", "#111827", "#2563eb", "#9ca3af", "#ef4444"],
       specs: [
-        { label: "Fit", value: "Unisex" },
-        { label: "Sizes", value: "XS to 3XL" },
+        { label: "Fabric", value: "100% cotton pique" },
+        { label: "Neck", value: "Collar / Polo" },
+        { label: "Print", value: "DTF / Embroidery" },
         { label: "Turnaround", value: "5-8 business days" },
-        { label: "Min quantity", value: "10 units" }
+        { label: "Min quantity", value: "20 units" }
       ]
     },
     {
@@ -323,105 +297,64 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
   ],
   signage: [
     {
-      slug: "vinyl-banners",
-      name: "Vinyl Banners",
-      category: "banners",
+      slug: "marketing-material",
+      name: "Marketing Material",
+      category: "marketing-material",
       image: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80",
-      description: "High-visibility banners for storefronts, events, and promotions.",
-      startingPrice: "$95",
+      description: "Posters, banners, and yard signs for events, storefronts, and promotions.",
+      startingPrice: "$24",
       specs: [
-        { label: "Material", value: "13oz vinyl" },
-        { label: "Options", value: "Grommets / Hemming" },
-        { label: "Turnaround", value: "2-4 business days" },
+        { label: "Types", value: "Posters / Banners / Yard Signs" },
+        { label: "Finish", value: "Gloss / Matte / Vinyl" },
+        { label: "Turnaround", value: "2-5 business days" },
         { label: "Min quantity", value: "1 unit" }
       ]
     },
     {
-      slug: "yard-signs",
-      name: "Yard Signs",
-      category: "yard-signs",
-      image: "/images/card2.jpg",
-      description: "Weather-ready yard signs for directions, campaigns, and events.",
-      startingPrice: "$24",
+      slug: "vinyl-banners",
+      name: "Vinyl Banners",
+      category: "vinyl-banners",
+      image: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1200&q=80",
+      description: "Heavy-duty vinyl banners with hem and grommets for indoor and outdoor use.",
+      startingPrice: "From $109",
       specs: [
-        { label: "Board", value: "Coroplast" },
-        { label: "Finish", value: "Single / Double sided" },
-        { label: "Turnaround", value: "3-5 business days" },
-        { label: "Min quantity", value: "10 units" }
+        { label: "Popular size", value: "3' × 6' / 4' × 8'" },
+        { label: "Material", value: "Heavy-duty vinyl" },
+        { label: "Finishing", value: "Hem & grommets included" },
+        { label: "Use", value: "Indoor & outdoor" },
+        { label: "Turnaround", value: "3-5 business days" }
       ]
     },
     {
-      slug: "campaign-yard-sign",
-      name: "Campaign Yard Sign",
-      category: "yard-signs",
-      image: "/images/cardprint.jpg",
-      description: "Durable yard signs for political, real estate, and event use.",
-      startingPrice: "$21",
+      slug: "roll-up-banners",
+      name: "Roll-Up Banners",
+      category: "roll-up-banners",
+      image: "https://images.unsplash.com/photo-1531058020387-3be344556be6?auto=format&fit=crop&w=1200&q=80",
+      description: "Professional retractable banner stands for trade shows, events, and retail displays.",
+      startingPrice: "From $229",
       specs: [
-        { label: "Board", value: "Coroplast" },
-        { label: "Stake", value: "H-wire" },
-        { label: "Turnaround", value: "3-5 business days" },
-        { label: "Min quantity", value: "10 units" }
+        { label: "Size", value: "33\" × 81\"" },
+        { label: "Includes", value: "Stand + carrying bag" },
+        { label: "Print", value: "Full colour" },
+        { label: "Turnaround", value: "3-5 business days" }
       ]
-    }
+    },
   ],
   "packaging-boxes": [
     {
-      slug: "pizza-boxes",
-      name: "Pizza Boxes",
-      category: "pizza-boxes",
+      slug: "packaging-box",
+      name: "Packaging Box",
+      category: "packaging-box",
       image: "/images/cardingprint.jpg",
-      description: "Custom printed pizza boxes for restaurants and food delivery.",
-      startingPrice: "$140",
+      description: "Custom printed packaging boxes for retail, e-commerce, and food delivery.",
+      startingPrice: "$132",
       specs: [
         { label: "Board", value: "Corrugated" },
         { label: "Print", value: "Exterior CMYK" },
-        { label: "Turnaround", value: "7-10 business days" },
-        { label: "Min quantity", value: "50 units" }
-      ]
-    },
-    {
-      slug: "mailer-boxes",
-      name: "Mailer Boxes",
-      category: "mailer-boxes",
-      image: "/images/cardingprint.jpg",
-      description: "Branded mailer boxes for e-commerce unboxing experiences.",
-      startingPrice: "$180",
-      specs: [
-        { label: "Board", value: "E-flute corrugated" },
-        { label: "Print", value: "Exterior CMYK" },
-        { label: "Turnaround", value: "7-10 business days" },
-        { label: "Min quantity", value: "50 units" }
-      ]
-    },
-    {
-      slug: "shipping-boxes",
-      name: "Shipping Boxes",
-      category: "shipping-boxes",
-      image: "/images/card2.jpg",
-      description: "Strong shipping cartons for secure packing and transport.",
-      startingPrice: "$132",
-      specs: [
-        { label: "Board", value: "Heavy corrugated" },
-        { label: "Print", value: "1-color / CMYK" },
-        { label: "Turnaround", value: "5-8 business days" },
+        { label: "Turnaround", value: "5-10 business days" },
         { label: "Min quantity", value: "25 units" }
       ]
     },
-    {
-      slug: "subscription-boxes",
-      name: "Subscription Boxes",
-      category: "mailer-boxes",
-      image: "/images/cardprint.jpg",
-      description: "Monthly subscription boxes for retail and promo packs.",
-      startingPrice: "$195",
-      specs: [
-        { label: "Board", value: "E-flute corrugated" },
-        { label: "Finish", value: "Gloss / Matte" },
-        { label: "Turnaround", value: "7-10 business days" },
-        { label: "Min quantity", value: "50 units" }
-      ]
-    }
   ]
 };
 
@@ -447,7 +380,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __productStore: { items: Product[] } | undefined;
 }
-if (!globalThis.__productStore) {
+if (!globalThis.__productStore || process.env.NODE_ENV === "development") {
   globalThis.__productStore = {
     items: initialProducts.map((product, index) => {
       const timestamp = new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString();
@@ -483,27 +416,14 @@ function cloneProduct(product: Product): Product {
 
 function ensureCategoryName(category: string) {
   const categoryMatch = categories.find((item) => item.slug === category);
-
-  if (!categoryMatch) {
-    throw new Error("Unknown category");
-  }
-
-  return categoryMatch.name;
+  return categoryMatch?.name ?? category;
 }
 
 export function getCatalogGroupForCategory(category: string) {
   const categoryMatch = categories.find((item) => item.slug === category);
-
-  if (!categoryMatch) {
-    throw new Error("Unknown category");
-  }
-
+  if (!categoryMatch) return null;
   const groupMatch = catalogGroups.find((item) => item.slug === categoryMatch.groupSlug);
-
-  if (!groupMatch) {
-    throw new Error("Unknown catalog group");
-  }
-
+  if (!groupMatch) return null;
   return groupMatch;
 }
 
@@ -511,7 +431,7 @@ export function groupProductsByCatalog(productsList: Product[]) {
   return catalogGroups
     .map((group) => ({
       ...group,
-      products: productsList.filter((product) => getCatalogGroupForCategory(product.category).slug === group.slug)
+      products: productsList.filter((product) => getCatalogGroupForCategory(product.category)?.slug === group.slug)
     }))
     .filter((group) => group.products.length > 0);
 }
@@ -540,6 +460,23 @@ function createUniqueSlug(baseSlug: string, ignoreSlug?: string) {
   }
 
   return candidate;
+}
+
+export const LISTING_ALLOWED_CATEGORIES = new Set([
+  "business-cards", "flyers", "marketing-material", "promotional-products",
+  "packaging-box",
+  "t-shirts",
+]);
+
+export const LISTING_EXCLUDED_SLUGS = new Set([
+  "retractable-banner", "gloss-stickers", "waterproof-labels",
+  "die-cut-stickers", "product-label-rolls",
+]);
+
+export function getListingProducts(category?: string) {
+  return getProducts(category).filter(
+    (p) => LISTING_ALLOWED_CATEGORIES.has(p.category) && !LISTING_EXCLUDED_SLUGS.has(p.slug)
+  );
 }
 
 export const featuredProducts = () => getProducts().slice(0, 3);
@@ -722,7 +659,7 @@ export function getAdminProductStats() {
 
   return {
     productCount: _ps.items.length,
-    categoryCount: new Set(_ps.items.map((product) => getCatalogGroupForCategory(product.category).slug)).size,
+    categoryCount: new Set(_ps.items.map((product) => getCatalogGroupForCategory(product.category)?.slug).filter(Boolean)).size,
     latestUpdatedAt: latestUpdatedAt || null
   };
 }

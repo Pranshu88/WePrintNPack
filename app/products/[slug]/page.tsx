@@ -102,15 +102,18 @@ function adaptProduct(product: NonNullable<ReturnType<typeof getProductBySlug>>)
 
 export default async function ProductDetailsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ gallery?: string }>;
 }) {
   const { slug } = await params;
+  const { gallery } = await searchParams;
   const product = getProductBySlug(slug);
 
   if (!product) {
     notFound();
   }
 
-  return <ShirtOrderClient shirt={adaptProduct(product)} galleryId={null} />;
+  return <ShirtOrderClient shirt={adaptProduct(product)} galleryId={gallery ?? null} />;
 }

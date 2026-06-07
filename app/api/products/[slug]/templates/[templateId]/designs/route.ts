@@ -23,7 +23,7 @@ export async function POST(
     return NextResponse.json({ error: "name and frontImage are required." }, { status: 400 });
   }
 
-  const template = addDesign(templateId, { name, colorHex, colorName, frontImage, frontOverlay, backImage, backOverlay, frontAdminItems, backAdminItems, frontBgColor, backBgColor });
+  const template = await addDesign(templateId, { name, colorHex, colorName, frontImage, frontOverlay, backImage, backOverlay, frontAdminItems, backAdminItems, frontBgColor, backBgColor });
   if (!template) {
     return NextResponse.json({ error: "Gallery template not found." }, { status: 404 });
   }

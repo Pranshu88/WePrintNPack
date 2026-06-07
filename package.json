@@ -12,19 +12,21 @@
     "postinstall": "node -e \"if(!process.env.VERCEL){require('child_process').execSync('npm rebuild better-sqlite3 --build-from-source',{stdio:'inherit'})}\""
   },
   "dependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@libsql/client": "^0.17.3",
+    "@stripe/stripe-js": "^9.7.0",
     "@types/nodemailer": "^8.0.0",
-    "better-sqlite3": "^12.9.0",
     "lucide-react": "^1.11.0",
     "next": "^15.5.18",
     "nodemailer": "^8.0.7",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "stripe": "^22.2.0"
   },
   "devDependencies": {
     "@types/node": "22.15.0",
     "@types/react": "19.1.2",
     "@types/react-dom": "19.1.2",
+    "better-sqlite3": "^12.10.0",
     "typescript": "5.8.3"
   }
 }

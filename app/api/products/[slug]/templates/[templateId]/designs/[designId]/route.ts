@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getDesign, updateDesign, deleteDesign, type SerializableItem } from "@/lib/template-data";
+import { getDesign, updateDesign, deleteDesign, type GalleryTemplate, type SerializableItem } from "@/lib/template-data";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ slug: string; templateId: string; designId: string }> }
 ) {
   const { templateId, designId } = await params;
-  const design = getDesign(templateId, designId);
+  const design = await getDesign(templateId, designId);
   if (!design) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -18,7 +18,12 @@ export async function PATCH(
   { params }: { params: Promise<{ slug: string; templateId: string; designId: string }> }
 ) {
   const { templateId, designId } = await params;
-  const body = (await req.json()) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
   const updates: {
     name?: string;
     colorHex?: string;
@@ -44,7 +49,13 @@ export async function PATCH(
   if (typeof body.frontBgColor === "string") updates.frontBgColor = body.frontBgColor;
   if (typeof body.backBgColor === "string") updates.backBgColor = body.backBgColor;
 
-  const template = updateDesign(templateId, designId, updates);
+  let template: GalleryTemplate | undefined;
+  try {
+    template = await updateDesign(templateId, designId, updates);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Database error.";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
   if (!template) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -56,7 +67,7 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string; templateId: string; designId: string }> }
 ) {
   const { templateId, designId } = await params;
-  const deleted = deleteDesign(templateId, designId);
+  const deleted = await deleteDesign(templateId, designId);
   if (!deleted) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }

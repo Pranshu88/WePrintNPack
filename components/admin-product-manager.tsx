@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import { categories, groupProductsByCatalog } from "@/lib/data";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, type ChangeEvent, type FormEvent } from "react";
+import { categories, groupProductsByCatalog, LISTING_ALLOWED_CATEGORIES, LISTING_EXCLUDED_SLUGS } from "@/lib/data";
+import { usePathname } from "next/navigation";
+import AdminNotificationBell from "./admin-notification-bell";
 import type { Product } from "@/lib/types";
 
 type ProductFormState = {
@@ -63,24 +66,18 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
-const ALLOWED_CATEGORIES = new Set([
-  "business-cards", "flyers", "posters", "banners",
-  "yard-signs", "stickers", "labels",
-  "pizza-boxes", "mailer-boxes", "shipping-boxes",
-  "t-shirts",
-]);
 
 const recentOrders = [
   { id: "#1024", name: "Emma Johnson", amount: "$236.00", status: "Completed", color: "#22c55e", bg: "#f0fdf4" },
-  { id: "#1023", name: "Michael Brown", amount: "$125.50", status: "Processing", color: "#f97316", bg: "#fff7ed" },
+  { id: "#1023", name: "Michael Brown", amount: "$125.50", status: "Processing", color: "#7c3aed", bg: "#fff7ed" },
   { id: "#1022", name: "Sophia Davis", amount: "$89.00", status: "Shipped", color: "#3b82f6", bg: "#eff6ff" },
   { id: "#1021", name: "James Wilson", amount: "$310.00", status: "Completed", color: "#22c55e", bg: "#f0fdf4" },
 ];
 
 const recentActivity = [
-  { icon: "📦", title: "New product added", sub: "Premium Business Cards", time: "2 mins ago", color: "#f97316", bg: "#f5f3ff" },
+  { icon: "📦", title: "New product added", sub: "Premium Business Cards", time: "2 mins ago", color: "#7c3aed", bg: "#f5f3ff" },
   { icon: "🏷️", title: "Category updated", sub: "Marketing Materials", time: "15 mins ago", color: "#06b6d4", bg: "#ecfeff" },
-  { icon: "🛍️", title: "Order #1024 completed", sub: "Emma Johnson", time: "1 hour ago", color: "#f97316", bg: "#fff7ed" },
+  { icon: "🛍️", title: "Order #1024 completed", sub: "Emma Johnson", time: "1 hour ago", color: "#7c3aed", bg: "#fff7ed" },
   { icon: "⭐", title: "New review received", sub: "Premium Business Cards", time: "2 hours ago", color: "#eab308", bg: "#fefce8" },
 ];
 
@@ -115,6 +112,8 @@ type AdminProductManagerProps = {
 };
 
 export function AdminProductManager({ initialProducts }: AdminProductManagerProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [products, setProducts] = useState<Product[]>(() => initialProducts);
   const [loading, setLoading] = useState(initialProducts.length === 0);
   const [saving, setSaving] = useState(false);
@@ -123,6 +122,38 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [form, setForm] = useState<ProductFormState>(emptyForm());
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  type StatsData = {
+    ordersToday: number;
+    totalOrdersAll: number;
+    revenueToday: number;
+    totalOrders: number;
+    recentOrders: Array<{ customer_name: string; customer_email: string; amount_total: number; production_status: string; created_at: string; stripe_session_id: string | null; id: string }>;
+  };
+  const [stats, setStats] = useState<StatsData>({ ordersToday: 0, revenueToday: 0, totalOrders: 0, totalOrdersAll: 0, recentOrders: [] });
+
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/stats", { cache: "no-store" });
+      const data = await res.json() as StatsData;
+      setStats(data);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { void loadStats(); }, [loadStats]);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/admin/logout", { method: "POST" });
+      router.push("/admin/login");
+    } finally {
+      setLoggingOut(false);
+      setShowLogoutConfirm(false);
+    }
+  }
 
   async function loadProducts() {
     setLoading(true);
@@ -204,10 +235,17 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     setForm((current) => ({ ...current, image: dataUrl, imageName: file.name }));
   }
 
-  const EXCLUDED_SLUGS = new Set(["retractable-banner", "gloss-stickers", "waterproof-labels", "die-cut-stickers", "product-label-rolls"]);
-  const visibleProducts = products.filter((p) => ALLOWED_CATEGORIES.has(p.category) && !EXCLUDED_SLUGS.has(p.slug));
-  const productCount = visibleProducts.length;
-  const groupedProducts = groupProductsByCatalog(visibleProducts);
+  const visibleProducts = products.filter((p) => LISTING_ALLOWED_CATEGORIES.has(p.category) && !LISTING_EXCLUDED_SLUGS.has(p.slug));
+  const deduplicatedProducts = visibleProducts.reduce<Product[]>((acc, p) => {
+    if (p.category === "t-shirts") {
+      if (!acc.some((x) => x.category === "t-shirts")) acc.push({ ...p, name: "T-Shirts" });
+    } else {
+      acc.push(p);
+    }
+    return acc;
+  }, []);
+  const productCount = deduplicatedProducts.length;
+  const groupedProducts = groupProductsByCatalog(deduplicatedProducts);
   const latestUpdatedAt = products
     .map((p) => p.updatedAt || p.createdAt || "")
     .filter(Boolean).sort().at(-1);
@@ -234,7 +272,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
       display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
       borderRadius: 10, textDecoration: "none", marginBottom: 2, fontSize: "0.875rem",
       fontWeight: active ? 600 : 500,
-      background: active ? "linear-gradient(135deg, #f97316, #ef4444, #6366f1)" : "transparent",
+      background: active ? "linear-gradient(135deg, #7c3aed, #db2777, #f97316)" : "transparent",
       color: active ? "#fff" : "#374151", cursor: "pointer",
     }),
     navCount: (active: boolean): React.CSSProperties => ({
@@ -244,14 +282,14 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     }),
     upgradeCard: {
       margin: "0 12px 12px", borderRadius: 16, padding: "18px 16px",
-      background: "linear-gradient(135deg, #f97316 0%, #ef4444 50%, #6366f1 100%)",
+      background: "linear-gradient(135deg, #7c3aed 0%, #db2777 50%, #f97316 100%)",
       color: "#fff",
     } as React.CSSProperties,
     profileRow: {
       padding: "14px 16px", borderTop: "1px solid #f5f5f5",
       display: "flex", alignItems: "center", gap: 10,
     } as React.CSSProperties,
-    avatar: { width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #f97316, #ef4444, #6366f1)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.85rem", flexShrink: 0 } as React.CSSProperties,
+    avatar: { width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.85rem", flexShrink: 0 } as React.CSSProperties,
     mainArea: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } as React.CSSProperties,
     topBar: { background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "12px 28px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 } as React.CSSProperties,
     searchBox: { flex: 1, display: "flex", alignItems: "center", gap: 10, background: "#f8f9fc", border: "1px solid #f0f0f0", borderRadius: 10, padding: "9px 14px" } as React.CSSProperties,
@@ -275,22 +313,20 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     tableRow: { display: "grid", gridTemplateColumns: "2fr 0.8fr 0.9fr 1fr 0.9fr", padding: "12px 16px", alignItems: "center", borderBottom: "1px solid #f9fafb" } as React.CSSProperties,
     productThumb: { width: 40, height: 40, borderRadius: 8, objectFit: "cover" as const, background: "#f3f4f6", flexShrink: 0 } as React.CSSProperties,
     editBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "1.5px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, color: "#374151" } as React.CSSProperties,
-    btnPrimary: { display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", border: "none", borderRadius: 10, background: "linear-gradient(135deg, #f97316, #ef4444, #6366f1)", color: "#fff", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" } as React.CSSProperties,
+    btnPrimary: { display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", border: "none", borderRadius: 10, background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" } as React.CSSProperties,
     btnOutline: { display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", color: "#374151", fontWeight: 600, fontSize: "0.875rem", cursor: "pointer" } as React.CSSProperties,
   };
 
   const navItems = [
-    { label: "Product listing", href: "#", count: productCount, active: true },
-    { label: "Templates", href: "/admin/templates", count: null, active: false },
-    { label: "Categories", href: "#", count: null, active: false },
-    { label: "Reviews", href: "#", count: 3, active: false },
+    { label: "Category listing", href: "/admin", count: productCount, active: pathname === "/admin" },
+    { label: "Templates", href: "/admin/templates", count: null, active: pathname === "/admin/templates" },
+    { label: "Reviews", href: "/admin/reviews", count: null, active: pathname === "/admin/reviews" },
   ];
 
   const metrics = [
-    { label: "Total Products", value: productCount, icon: "🛍️", color: "#f97316", iconBg: "#f5f3ff", trend: "↑ 12% from last month", trendColor: "#22c55e" },
-    { label: "Orders Today", value: 24, icon: "📦", color: "#f97316", iconBg: "#fff7ed", trend: "↑ 18% from yesterday", trendColor: "#22c55e" },
-    { label: "Revenue (Today)", value: "$1,245", icon: "💰", color: "#ec4899", iconBg: "#fdf2f8", trend: "↑ 15% from yesterday", trendColor: "#22c55e" },
-    { label: "Pending Reviews", value: 3, icon: "⭐", color: "#ef4444", iconBg: "#faf5ff", trend: "↓ 2 from yesterday", trendColor: "#ef4444" },
+    { label: "Total Products", value: productCount, icon: "🛍️", color: "#7c3aed", iconBg: "#f5f3ff", trend: `${productCount} active listings`, trendColor: "#22c55e" },
+    { label: "Orders Today", value: stats.ordersToday, icon: "📦", color: "#7c3aed", iconBg: "#fff7ed", trend: `${stats.totalOrders} total orders`, trendColor: "#22c55e" },
+    { label: "Revenue (Today)", value: `$${stats.revenueToday.toFixed(2)}`, icon: "💰", color: "#ec4899", iconBg: "#fdf2f8", trend: stats.revenueToday > 0 ? "Paid orders today" : "No revenue today", trendColor: stats.revenueToday > 0 ? "#22c55e" : "#9ca3af" },
   ];
 
   return (
@@ -302,7 +338,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
           <img src="/images/applogo.jpeg" alt="Logo" style={{ width: 40, height: 40, borderRadius: 10, objectFit: "cover" }} />
           <div>
             <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "#111827", lineHeight: 1.1 }}>WE PRINT</div>
-            <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "#f97316", lineHeight: 1.1 }}>N PACK</div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "#7c3aed", lineHeight: 1.1 }}>N PACK</div>
           </div>
         </div>
 
@@ -313,7 +349,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
             {navItems.map((item) => (
               <Link key={item.label} href={item.href} style={S.navItem(item.active)}>
                 <span style={{ fontSize: "1rem" }}>
-                  {item.label === "Product listing" ? "🗂️" : item.label === "Templates" ? "🎨" : item.label === "Categories" ? "📁" : "💬"}
+                  {item.label === "Category listing" ? "🗂️" : item.label === "Templates" ? "🎨" : "💬"}
                 </span>
                 {item.label}
                 {item.count !== null && (
@@ -326,11 +362,11 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
           <div style={S.navSection}>
             <span style={S.navTitle}>Commerce</span>
             {[
-              { label: "Orders", icon: "🛒", count: 12 },
-              { label: "Customers", icon: "👥", count: null },
-              { label: "Analytics", icon: "📊", count: null },
+              { label: "Orders", icon: "🛒", count: stats.totalOrdersAll || null, href: "/admin/orders" },
+              { label: "Customers", icon: "👥", count: null, href: "/admin/customers" },
+              { label: "Analytics", icon: "📊", count: null, href: "#" },
             ].map((item) => (
-              <a key={item.label} href="#" style={S.navItem(false)}>
+              <a key={item.label} href={item.href} style={S.navItem(false)}>
                 <span>{item.icon}</span>
                 {item.label}
                 {item.count !== null && <span style={S.navCount(false)}>{item.count}</span>}
@@ -341,19 +377,15 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
           <div style={S.navSection}>
             <span style={S.navTitle}>System</span>
             <a href="#" style={S.navItem(false)}><span>⚙️</span>Settings</a>
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              style={{ ...S.navItem(false), width: "100%", textAlign: "left", border: "none", cursor: "pointer", background: "transparent" }}
+            >
+              <span>🚪</span>Logout
+            </button>
           </div>
         </nav>
 
-        {/* Upgrade card */}
-        <div style={S.upgradeCard}>
-          <div style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 4 }}>Upgrade to Pro</div>
-          <div style={{ fontSize: "0.75rem", opacity: 0.85, marginBottom: 14, lineHeight: 1.5 }}>
-            Unlock powerful features and take your business to next level.
-          </div>
-          <button style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "none", background: "#fff", color: "#f97316", fontWeight: 700, fontSize: "0.8rem", cursor: "pointer" }}>
-            Upgrade Now
-          </button>
-        </div>
 
         {/* Profile */}
         <div style={S.profileRow}>
@@ -378,10 +410,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
               style={{ border: "none", background: "none", outline: "none", fontSize: "0.875rem", color: "#374151", flex: 1 }}
             />
           </div>
-          <button style={{ width: 40, height: 40, borderRadius: 10, border: "1px solid #f0f0f0", background: "#fff", cursor: "pointer", fontSize: "1.1rem", position: "relative" }}>
-            🔔
-            <span style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, borderRadius: "50%", background: "#ef4444", border: "2px solid #fff" }} />
-          </button>
+          <AdminNotificationBell />
         </header>
 
         {/* Scrollable content */}
@@ -389,11 +418,11 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
           {/* Page header */}
           <div style={S.pageHeader}>
             <div>
-              <p style={{ margin: "0 0 4px", fontSize: "0.75rem", fontWeight: 700, color: "#f97316", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              <p style={{ margin: "0 0 4px", fontSize: "0.75rem", fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 DASHBOARD / ADMIN
               </p>
               <h1 style={{ margin: "0 0 6px", fontSize: "2rem", fontWeight: 800, color: "#111827" }}>
-                Admin <span style={{ color: "#f97316" }}>Dashboard</span>
+                Admin <span style={{ color: "#7c3aed" }}>Dashboard</span>
               </h1>
               <p style={{ margin: "0 0 10px", fontSize: "0.8rem", color: "#9ca3af" }}>
                 <Link href="/" style={{ color: "#9ca3af", textDecoration: "none" }}>Home</Link>
@@ -404,10 +433,10 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-              <button onClick={() => void loadProducts()} style={{ ...S.btnOutline, background: "linear-gradient(135deg, #f97316, #ef4444, #6366f1)", color: "#fff", border: "none" }}>
+              <button onClick={() => void loadProducts()} style={{ ...S.btnOutline, background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none" }}>
                 <span>🔄</span> Sync
               </button>
-              <button onClick={() => void loadProducts()} style={{ ...S.btnOutline, background: "linear-gradient(135deg, #f97316, #fb923c)", color: "#fff", border: "none" }}>
+              <button onClick={() => void loadProducts()} style={{ ...S.btnOutline, background: "linear-gradient(135deg, #7c3aed, #db2777)", color: "#fff", border: "none" }}>
                 <span>↺</span> Refresh
               </button>
             </div>
@@ -434,12 +463,12 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
             ))}
           </div>
 
-          {/* Product Listing */}
+          {/* Category Listing */}
           <div style={{ ...S.panel, marginBottom: 28 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#111827" }}>Product Listing</h2>
-                <span style={{ fontSize: "0.8rem", color: "#f97316", fontWeight: 600 }}>
+                <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#111827" }}>Category Listing</h2>
+                <span style={{ fontSize: "0.8rem", color: "#7c3aed", fontWeight: 600 }}>
                   {loading ? "Loading..." : `${productCount} records`}
                 </span>
               </div>
@@ -523,13 +552,13 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
               <svg viewBox="0 0 620 220" style={{ width: "100%", height: 160, overflow: "visible" }}>
                 <defs>
                   <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f97316" stopOpacity="0.25" />
-                    <stop offset="100%" stopColor="#f97316" stopOpacity="0.02" />
+                    <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.25" />
+                    <stop offset="100%" stopColor="#7c3aed" stopOpacity="0.02" />
                   </linearGradient>
                   <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#f97316" />
-                    <stop offset="60%" stopColor="#ef4444" />
-                    <stop offset="100%" stopColor="#6366f1" />
+                    <stop offset="0%" stopColor="#7c3aed" />
+                    <stop offset="60%" stopColor="#db2777" />
+                    <stop offset="100%" stopColor="#f97316" />
                   </linearGradient>
                 </defs>
                 {[0, 50, 100, 150, 200].map((y, i) => (
@@ -542,7 +571,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
                 ))}
                 <path d={fillPath} fill="url(#chartGrad)" />
                 <path d={linePath} fill="none" stroke="url(#lineGrad)" strokeWidth="2.5" strokeLinecap="round" />
-                <circle cx="400" cy="55" r="5" fill="#ef4444" />
+                <circle cx="400" cy="55" r="5" fill="#db2777" />
                 <rect x="355" y="28" width="90" height="22" rx="6" fill="#1f2937" />
                 <text x="400" y="43" textAnchor="middle" fontSize="11" fill="#fff" fontWeight="600">$1,450 · May 20</text>
                 {chartData.map((pt) => (
@@ -555,28 +584,40 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
             <div style={S.panel}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <h3 style={S.panelTitle}>Recent Orders</h3>
-                <a href="#" style={{ fontSize: "0.8rem", color: "#f97316", fontWeight: 600, textDecoration: "none" }}>View All</a>
+                <Link href="/admin/orders" style={{ fontSize: "0.8rem", color: "#7c3aed", fontWeight: 600, textDecoration: "none" }}>View All</Link>
               </div>
-              {recentOrders.map((o) => (
-                <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #f9fafb" }}>
-                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.8rem", fontWeight: 700, color: "#6b7280", flexShrink: 0 }}>
-                    {o.name.split(" ").map(w => w[0]).join("")}
+              {stats.recentOrders.length === 0 ? (
+                <p style={{ fontSize: "0.82rem", color: "#9ca3af", margin: 0 }}>No orders yet.</p>
+              ) : stats.recentOrders.map((o) => {
+                const initials = o.customer_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                const shortId = o.stripe_session_id?.slice(-8) ?? o.id.slice(0, 8);
+                const statusMap: Record<string, { color: string; bg: string }> = {
+                  pending:    { color: "#b45309", bg: "#fef3c7" },
+                  production: { color: "#1d4ed8", bg: "#dbeafe" },
+                  completed:  { color: "#065f46", bg: "#d1fae5" },
+                };
+                const sc = statusMap[o.production_status] ?? statusMap.pending;
+                return (
+                  <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #f9fafb" }}>
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#7c3aed,#db2777)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.78rem", fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                      {initials}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "#111827" }}>#{shortId}</div>
+                      <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>{o.customer_name}</div>
+                    </div>
+                    <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "#111827" }}>${o.amount_total.toFixed(2)}</div>
+                    <span style={{ fontSize: "0.72rem", fontWeight: 600, color: sc.color, background: sc.bg, padding: "3px 9px", borderRadius: 20, textTransform: "capitalize" }}>{o.production_status}</span>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "#111827" }}>{o.id}</div>
-                    <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>{o.name}</div>
-                  </div>
-                  <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "#111827" }}>{o.amount}</div>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 600, color: o.color, background: o.bg, padding: "3px 9px", borderRadius: 20 }}>{o.status}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Recent Activity */}
             <div style={S.panel}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <h3 style={S.panelTitle}>Recent Activity</h3>
-                <a href="#" style={{ fontSize: "0.8rem", color: "#f97316", fontWeight: 600, textDecoration: "none" }}>View All</a>
+                <a href="#" style={{ fontSize: "0.8rem", color: "#7c3aed", fontWeight: 600, textDecoration: "none" }}>View All</a>
               </div>
               {recentActivity.map((a) => (
                 <div key={a.title} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid #f9fafb" }}>
@@ -684,6 +725,45 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Logout confirmation modal */}
+      {showLogoutConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 20, padding: "36px 40px", maxWidth: 380, width: "90%",
+            boxShadow: "0 24px 60px rgba(0,0,0,0.18)", textAlign: "center",
+          }}>
+            <div style={{ fontSize: "2.5rem", marginBottom: 12 }}>🚪</div>
+            <h2 style={{ margin: "0 0 8px", fontSize: "1.2rem", fontWeight: 800, color: "#111827" }}>Do you want to logout?</h2>
+            <p style={{ margin: "0 0 28px", color: "#6b7280", fontSize: "0.875rem" }}>You will be redirected to the admin login page.</p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+              <button
+                onClick={() => void handleLogout()}
+                disabled={loggingOut}
+                style={{
+                  padding: "11px 32px", border: "none", borderRadius: 10,
+                  background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)",
+                  color: "#fff", fontWeight: 700, fontSize: "0.95rem", cursor: loggingOut ? "not-allowed" : "pointer",
+                }}
+              >
+                {loggingOut ? "Logging out…" : "Yes"}
+              </button>
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                style={{
+                  padding: "11px 32px", border: "1.5px solid #e5e7eb", borderRadius: 10,
+                  background: "#fff", color: "#374151", fontWeight: 700, fontSize: "0.95rem", cursor: "pointer",
+                }}
+              >
+                No
+              </button>
+            </div>
           </div>
         </div>
       )}

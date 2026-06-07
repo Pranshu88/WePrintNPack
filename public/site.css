@@ -1482,6 +1482,15 @@ button {
   margin: 0;
 }
 
+/* ── Business-card order 2-col layout ── */
+.bc-order-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  padding-top: 2.5rem;
+  align-items: start;
+}
+
 @media (max-width: 980px) {
   .hero-grid,
   .split-panel,
@@ -1491,8 +1500,14 @@ button {
   .category-grid,
   .product-grid,
   .testimonial-grid,
-  .metric-grid {
+  .metric-grid,
+  .home-hero-grid,
+  .bc-order-layout {
     grid-template-columns: 1fr;
+  }
+
+  .packaging-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .nav-links,
@@ -1547,4 +1562,12 @@ button {
     grid-template-columns: 1fr;
   }
 
-} 
+  .packaging-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .container,
+  .container-wide {
+    width: calc(100% - 2rem);
+  }
+}

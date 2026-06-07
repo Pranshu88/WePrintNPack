@@ -9,6 +9,108 @@ import DesignEditorShell from "./design-editor-shell";
 const LENS_SIZE = 140;
 const ZOOM_FACTOR = 2.5;
 
+// Price overrides for non-BC gallery templates (mirrors PRICE_FALLBACKS in popular-products-carousel)
+const GALLERY_PRICE_MAP: Record<string, { price: string; priceNote: string }> = {
+  "Vinyl Banner":            { price: "From $109", priceNote: "+ tax" },
+  "Large Outdoor Banner":    { price: "$179",      priceNote: "+ tax" },
+  "Standard Roll-Up Banner": { price: "$229",      priceNote: "+ tax" },
+  "Premium Roll-Up Banner":  { price: "$279",      priceNote: "+ tax" },
+  "Small Posters":           { price: "$109",      priceNote: "+ tax" },
+  "Large Posters":           { price: "$139",      priceNote: "+ tax" },
+  "Elite Yard Sign":         { price: "$189",      priceNote: "+ tax" },
+  "Business Yard Sign":      { price: "$379",      priceNote: "+ tax" },
+  "Die-Cut Stickers":        { price: "$89",       priceNote: "+ tax" },
+  "Product Labels":          { price: "$139",      priceNote: "+ tax" },
+};
+
+// Business card package metadata keyed by gallery template name
+const BC_PACKAGE_DATA: Record<string, { dbKey: string; title: string; price: string; priceNum: number; priceNote: string; specs: Array<{ label: string; value: string }> }> = {
+  "Business Cards": {
+    dbKey: "bc-standard",
+    title: "Business Cards",
+    price: "$79",
+    priceNum: 79,
+    priceNote: "+ tax · per set",
+    specs: [
+      { label: "Size", value: '3.5" × 2"' },
+      { label: "Stock", value: "14pt Matte or Gloss" },
+      { label: "Print", value: "Full colour" },
+      { label: "Sides", value: "Double-sided included" },
+    ],
+  },
+  "Premium Business Cards": {
+    dbKey: "bc-premium",
+    title: "Premium Business Cards",
+    price: "$119",
+    priceNum: 119,
+    priceNote: "+ tax · per set",
+    specs: [
+      { label: "Stock", value: "16pt Matte / Silk" },
+      { label: "Sides", value: "Double-sided" },
+      { label: "Finish", value: "Premium finish" },
+    ],
+  },
+  "Luxury Business Cards": {
+    dbKey: "bc-luxury",
+    title: "Luxury Business Cards",
+    price: "From $179",
+    priceNum: 179,
+    priceNote: "+ tax · quote based on finish",
+    specs: [
+      { label: "Finish", value: "Soft Touch / Suede / Spot UV / Raised UV / Painted Edge" },
+    ],
+  },
+  "Express Flyers": {
+    dbKey: "fly-standard",
+    title: "Express Flyers",
+    price: "$159",
+    priceNum: 159,
+    priceNote: "+ tax · per set",
+    specs: [
+      { label: "Size", value: '8.5" × 5.5"' },
+      { label: "Stock", value: "100lb Gloss Text" },
+      { label: "Print", value: "Full colour" },
+      { label: "Sides", value: "Double-sided" },
+    ],
+  },
+  "Prime Flyers": {
+    dbKey: "fly-premium",
+    title: "Prime Flyers",
+    price: "$329",
+    priceNum: 329,
+    priceNote: "+ tax · per set",
+    specs: [
+      { label: "Size", value: '8.5" × 11"' },
+      { label: "Stock", value: "100lb Gloss Text" },
+      { label: "Print", value: "Full colour" },
+      { label: "Sides", value: "Double-sided" },
+    ],
+  },
+};
+
+function openBcDB(): Promise<IDBDatabase> {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open("bc-packages-db", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("images");
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function loadBcImage(id: string): Promise<string> {
+  try {
+    const db = await openBcDB();
+    return await new Promise<string>((res) => {
+      const tx = db.transaction("images", "readonly");
+      const req = tx.objectStore("images").get(id);
+      req.onsuccess = () => res((req.result as string) ?? "");
+      req.onerror = () => res("");
+    });
+  } catch {
+    return "";
+  }
+}
+
 const zoomBtnStyle: React.CSSProperties = {
   width: "36px", height: "36px", background: "rgba(255,255,255,0.95)",
   border: "1px solid #e5e7eb", borderRadius: "8px", cursor: "pointer",
@@ -19,16 +121,22 @@ const zoomBtnStyle: React.CSSProperties = {
 type Props = {
   product: Product;
   galleryId: string | null;
+  categoryLabel?: string;
+  categoryHref?: string;
+  productBasePath?: string;
+  productNameOverride?: string;
 };
 
 const DESIGNS_PER_PAGE = 20;
 
-export default function BusinessCardOrderClient({ product, galleryId }: Props) {
+export default function BusinessCardOrderClient({ product, galleryId, categoryLabel = "Business Cards", categoryHref = "/products/business-cards", productBasePath, productNameOverride }: Props) {
+  const basePath = productBasePath ?? categoryHref;
   const [editorOpen, setEditorOpen] = useState(false);
   const [designsModalOpen, setDesignsModalOpen] = useState(false);
   const [gallery, setGallery] = useState<GalleryTemplate | null>(null);
   const [allDesigns, setAllDesigns] = useState<DesignTemplateItem[]>([]);
   const [loadingGallery, setLoadingGallery] = useState(true);
+  const [bcImage, setBcImage] = useState("");
 
   // browse designs modal state
   const [designSearch, setDesignSearch] = useState("");
@@ -59,13 +167,25 @@ export default function BusinessCardOrderClient({ product, galleryId }: Props) {
       .then((data: { templates?: GalleryTemplate[] }) => {
         const templates = data.templates ?? [];
         if (galleryId) {
-          setGallery(templates.find((g) => g.id === galleryId) ?? null);
+          const matched = templates.find((g) => g.id === galleryId) ?? null;
+          setGallery(matched);
+          // Scope designs to the selected template only
+          setAllDesigns(matched?.designs ?? []);
+        } else {
+          setAllDesigns(templates.flatMap((g) => g.designs));
         }
-        setAllDesigns(templates.flatMap((g) => g.designs));
       })
       .catch(() => {})
       .finally(() => setLoadingGallery(false));
   }, [galleryId, product.slug]);
+
+  // Load the correct BC package photo from IndexedDB once gallery is known
+  useEffect(() => {
+    if (!gallery) return;
+    const bcData = BC_PACKAGE_DATA[gallery.name];
+    if (!bcData) return;
+    void loadBcImage(bcData.dbKey).then((img) => { if (img) setBcImage(img); });
+  }, [gallery]);
 
   const hasDesigns = allDesigns.length > 0;
 
@@ -104,16 +224,56 @@ export default function BusinessCardOrderClient({ product, galleryId }: Props) {
     setEditorOpen(true);
   }
 
+  // When a BC package gallery is selected, override static product data with package-specific data
+  const bcData = gallery ? BC_PACKAGE_DATA[gallery.name] ?? null : null;
+  const galleryPrice = gallery ? GALLERY_PRICE_MAP[gallery.name] ?? null : null;
+  const displayTitle = bcData?.title ?? (gallery?.name && !bcData ? gallery.name : null) ?? productNameOverride ?? product.name;
+  const displayPrice = bcData?.price ?? galleryPrice?.price ?? product.startingPrice;
+  const displayPriceNote = bcData?.priceNote ?? galleryPrice?.priceNote ?? "per set · No setup fee";
+  const displayPriceNum = parseFloat(displayPrice.replace(/[^0-9.]/g, "")) || undefined;
+  const displaySpecs = bcData?.specs ?? product.specs;
+  const displayImage = bcImage || gallery?.previewImage || product.image || gallery?.designs[0]?.frontImage;
+
+  const editorProductType = ((): React.ComponentProps<typeof DesignEditorShell>["productType"] => {
+    const gn = gallery?.name ?? "";
+    const s  = product.slug;
+
+    // Check gallery name first — it's more specific than the product slug
+    if (gn === "Premium Roll-Up Banner")             return "banner-rollup-premium";
+    if (gn === "Standard Roll-Up Banner")            return "banner-rollup-std";
+    if (gn.includes("Roll-Up Banner"))               return "banner-rollup-std";
+    if (gn === "Large Outdoor Banner")               return "banner-outdoor";
+    if (gn === "Vinyl Banner")                       return "banner-vinyl";
+    if (gn === "Small Posters")                      return "poster-small";
+    if (gn === "Large Posters")                      return "poster-large";
+    if (gn === "Express Flyers")                     return "flyer-express";
+    if (gn === "Prime Flyers")                       return "flyer-prime";
+    if (gn.toLowerCase().includes("sticker") ||
+        gn.toLowerCase().includes("label"))          return "sticker-label";
+
+    // Fall back to product slug
+    if (s === "yard-signs")                          return "yard-sign";
+    if (s === "stickers-and-labels")                 return "sticker-label";
+    if (s === "vinyl-banners")                       return "banner-vinyl";
+    if (s === "posters" || s === "small-posters")    return "poster-small";
+    if (s === "large-posters")                       return "poster-large";
+    if (s === "express-flyers" || s === "flyers")    return "flyer-express";
+    if (s === "prime-flyers")                        return "flyer-prime";
+    return "business-card";
+  })();
+
   if (editorOpen) {
     return (
       <DesignEditorShell
-        productType="business-card"
+        productType={editorProductType}
         productSlug={product.slug}
         initialFrontItems={frontItems}
         initialBackItems={backItems}
         initialFrontBgColor={frontBgColor}
         initialBackBgColor={backBgColor}
         templateId={selectedDesignId}
+        productName={displayTitle}
+        pricePerUnit={displayPriceNum}
         onClose={() => setEditorOpen(false)}
       />
     );
@@ -125,106 +285,110 @@ export default function BusinessCardOrderClient({ product, galleryId }: Props) {
 
       {/* Breadcrumb */}
       <div style={{ borderBottom: "1px solid #f3f4f6", padding: "0.75rem 0" }}>
-        <div className="container container-wide" style={{ display: "flex", gap: "0.5rem", fontSize: "0.875rem", color: "#6b7280", alignItems: "center" }}>
-          <Link href="/" style={{ color: "#6b7280", textDecoration: "none" }}>Home</Link>
+        <div className="container container-wide" style={{ display: "flex", gap: "0.5rem", fontSize: "0.875rem", color: "#9ca3af", alignItems: "center" }}>
+          <Link href="/" style={{ color: "#9ca3af", textDecoration: "none" }}>Home</Link>
           <span>/</span>
-          <Link href="/products/business-cards" style={{ color: "#6b7280", textDecoration: "none" }}>Business Cards</Link>
+          <Link href={categoryHref} style={{ color: "#9ca3af", textDecoration: "none" }}>{categoryLabel}</Link>
           <span>/</span>
-          <span style={{ color: "#374151" }}>{product.name}</span>
+          <span style={{ background: "linear-gradient(90deg,#7c3aed,#db2777,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", fontWeight: 700 }}>{displayTitle}</span>
         </div>
       </div>
 
       <div className="container container-wide">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3rem", paddingTop: "2rem", alignItems: "start" }}>
+        <div className="bc-order-layout">
 
-          {/* LEFT: Product / gallery image */}
+          {/* LEFT: Product image */}
           <div>
-            {/* Gray card container with padding — shows the business card fully */}
             <div
               ref={imageContainerRef}
-              style={{ position: "relative", background: "#f3f4f6", borderRadius: "16px", padding: "2rem", border: "1px solid #e5e7eb", cursor: lensPos ? "crosshair" : "default" }}
+              style={{
+                position: "relative",
+                background: "linear-gradient(135deg, #fdf4ff 0%, #fce7f3 40%, #eff6ff 100%)",
+                borderRadius: "20px",
+                padding: "2.5rem 2rem",
+                cursor: lensPos ? "crosshair" : "default",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.07)",
+              }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setLensPos(null)}
             >
-              {/* Card image with shadow, natural landscape aspect ratio */}
-              <div style={{ position: "relative", borderRadius: "8px", overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.22)" }}>
+              <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", boxShadow: "0 12px 40px rgba(0,0,0,0.22)", maxHeight: "420px" }}>
                 <img
-                  src={gallery?.previewImage ?? product.image}
-                  alt={gallery?.name ?? product.name}
-                  style={{ width: "100%", height: "auto", display: "block", transform: `scale(${zoom})`, transition: zoom === 1 ? "transform 0.2s ease" : "none", transformOrigin: lensPos ? `${lensPos.x * 100}% ${lensPos.y * 100}%` : "center center" }}
+                  src={displayImage}
+                  alt={displayTitle}
+                  style={{ width: "100%", height: "auto", maxHeight: "420px", objectFit: "contain", display: "block", transform: `scale(${zoom})`, transition: zoom === 1 ? "transform 0.2s ease" : "none", transformOrigin: lensPos ? `${lensPos.x * 100}% ${lensPos.y * 100}%` : "center center" }}
                 />
-
-                {/* Zoom lens */}
                 {lensPos && (
-                  <div style={{ position: "absolute", width: `${LENS_SIZE}px`, height: `${LENS_SIZE}px`, borderRadius: "50%", border: "2.5px solid #3b82f6", backgroundImage: `url(${gallery?.previewImage ?? product.image})`, backgroundRepeat: "no-repeat", backgroundSize: `${ZOOM_FACTOR * 100}% ${ZOOM_FACTOR * 100}%`, backgroundPosition: `${lensPos.x * 100}% ${lensPos.y * 100}%`, left: `${lensPos.x * 100}%`, top: `${lensPos.y * 100}%`, transform: "translate(-50%, -50%)", boxShadow: "0 4px 20px rgba(0,0,0,0.3), inset 0 0 0 1px rgba(255,255,255,0.4)", pointerEvents: "none", zIndex: 10 }} />
+                  <div style={{ position: "absolute", width: `${LENS_SIZE}px`, height: `${LENS_SIZE}px`, borderRadius: "50%", border: "2.5px solid rgba(124,58,237,0.6)", backgroundImage: `url(${displayImage})`, backgroundRepeat: "no-repeat", backgroundSize: `${ZOOM_FACTOR * 100}% ${ZOOM_FACTOR * 100}%`, backgroundPosition: `${lensPos.x * 100}% ${lensPos.y * 100}%`, left: `${lensPos.x * 100}%`, top: `${lensPos.y * 100}%`, transform: "translate(-50%, -50%)", boxShadow: "0 4px 20px rgba(0,0,0,0.25)", pointerEvents: "none", zIndex: 10 }} />
                 )}
               </div>
 
               {/* Zoom controls */}
-              <div style={{ position: "absolute", bottom: "12px", right: "12px", display: "flex", flexDirection: "column", gap: "4px" }}>
+              <div style={{ position: "absolute", bottom: "14px", right: "14px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 <button onClick={() => setZoom(z => Math.min(z + 0.25, 3))} style={zoomBtnStyle} aria-label="Zoom in">+</button>
                 <button onClick={() => setZoom(z => Math.max(z - 0.25, 1))} style={zoomBtnStyle} aria-label="Zoom out">−</button>
               </div>
             </div>
 
             {gallery && (
-              <div style={{ marginTop: "0.75rem", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.825rem", color: "#0891b2", fontWeight: 600 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+              <div style={{ marginTop: "0.85rem", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.825rem", fontWeight: 600, background: "linear-gradient(90deg,#7c3aed,#db2777,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                 Template: {gallery.name}
               </div>
             )}
           </div>
 
           {/* RIGHT: Product info + CTAs */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
 
-            <div>
-              <h1 style={{ margin: "0 0 0.4rem", fontSize: "1.6rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-                {product.name}
+            {/* Title + description */}
+            <div style={{ paddingBottom: "1.25rem" }}>
+              <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+                {displayTitle}
               </h1>
               <p style={{ margin: 0, fontSize: "0.95rem", color: "#6b7280", lineHeight: 1.6 }}>{product.description}</p>
             </div>
 
             {/* Price */}
-            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "1rem" }}>
-              <p style={{ margin: "0 0 4px", fontSize: "0.875rem", color: "#6b7280" }}>Starting from</p>
-              <div style={{ fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>
-                {product.startingPrice}
+            <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0" }}>
+              <p style={{ margin: "0 0 6px", fontSize: "0.8rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Starting from</p>
+              <div style={{ fontSize: "2.25rem", fontWeight: 800, letterSpacing: "-0.03em", background: "linear-gradient(90deg,#7c3aed,#db2777,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", lineHeight: 1 }}>
+                {displayPrice}
               </div>
-              <div style={{ fontSize: "0.875rem", color: "#6b7280", marginTop: "2px" }}>per set · No setup fee</div>
+              <div style={{ fontSize: "0.875rem", color: "#9ca3af", marginTop: "5px" }}>{displayPriceNote}</div>
             </div>
 
             {/* Specs */}
-            {product.specs.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", borderTop: "1px solid #f3f4f6", paddingTop: "1rem" }}>
-                {product.specs.map((s) => (
-                  <div key={s.label} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.875rem" }}>
-                    <span style={{ color: "#6b7280" }}>{s.label}</span>
-                    <span style={{ color: "#111827", fontWeight: 600 }}>{s.value}</span>
+            {displaySpecs.length > 0 && (
+              <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                {displaySpecs.map((s) => (
+                  <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.875rem" }}>
+                    <span style={{ color: "#9ca3af" }}>{s.label}</span>
+                    <span style={{ color: "#111827", fontWeight: 700 }}>{s.value}</span>
                   </div>
                 ))}
               </div>
             )}
 
             {/* CTA Buttons */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "1px solid #f3f4f6", paddingTop: "1rem" }}>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "1.25rem", display: "flex", flexDirection: "column", gap: "12px" }}>
 
-              {/* Browse templates — shown when not on a gallery page */}
+              {/* Browse templates */}
               {!galleryId && (
                 <Link
-                  href={`/products/business-cards/${product.slug}/templates`}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", width: "100%", padding: "0.875rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "10px", fontSize: "1rem", fontWeight: 700, cursor: "pointer", textDecoration: "none" }}
+                  href={`${basePath}/${product.slug}/templates`}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", width: "100%", padding: "0.95rem", background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)", color: "#fff", border: "none", borderRadius: "12px", fontSize: "1rem", fontWeight: 700, cursor: "pointer", textDecoration: "none", boxShadow: "0 4px 16px rgba(124,58,237,0.35)" }}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
                   Browse Templates
                 </Link>
               )}
 
-              {/* Browse designs — shown once templates are loaded */}
+              {/* Browse designs */}
               {!loadingGallery && hasDesigns && (
                 <button
                   onClick={openDesignsModal}
-                  style={{ width: "100%", padding: "0.875rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "10px", fontSize: "1rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                  style={{ width: "100%", padding: "0.95rem", background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)", color: "#fff", border: "none", borderRadius: "12px", fontSize: "1rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", boxShadow: "0 4px 16px rgba(124,58,237,0.35)" }}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
@@ -236,7 +400,7 @@ export default function BusinessCardOrderClient({ product, galleryId }: Props) {
               {/* Upload design */}
               <button
                 onClick={openUploadDesign}
-                style={{ width: "100%", padding: "0.875rem", background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: "10px", fontSize: "1rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                style={{ width: "100%", padding: "0.95rem", background: "#fff", color: "#374151", border: "2px solid transparent", borderRadius: "12px", fontSize: "1rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", backgroundClip: "padding-box", boxShadow: "inset 0 0 0 2px #e5e7eb", position: "relative" }}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
@@ -252,61 +416,61 @@ export default function BusinessCardOrderClient({ product, galleryId }: Props) {
     {/* Designs Modal */}
     {designsModalOpen && (
       <div
-        style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+        style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(15,15,25,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(4px)" }}
         onClick={(e) => { if (e.target === e.currentTarget) setDesignsModalOpen(false); }}
       >
-        <div style={{ background: "#fff", borderRadius: "20px", width: "min(1000px,100%)", maxHeight: "92vh", overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column" }}>
+        <div style={{ background: "#fff", borderRadius: "24px", width: "min(1080px,100%)", maxHeight: "92vh", overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
 
           {/* Modal header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.25rem 1.5rem", borderBottom: "1px solid #f3f4f6", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.5rem 1.75rem 1.25rem", flexShrink: 0 }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 800, color: "#111827" }}>Choose a design</h2>
-              <p style={{ margin: "2px 0 0", fontSize: "0.825rem", color: "#6b7280" }}>
+              <h2 style={{ margin: "0 0 3px", fontSize: "1.4rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>Choose a design</h2>
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "#9ca3af" }}>
                 {filteredDesigns.length} design{filteredDesigns.length !== 1 ? "s" : ""} available
                 {designSearch ? ` for "${designSearch}"` : ""}
               </p>
             </div>
             <button
               onClick={() => setDesignsModalOpen(false)}
-              style={{ width: 32, height: 32, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "1.1rem", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}
+              style={{ width: 36, height: 36, border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "#fff", cursor: "pointer", fontSize: "1rem", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}
             >✕</button>
           </div>
 
           {/* Search bar */}
-          <div style={{ padding: "0.85rem 1.5rem", borderBottom: "1px solid #f3f4f6", flexShrink: 0 }}>
+          <div style={{ padding: "0 1.75rem 1.25rem", flexShrink: 0 }}>
             <div style={{ position: "relative" }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"
-                style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"
+                style={{ position: "absolute", left: "1rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
               <input
                 type="text"
-                placeholder="Search designs…"
+                placeholder="Search designs..."
                 value={designSearch}
                 onChange={(e) => { setDesignSearch(e.target.value); setDesignPage(1); }}
-                style={{ width: "100%", padding: "0.55rem 0.75rem 0.55rem 2.25rem", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "0.875rem", outline: "none", boxSizing: "border-box", color: "#111827" }}
+                style={{ width: "100%", padding: "0.7rem 1rem 0.7rem 2.6rem", border: "1.5px solid #e5e7eb", borderRadius: "999px", fontSize: "0.9rem", outline: "none", boxSizing: "border-box", color: "#111827", background: "#fafafa" }}
               />
             </div>
           </div>
 
           {/* Design grid */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "1.5rem" }}>
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 1.75rem 1.5rem" }}>
             {pagedDesigns.length === 0 ? (
-              <p style={{ color: "#9ca3af", fontSize: "0.9rem", textAlign: "center", padding: "2rem" }}>
+              <p style={{ color: "#9ca3af", fontSize: "0.9rem", textAlign: "center", padding: "3rem" }}>
                 {designSearch ? `No designs found for "${designSearch}"` : "No designs available yet."}
               </p>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "1.25rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: "1.25rem" }}>
                 {pagedDesigns.map((d) => (
-                  <DesignCard key={d.id} design={d} price={product.startingPrice} onSelect={() => selectDesign(d)} />
+                  <DesignCard key={d.id} design={d} price={displayPrice} galleryName={gallery?.name} onSelect={() => selectDesign(d)} />
                 ))}
               </div>
             )}
           </div>
 
           {/* Pagination footer */}
-          <div style={{ padding: "0.9rem 1.5rem", borderTop: "1px solid #f3f4f6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.825rem", color: "#6b7280" }}>
+          <div style={{ padding: "1rem 1.75rem", borderTop: "1px solid #f3f4f6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "0.825rem", color: "#9ca3af", fontWeight: 500 }}>
               Page {designPage} of {totalDesignPages} · {filteredDesigns.length} design{filteredDesigns.length !== 1 ? "s" : ""}
             </span>
             <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
@@ -346,12 +510,16 @@ function PageBtn({ label, active = false, disabled, onClick }: { label: string; 
       onClick={onClick}
       disabled={disabled}
       style={{
-        padding: "0.35rem 0.75rem", borderRadius: "7px",
-        border: active ? "2px solid #06b6d4" : "1px solid #e5e7eb",
-        background: active ? "#06b6d4" : "#fff",
+        width: 36, height: 36,
+        borderRadius: "10px",
+        border: active ? "none" : "1.5px solid #e5e7eb",
+        background: active ? "linear-gradient(135deg,#7c3aed,#db2777,#f97316)" : "#fff",
         color: active ? "#fff" : disabled ? "#d1d5db" : "#374151",
-        fontSize: "0.825rem", fontWeight: active ? 700 : 500,
+        fontSize: "0.85rem", fontWeight: active ? 700 : 500,
         cursor: disabled ? "not-allowed" : "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.15s",
+        flexShrink: 0,
       }}
     >
       {label}
@@ -361,30 +529,296 @@ function PageBtn({ label, active = false, disabled, onClick }: { label: string; 
 
 // ─── Design Card ─────────────────────────────────────────────────────────────
 
-function DesignCard({ design, price, onSelect }: { design: DesignTemplateItem; price: string; onSelect: () => void }) {
+const BC_PREVIEW_DIMS             = { CW: 460,  CH: 270,  PX: 30, PY: 25 };
+const FLYER_EXPRESS_PREVIEW_DIMS  = { CW: 460,  CH: 297,  PX: 20, PY: 15 };
+const FLYER_PRIME_PREVIEW_DIMS    = { CW: 1700, CH: 1098, PX: 20, PY: 20 };
+const PREVIEW_MAX_PX = 280;
+
+function galleryToDims(galleryName: string | undefined): typeof BC_PREVIEW_DIMS {
+  const gn = galleryName ?? "";
+  if (gn === "Prime Flyers") return FLYER_PRIME_PREVIEW_DIMS;
+  if (gn === "Express Flyers") return FLYER_EXPRESS_PREVIEW_DIMS;
+  return BC_PREVIEW_DIMS;
+}
+
+function parseSvgViewBox(url: string): { vw: number; vh: number } | null {
+  try {
+    if (!url.startsWith("data:image/svg+xml")) return null;
+    const comma = url.indexOf(",");
+    if (comma === -1) return null;
+    const meta = url.slice(0, comma);
+    const enc  = url.slice(comma + 1);
+    const raw  = meta.includes(";base64") ? atob(enc) : decodeURIComponent(enc);
+    const m = raw.match(/viewBox\s*=\s*["']([^"']+)["']/);
+    if (!m) return null;
+    const parts = m[1].trim().split(/[\s,]+/);
+    if (parts.length < 4) return null;
+    const vw = parseFloat(parts[2]);
+    const vh = parseFloat(parts[3]);
+    return vw > 0 && vh > 0 ? { vw, vh } : null;
+  } catch { return null; }
+}
+
+function getPreviewDims(baseImage?: string) {
+  if (!baseImage) return BC_PREVIEW_DIMS;
+  const vb = parseSvgViewBox(baseImage);
+  if (!vb) return BC_PREVIEW_DIMS;
+  // If it's clearly a BC landscape ratio (roughly 1.7:1), use BC dims
+  const ratio = vb.vw / vb.vh;
+  if (ratio > 1.5 && ratio < 2.0) return BC_PREVIEW_DIMS;
+  // Otherwise it's a sticker/label — scale to PREVIEW_MAX_PX, no offset
+  const scale = PREVIEW_MAX_PX / Math.max(vb.vw, vb.vh);
+  return { CW: Math.round(vb.vw * scale), CH: Math.round(vb.vh * scale), PX: 0, PY: 0 };
+}
+
+function loadPreviewImg(src: string): Promise<HTMLImageElement> {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error("img load failed"));
+    img.src = src;
+  });
+}
+
+// Draws gray placeholder rect + camera icon + "Upload Photo" — mirrors generateItemsPNG in the editor.
+async function drawPhotoPlaceholder(
+  ctx: CanvasRenderingContext2D,
+  ix: number, iy: number, iw: number, ih: number,
+) {
+  ctx.fillStyle = "rgba(148,163,184,0.7)";
+  ctx.fillRect(ix, iy, iw, ih);
+
+  const iconPx = Math.min(iw, ih) * 0.28;
+  const cx = ix + iw / 2;
+  const cy = iy + ih / 2 - iconPx * 0.2;
+
+  const camSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${iconPx}" height="${iconPx}" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.6"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
+  try {
+    const camImg = await loadPreviewImg("data:image/svg+xml;charset=utf-8," + encodeURIComponent(camSvg));
+    ctx.drawImage(camImg, cx - iconPx / 2, cy - iconPx / 2, iconPx, iconPx);
+  } catch { /* skip icon */ }
+
+  const fontSize = Math.max(8, Math.min(iw * 0.1, 14));
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.font = `700 ${fontSize}px Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("Upload Photo", cx, cy + iconPx * 0.7 + fontSize);
+}
+
+// For designs with no frontAdminItems: parse SVG for data-placeholder="photo" rects and
+// draw camera icons on top so the thumbnail matches the 2D editor view.
+async function buildSvgWithPlaceholders(svgUrl: string): Promise<string> {
+  if (!svgUrl.startsWith("data:image/svg+xml")) return "";
+  const comma = svgUrl.indexOf(",");
+  if (comma === -1) return "";
+  const meta = svgUrl.slice(0, comma);
+  const enc  = svgUrl.slice(comma + 1);
+  const raw  = meta.includes(";base64") ? atob(enc) : decodeURIComponent(enc);
+
+  const doc = new DOMParser().parseFromString(raw, "image/svg+xml");
+  const svg = doc.querySelector("svg");
+  if (!svg) return "";
+
+  const placeholderEls = Array.from(svg.querySelectorAll('rect[data-placeholder="photo"]'));
+  if (placeholderEls.length === 0) return "";
+
+  // Derive canvas size from SVG viewBox (capped at 460px wide for card display)
+  const vbAttr = svg.getAttribute("viewBox");
+  let vw = parseFloat(svg.getAttribute("width") ?? "460");
+  let vh = parseFloat(svg.getAttribute("height") ?? "297");
+  if (vbAttr) {
+    const parts = vbAttr.trim().split(/[\s,]+/);
+    if (parts.length >= 4) { vw = parseFloat(parts[2]); vh = parseFloat(parts[3]); }
+  }
+  const scale = Math.min(1, 460 / vw);
+  const CW = Math.round(vw * scale);
+  const CH = Math.round(vh * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width  = CW;
+  canvas.height = CH;
+  const ctx = canvas.getContext("2d")!;
+
+  // Draw the full SVG template
+  try {
+    const svgImg = await loadPreviewImg(svgUrl);
+    ctx.drawImage(svgImg, 0, 0, CW, CH);
+  } catch { return ""; }
+
+  // Overlay camera icon on each placeholder rect
+  for (const el of placeholderEls) {
+    const x = parseFloat(el.getAttribute("x")      ?? "0") * scale;
+    const y = parseFloat(el.getAttribute("y")      ?? "0") * scale;
+    const w = parseFloat(el.getAttribute("width")  ?? "0") * scale;
+    const h = parseFloat(el.getAttribute("height") ?? "0") * scale;
+    if (w < 4 || h < 4) continue;
+    await drawPhotoPlaceholder(ctx, x, y, w, h);
+  }
+
+  return canvas.toDataURL("image/png");
+}
+
+async function buildDesignPreview(
+  items: SerializableItem[],
+  bgColor: string,
+  baseImage?: string,
+  dims?: { CW: number; CH: number; PX: number; PY: number }
+): Promise<string> {
+  const { CW, CH, PX, PY } = dims ?? BC_PREVIEW_DIMS;
+  const canvas = document.createElement("canvas");
+  canvas.width = CW;
+  canvas.height = CH;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, CW, CH);
+  if (baseImage) {
+    try {
+      const svgImg = await loadPreviewImg(baseImage);
+      ctx.drawImage(svgImg, 0, 0, CW, CH);
+    } catch { /* skip */ }
+  }
+
+  for (const rawItem of items) {
+    const item = rawItem as SerializableItem & { shape?: string; italic?: boolean; bold?: boolean; effect?: string; rotation?: number };
+    if (item.kind === "text") {
+      const text  = item.text ?? "";
+      const font  = item.font ?? "Arial";
+      const size  = item.size ?? 16;
+      const color = item.color ?? "#000000";
+      const bold  = item.bold ?? false;
+      const italic = item.italic ?? false;
+      const align = item.align ?? "left";
+      const shape = item.shape ?? "none";
+
+      if (shape === "curve") {
+        const w = item.w;
+        const r = w * 0.7;
+        const h = r - Math.sqrt(r * r - (w / 2) * (w / 2));
+        const svgH = Math.max(h + size + 8, size + 12);
+        const pathId = `cp-${item.id}`;
+        const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${svgH}"><defs><path id="${pathId}" d="M 0 ${r} Q ${w / 2} 0 ${w} ${r}"/></defs><text font-family="${font}" font-size="${size}" font-weight="${bold ? 700 : 400}" font-style="${italic ? "italic" : "normal"}" fill="${color}"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escaped}</textPath></text></svg>`;
+        try {
+          const svgImg = await loadPreviewImg(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`);
+          ctx.drawImage(svgImg, PX + item.x, PY + item.y, w, svgH);
+        } catch { /* skip */ }
+        continue;
+      }
+
+      ctx.save();
+      if (item.rotation) {
+        const cx = PX + item.x + item.w / 2;
+        const cy = PY + item.y + size / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate((item.rotation * Math.PI) / 180);
+        ctx.translate(-cx, -cy);
+      }
+      ctx.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${font}`;
+      ctx.textAlign = align as CanvasTextAlign;
+      const tx = align === "center" ? PX + item.x + item.w / 2
+               : align === "right"  ? PX + item.x + item.w
+               : PX + item.x;
+      const ty = PY + item.y + size;
+      ctx.fillStyle = color;
+      ctx.fillText(text, tx, ty);
+      ctx.restore();
+    } else if (item.kind === "image") {
+      const ix = PX + item.x;
+      const iy = PY + item.y;
+      const iw = item.w;
+      const ih = item.h ?? item.w;
+      if (item.src) {
+        try {
+          const img = await loadPreviewImg(item.src);
+          ctx.save();
+          if (item.rotation) {
+            const cx = ix + iw / 2;
+            const cy = iy + ih / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate((item.rotation * Math.PI) / 180);
+            ctx.translate(-cx, -cy);
+          }
+          ctx.drawImage(img, ix, iy, iw, ih);
+          ctx.restore();
+        } catch { /* skip */ }
+      } else {
+        // Photo placeholder — same render as the 2D editor
+        await drawPhotoPlaceholder(ctx, ix, iy, iw, ih);
+      }
+    }
+  }
+  return canvas.toDataURL("image/png");
+}
+
+function DesignCard({ design, price, galleryName, onSelect }: { design: DesignTemplateItem; price: string; galleryName?: string; onSelect: () => void }) {
   const [hovered, setHovered] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const dotColor = design.frontBgColor && design.frontBgColor !== "#ffffff" ? design.frontBgColor : "#111827";
+
+  useEffect(() => {
+    // If a pre-rendered overlay PNG exists, use frontImage + frontOverlay directly.
+    if (design.frontOverlay) return;
+    let cancelled = false;
+
+    if (design.frontAdminItems?.length) {
+      // Build canvas from stored admin items (includes photo placeholders with camera icon).
+      const dims = galleryToDims(galleryName) ?? getPreviewDims(design.frontImage);
+      buildDesignPreview(
+        design.frontAdminItems,
+        design.frontBgColor ?? "#ffffff",
+        design.frontImage,
+        dims,
+      ).then((src) => { if (!cancelled) setPreviewSrc(src); }).catch(() => {});
+    } else if (design.frontImage) {
+      // No admin items: parse the SVG for data-placeholder="photo" rects and
+      // overlay camera icons so the thumbnail matches the 2D editor view.
+      buildSvgWithPlaceholders(design.frontImage)
+        .then((src) => { if (!cancelled && src) setPreviewSrc(src); }).catch(() => {});
+    }
+
+    return () => { cancelled = true; };
+  }, [design.frontAdminItems, design.frontBgColor, design.frontImage, design.frontOverlay, galleryName]);
 
   return (
     <div
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ cursor: "pointer", borderRadius: "14px", border: `2px solid ${hovered ? "#06b6d4" : "#e5e7eb"}`, transition: "border-color 0.15s, box-shadow 0.15s", boxShadow: hovered ? "0 6px 20px rgba(0,0,0,0.1)" : "none", overflow: "hidden", background: "#fff" }}
+      style={{
+        cursor: "pointer",
+        borderRadius: "16px",
+        border: `2px solid ${hovered ? "#06b6d4" : "rgba(0,0,0,0.07)"}`,
+        transition: "border-color 0.15s, box-shadow 0.15s, transform 0.15s",
+        boxShadow: hovered ? "0 8px 28px rgba(0,0,0,0.12)" : "0 2px 8px rgba(0,0,0,0.05)",
+        transform: hovered ? "translateY(-2px)" : "translateY(0)",
+        overflow: "hidden",
+        background: "#fff",
+      }}
     >
-      {/* Gray padded area with landscape card + shadow */}
-      <div style={{ background: "#f3f4f6", padding: "0.9rem 0.75rem 0.75rem" }}>
-        <div style={{ position: "relative", borderRadius: "6px", overflow: "hidden", boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>
-          <img
-            src={design.frontImage}
-            alt={design.name}
-            style={{ width: "100%", height: "auto", display: "block" }}
-          />
-          {design.frontOverlay && (
-            <img src={design.frontOverlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />
+      {/* Image area */}
+      <div style={{ background: "#f4f4f6", padding: "0.85rem 0.75rem 0.75rem", position: "relative" }}>
+        <div style={{ position: "relative", borderRadius: "8px", overflow: "hidden", boxShadow: "0 4px 18px rgba(0,0,0,0.2)" }}>
+          {previewSrc ? (
+            <img
+              src={previewSrc}
+              alt={design.name}
+              style={{ width: "100%", height: "auto", display: "block", transition: "transform 0.3s ease", transform: hovered ? "scale(1.03)" : "scale(1)" }}
+            />
+          ) : (
+            <>
+              <img
+                src={design.frontImage}
+                alt={design.name}
+                style={{ width: "100%", height: "auto", display: "block", transition: "transform 0.3s ease", transform: hovered ? "scale(1.03)" : "scale(1)" }}
+              />
+              {design.frontOverlay && (
+                <img src={design.frontOverlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />
+              )}
+            </>
           )}
           {hovered && (
-            <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ background: "#06b6d4", color: "#fff", padding: "0.4rem 1rem", borderRadius: "999px", fontWeight: 700, fontSize: "0.8rem" }}>
+            <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)", color: "#fff", padding: "0.45rem 1.2rem", borderRadius: "999px", fontWeight: 700, fontSize: "0.82rem", boxShadow: "0 4px 14px rgba(124,58,237,0.4)" }}>
                 Select →
               </span>
             </div>

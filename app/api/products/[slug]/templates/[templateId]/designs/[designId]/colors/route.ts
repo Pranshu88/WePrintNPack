@@ -20,7 +20,7 @@ export async function POST(
     return NextResponse.json({ error: "colorHex, colorName and frontImage are required." }, { status: 400 });
   }
 
-  const design = addDesignColor(templateId, designId, { colorHex, colorName, frontImage, frontOverlay, backImage, backOverlay, frontAdminItems, backAdminItems });
+  const design = await addDesignColor(templateId, designId, { colorHex, colorName, frontImage, frontOverlay, backImage, backOverlay, frontAdminItems, backAdminItems });
   if (!design) {
     return NextResponse.json({ error: "Design not found." }, { status: 404 });
   }

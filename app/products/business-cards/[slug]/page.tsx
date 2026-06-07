@@ -15,7 +15,7 @@ export default async function BusinessCardDetailPage({
   const { gallery } = await searchParams;
   const product = getProductBySlug(slug);
 
-  if (!product || product.category !== "business-cards") notFound();
+  if (!product || (product.category !== "business-cards" && product.category !== "flyers")) notFound();
 
   return <BusinessCardOrderClient product={product} galleryId={gallery ?? null} />;
 }

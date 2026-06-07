@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string; templateId: string }> }
 ) {
   const { templateId } = await params;
-  const template = getGalleryTemplate(templateId);
+  const template = await getGalleryTemplate(templateId);
   if (!template) {
     return NextResponse.json({ error: "Template not found." }, { status: 404 });
   }
@@ -19,11 +19,13 @@ export async function PATCH(
 ) {
   const { templateId } = await params;
   const body = (await req.json()) as Record<string, unknown>;
-  const updates: { name?: string; previewImage?: string } = {};
+  const updates: { name?: string; previewImage?: string; price?: string; specs?: string[] } = {};
   if (typeof body.name === "string") updates.name = body.name.trim();
   if (typeof body.previewImage === "string") updates.previewImage = body.previewImage;
+  if (typeof body.price === "string") updates.price = body.price;
+  if (Array.isArray(body.specs)) updates.specs = (body.specs as unknown[]).filter((s) => typeof s === "string") as string[];
 
-  const template = updateGalleryTemplate(templateId, updates);
+  const template = await updateGalleryTemplate(templateId, updates);
   if (!template) {
     return NextResponse.json({ error: "Template not found." }, { status: 404 });
   }
@@ -35,7 +37,7 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string; templateId: string }> }
 ) {
   const { templateId } = await params;
-  const deleted = deleteGalleryTemplate(templateId);
+  const deleted = await deleteGalleryTemplate(templateId);
   if (!deleted) {
     return NextResponse.json({ error: "Template not found." }, { status: 404 });
   }

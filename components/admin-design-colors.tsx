@@ -26,7 +26,7 @@ async function readFile(file: File): Promise<string> {
   });
 }
 
-function DesignThumb({ base, overlay, label }: { base?: string; overlay?: string; label: string }) {
+function DesignThumb({ base, overlay, label, multiplyOverlay }: { base?: string; overlay?: string; label: string; multiplyOverlay?: boolean }) {
   if (!base) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase" }}>{label}</span>
@@ -37,8 +37,8 @@ function DesignThumb({ base, overlay, label }: { base?: string; overlay?: string
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#6b7280", textTransform: "uppercase" }}>{label}</span>
       <div style={{ width: 72, height: 56, borderRadius: 6, overflow: "hidden", border: "1px solid #e5e7eb", position: "relative" }}>
-        <img src={base} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-        {overlay && <img src={overlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />}
+        <img src={base} alt="" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+        {overlay && <img src={overlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", mixBlendMode: multiplyOverlay ? "multiply" : "normal" }} />}
       </div>
     </div>
   );
@@ -174,7 +174,7 @@ export default function AdminDesignColors({ productSlug, galleryId, designId }: 
           <p style={{ margin: 0, fontSize: "0.85rem", color: "#6b7280" }}>Color variants for this design</p>
         </div>
         <button type="button" onClick={openAddColor}
-          style={{ padding: "0.6rem 1.15rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer", flexShrink: 0 }}>
+          style={{ padding: "0.6rem 1.15rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer", flexShrink: 0 }}>
           + Add Color Variant
         </button>
       </div>
@@ -202,7 +202,7 @@ export default function AdminDesignColors({ productSlug, galleryId, designId }: 
         <div style={{ textAlign: "center", padding: "3rem 1rem", color: "#9ca3af", border: "2px dashed #e5e7eb", borderRadius: "12px" }}>
           <p style={{ margin: "0 0 0.75rem", fontSize: "0.95rem" }}>No color variants yet.</p>
           <button onClick={openAddColor}
-            style={{ padding: "0.55rem 1.1rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
+            style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
             + Add Color Variant
           </button>
         </div>
@@ -227,11 +227,11 @@ export default function AdminDesignColors({ productSlug, galleryId, designId }: 
                 </div>
               </div>
 
-              {/* Front — color's base image + design template overlay */}
-              <DesignThumb base={v.frontImage} overlay={design?.frontOverlay} label="Front" />
+              {/* Front — multiply blend makes the white shirt in the overlay transparent, revealing the variant base */}
+              <DesignThumb base={v.frontImage} overlay={v.frontOverlay ?? design?.frontOverlay} label="Front" multiplyOverlay />
 
-              {/* Back — color's base image + design template overlay */}
-              <DesignThumb base={v.backImage} overlay={design?.backOverlay} label="Back" />
+              {/* Back — same multiply blend trick */}
+              <DesignThumb base={v.backImage} overlay={v.backOverlay ?? design?.backOverlay} label="Back" multiplyOverlay />
 
               {/* Actions */}
               <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flexShrink: 0 }}>
@@ -325,7 +325,7 @@ export default function AdminDesignColors({ productSlug, galleryId, designId }: 
             {/* Actions */}
             <div style={{ display: "flex", gap: "0.75rem", paddingTop: "0.25rem" }}>
               <button onClick={() => void saveColor()} disabled={saving}
-                style={{ padding: "0.65rem 1.4rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}>
+                style={{ padding: "0.65rem 1.4rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}>
                 {saving ? "Saving…" : editingColorId ? "Update Color" : "+ Add Color"}
               </button>
               <button onClick={clearForm}

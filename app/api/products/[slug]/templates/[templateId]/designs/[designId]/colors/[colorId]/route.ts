@@ -26,7 +26,7 @@ export async function PATCH(
   if (Array.isArray(body.frontAdminItems)) updates.frontAdminItems = body.frontAdminItems as SerializableItem[];
   if (Array.isArray(body.backAdminItems)) updates.backAdminItems = body.backAdminItems as SerializableItem[];
 
-  const design = updateDesignColor(templateId, designId, colorId, updates);
+  const design = await updateDesignColor(templateId, designId, colorId, updates);
   if (!design) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -38,7 +38,7 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string; templateId: string; designId: string; colorId: string }> }
 ) {
   const { templateId, designId, colorId } = await params;
-  const deleted = deleteDesignColor(templateId, designId, colorId);
+  const deleted = await deleteDesignColor(templateId, designId, colorId);
   if (!deleted) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }

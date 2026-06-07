@@ -191,12 +191,14 @@ export default function DesignTemplatesModal({ shirt, galleryId, selectedColor, 
     return matchCat && matchSearch;
   });
 
-  function PriceInfo() {
+  function PriceInfo({ center = false }: { center?: boolean }) {
+    const galleryPrice = activeGallery?.price?.trim();
+    const displayPrice = galleryPrice
+      ? (/[$+]/.test(galleryPrice) ? galleryPrice : `$${galleryPrice} + tax`)
+      : `₹${pricePerUnit.toLocaleString("en-IN")}.00`;
     return (
-      <div style={{ padding: "6px 2px 0" }}>
-        <p style={{ margin: "0 0 1px", fontSize: "0.875rem", fontWeight: 700, color: "#111827" }}>₹{pricePerUnit.toLocaleString("en-IN")}.00</p>
-        <p style={{ margin: "0 0 1px", fontSize: "0.75rem", color: "#6b7280" }}>1 unit</p>
-        <p style={{ margin: 0, fontSize: "0.75rem", color: "#6b7280" }}>No setup fee</p>
+      <div style={{ padding: "6px 2px 0", textAlign: center ? "center" : "left" }}>
+        <p style={{ margin: 0, fontSize: "0.875rem", fontWeight: 700, color: "#111827" }}>{displayPrice}</p>
       </div>
     );
   }
@@ -292,11 +294,14 @@ export default function DesignTemplatesModal({ shirt, galleryId, selectedColor, 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "200px", color: "#9ca3af", fontSize: "0.9rem" }}>Loading templates…</div>
           ) : view === "designs" && activeGallery ? (
             /* ══ DESIGN TEMPLATES VIEW ══ */
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "1rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "1rem" }}>
               {activeGallery.designs.length === 0 ? (
                 <p style={{ color: "#9ca3af", fontSize: "0.875rem", gridColumn: "1/-1" }}>No design templates added yet for this gallery template.</p>
               ) : activeGallery.designs.map((d) => {
                 const activeDesignColor = designColors[d.id] ?? selectedColor?.hex ?? shirt.colors[0]?.hex ?? "#111827";
+
+                const baseImgSrc = d.frontImage || shirtImage;
+                const overlaySrc = d.frontOverlay;
 
                 return (
                   <div key={d.id}>
@@ -306,35 +311,10 @@ export default function DesignTemplatesModal({ shirt, galleryId, selectedColor, 
                       onLeave={() => setHoveredId(null)}
                       onClick={() => onSelectTemplate(d.id, activeDesignColor)}
                     >
-                      {/* Layer 1 — base image (shirt/product), never modified */}
-                      <img src={d.frontImage} alt={d.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
+                      <img src={baseImgSrc} alt={d.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
 
-                      {d.frontOverlay && (
-                        activeDesignColor ? (
-                          /*
-                           * Color selected: render a solid-color div whose visibility is
-                           * masked by the overlay PNG's alpha channel.
-                           * Result: only the non-transparent pixels (text / logo) take on
-                           * the chosen color — the base image is never touched.
-                           */
-                          <div
-                            style={{
-                              position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none",
-                              background: activeDesignColor,
-                              WebkitMaskImage: `url(${d.frontOverlay})`,
-                              maskImage: `url(${d.frontOverlay})`,
-                              WebkitMaskSize: "contain",
-                              maskSize: "contain",
-                              WebkitMaskRepeat: "no-repeat",
-                              maskRepeat: "no-repeat",
-                              WebkitMaskPosition: "center",
-                              maskPosition: "center",
-                            } as React.CSSProperties}
-                          />
-                        ) : (
-                          /* No color yet: show overlay in its original colours */
-                          <img src={d.frontOverlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", pointerEvents: "none", zIndex: 1 }} />
-                        )
+                      {overlaySrc && (
+                        <img src={overlaySrc} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", pointerEvents: "none", zIndex: 1 }} />
                       )}
 
                       {hoveredId === d.id && (
@@ -343,34 +323,8 @@ export default function DesignTemplatesModal({ shirt, galleryId, selectedColor, 
                         </div>
                       )}
                     </CardShell>
-                    <div style={{ padding: "6px 2px 0" }}>
-                      <p style={{ margin: "0 0 2px", fontSize: "0.8rem", fontWeight: 600, color: "#111827" }}>{d.name}</p>
-                      <div style={{ display: "flex", gap: "5px", padding: "5px 0 3px", flexWrap: "wrap" }}>
-                        {PRINT_COLORS.map((c) => (
-                          <button
-                            key={c.hex}
-                            title={c.name}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDesignColors((prev) => ({ ...prev, [d.id]: c.hex }));
-                            }}
-                            style={{
-                              width: 18,
-                              height: 18,
-                              borderRadius: "50%",
-                              background: c.hex,
-                              border: `2px solid ${activeDesignColor === c.hex ? "#06b6d4" : "#d1d5db"}`,
-                              boxShadow: activeDesignColor === c.hex ? "0 0 0 2px #cffafe" : "none",
-                              cursor: "pointer",
-                              padding: 0,
-                              outline: "none",
-                              flexShrink: 0,
-                              transition: "border-color 0.12s, box-shadow 0.12s",
-                            }}
-                          />
-                        ))}
-                      </div>
-                      <PriceInfo />
+                    <div style={{ padding: "6px 2px 0", textAlign: "center" }}>
+                      <PriceInfo center />
                     </div>
                   </div>
                 );

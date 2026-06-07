@@ -21,6 +21,10 @@ export type ShirtProduct = {
   isNew?: boolean;
   technologies: string[];
   quantities: Array<{ qty: number; pricePerUnit: number }>;
+  category?: string;
+  categoryName?: string;
+  startingPrice?: string;
+  specs?: Array<{ label: string; value: string }>;
 };
 
 export type DesignTemplate = {

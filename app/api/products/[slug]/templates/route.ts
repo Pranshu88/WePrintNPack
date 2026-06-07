@@ -11,16 +11,14 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const rawPage = searchParams.get("page");
 
-  // When no ?page= param, return all templates (used by admin + order clients)
   if (rawPage === null) {
-    const templates = getGalleryTemplates(slug);
+    const templates = await getGalleryTemplates(slug);
     return NextResponse.json({ templates });
   }
 
-  // With ?page=, return paginated response (used by customer gallery)
   const page = Math.max(1, parseInt(rawPage, 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10)));
-  const result = getGalleryTemplatesPaginated(slug, page, limit);
+  const result = await getGalleryTemplatesPaginated(slug, page, limit);
   return NextResponse.json(result);
 }
 
@@ -37,6 +35,6 @@ export async function POST(
     return NextResponse.json({ error: "name and previewImage are required." }, { status: 400 });
   }
 
-  const template = createGalleryTemplate(slug, name, previewImage);
+  const template = await createGalleryTemplate(slug, name, previewImage);
   return NextResponse.json({ template }, { status: 201 });
 }
