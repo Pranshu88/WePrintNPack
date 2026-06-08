@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type CartItem = {
@@ -12,7 +12,38 @@ type CartItem = {
   thumb?: string;
   frontPreview?: string;
   doubleSided?: boolean;
+  previewBoxColor?: string;
+  boxFaceImages?: { front?: string; right?: string; top?: string };
+  previewW?: number;
+  previewH?: number;
+  previewD?: number;
 };
+
+function SimpleCube3D({ bg, faceImages, previewW = 1, previewH = 1, previewD = 1 }: { bg: string; faceImages?: { front?: string; right?: string; top?: string }; previewW?: number; previewH?: number; previewD?: number }) {
+  const MAX = 60;
+  const sc = MAX / Math.max(previewW, previewH, previewD);
+  const fw = previewW * sc, fh = previewH * sc;
+  const fd = Math.max(previewD * sc, 15);
+  const face = (w: number, h: number, imgSrc: string | undefined, transform: string): React.CSSProperties => ({
+    position: "absolute", width: w, height: h,
+    left: (fw - w) / 2, top: (fh - h) / 2,
+    background: imgSrc ? `url("${imgSrc}") center/cover no-repeat` : bg,
+    border: "1px solid rgba(0,0,0,0.13)",
+    backfaceVisibility: "hidden", boxSizing: "border-box", transform,
+  });
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", perspective: 300 }}>
+      <div style={{ position: "relative", width: fw, height: fh, transformStyle: "preserve-3d", transform: "rotateX(-30deg) rotateY(30deg)" }}>
+        <div style={face(fw, fh, faceImages?.front, `translateZ(${fd/2}px)`)} />
+        <div style={face(fw, fh, faceImages?.front, `rotateY(180deg) translateZ(${fd/2}px)`)} />
+        <div style={face(fd, fh, faceImages?.right, `rotateY(-90deg) translateZ(${fw/2}px)`)} />
+        <div style={face(fd, fh, faceImages?.right, `rotateY(90deg) translateZ(${fw/2}px)`)} />
+        <div style={face(fw, fd, faceImages?.top,   `rotateX(-90deg) translateZ(${fh/2}px)`)} />
+        <div style={face(fw, fd, faceImages?.top,   `rotateX(90deg) translateZ(${fh/2}px)`)} />
+      </div>
+    </div>
+  );
+}
 
 type User = { id: string; firstName: string; lastName: string; email: string };
 
@@ -175,15 +206,17 @@ export default function CartPage() {
                     position: "relative", overflow: "hidden",
                     minHeight: 160,
                   }}>
-                    {/* Thumbnail — flush top/left/bottom */}
+                    {/* Thumbnail */}
                     <div style={{
                       width: 160, flexShrink: 0,
                       background: "transparent",
                       position: "relative", overflow: "hidden",
                     }}>
-                      {(item.frontPreview ?? item.thumb)
-                        ? <img src={item.frontPreview ?? item.thumb} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />
-                        : <svg style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)" }} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                      {item.boxFaceImages?.front
+                        ? <SimpleCube3D bg={item.previewBoxColor ?? "#c8a97e"} faceImages={item.boxFaceImages} previewW={item.previewW ?? 315} previewH={item.previewH ?? 202} previewD={item.previewD ?? 62} />
+                        : (item.frontPreview ?? item.thumb)
+                          ? <img src={item.frontPreview ?? item.thumb} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />
+                          : <svg style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)" }} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
                       }
                     </div>
 

@@ -88,7 +88,7 @@ type TextItem  = { id: string; kind: "text"; text: string; x: number; y: number;
 type ImageItem = { id: string; kind: "image"; src: string; x: number; y: number; w: number; h: number };
 type CanvasItem = TextItem | ImageItem;
 
-type ViewData   = { faceColors: Record<string, string>; items: Record<string, CanvasItem[]> };
+type ViewData   = { faceColors: Record<string, string>; items: Record<string, CanvasItem[]>; globalItems: CanvasItem[] };
 type EditorState = { outside: ViewData; inside: ViewData; insideColor: string };
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -113,13 +113,134 @@ const INSIDE_COLORS = [
 
 const TEXT_COLORS = ["#000000","#ffffff","#dc2626","#ea580c","#ca8a04","#16a34a","#0891b2","#1d4ed8","#7c3aed","#db2777"];
 
-const FONT_OPTIONS = [
-  { label: "Arial",   value: "Arial, sans-serif" },
-  { label: "Georgia", value: "Georgia, serif" },
-  { label: "Courier", value: "'Courier New', monospace" },
-  { label: "Impact",  value: "Impact, fantasy" },
-  { label: "Tahoma",  value: "Tahoma, sans-serif" },
-  { label: "Verdana", value: "Verdana, sans-serif" },
+const FONT_OPTIONS: { label: string; value: string; previewWeight?: number }[] = [
+  { label: "Abel",                        value: "'Abel', sans-serif" },
+  { label: "Adelle",                      value: "'Adelle', serif" },
+  { label: "Advent Pro",                  value: "'Advent Pro', sans-serif" },
+  { label: "Alegreya Black",              value: "'Alegreya', serif",                      previewWeight: 900 },
+  { label: "Alex Brush",                  value: "'Alex Brush', cursive" },
+  { label: "Allison",                     value: "'Allison', cursive" },
+  { label: "Alumni Sans",                 value: "'Alumni Sans', sans-serif" },
+  { label: "Amaranth",                    value: "'Amaranth', sans-serif",                 previewWeight: 700 },
+  { label: "Antic Slab",                  value: "'Antic Slab', serif" },
+  { label: "Archivo",                     value: "'Archivo', sans-serif" },
+  { label: "Archivo Narrow",              value: "'Archivo Narrow', sans-serif" },
+  { label: "Arimo",                       value: "'Arimo', sans-serif" },
+  { label: "Barlow Semi Condensed",       value: "'Barlow Semi Condensed', sans-serif" },
+  { label: "Bellefair",                   value: "'Bellefair', serif" },
+  { label: "Bellota",                     value: "'Bellota', cursive" },
+  { label: "Benchnine",                   value: "'BenchNine', sans-serif" },
+  { label: "Bevan",                       value: "'Bevan', serif",                         previewWeight: 700 },
+  { label: "BioRhyme Expanded",           value: "'BioRhyme Expanded', serif" },
+  { label: "Blazma",                      value: "'Blazma', sans-serif" },
+  { label: "Boogaloo",                    value: "'Boogaloo', cursive" },
+  { label: "Bowlby One",                  value: "'Bowlby One', cursive",                  previewWeight: 700 },
+  { label: "BravoSC",                     value: "'BravoSC', serif" },
+  { label: "Bree Serif",                  value: "'Bree Serif', serif" },
+  { label: "Carrois Gothic",              value: "'Carrois Gothic', sans-serif" },
+  { label: "Chomsky",                     value: "'Chomsky', fantasy" },
+  { label: "Cinzel Medium",               value: "'Cinzel', serif",                        previewWeight: 500 },
+  { label: "Comic Neue",                  value: "'Comic Neue', cursive" },
+  { label: "Cookie",                      value: "'Cookie', cursive" },
+  { label: "Corinthia",                   value: "'Corinthia', cursive" },
+  { label: "Cormorant Garamond",          value: "'Cormorant Garamond', serif" },
+  { label: "Cormorant Infant",            value: "'Cormorant Infant', serif" },
+  { label: "Cormorant SC",                value: "'Cormorant SC', serif" },
+  { label: "Crete Round",                 value: "'Crete Round', serif",                   previewWeight: 700 },
+  { label: "Crimson Pro",                 value: "'Crimson Pro', serif" },
+  { label: "Ephesis",                     value: "'Ephesis', cursive" },
+  { label: "Euphoria Script",             value: "'Euphoria Script', cursive" },
+  { label: "Fanwood Text",                value: "'Fanwood Text', serif" },
+  { label: "Fira Sans",                   value: "'Fira Sans', sans-serif" },
+  { label: "Fira Sans Extra Condensed",   value: "'Fira Sans Extra Condensed', sans-serif" },
+  { label: "Fjalla One",                  value: "'Fjalla One', sans-serif",               previewWeight: 700 },
+  { label: "Fondamento",                  value: "'Fondamento', cursive" },
+  { label: "Forum",                       value: "'Forum', cursive" },
+  { label: "Fruktur",                     value: "'Fruktur', cursive",                     previewWeight: 700 },
+  { label: "Fugaz One",                   value: "'Fugaz One', cursive" },
+  { label: "Gelasio",                     value: "'Gelasio', serif" },
+  { label: "Gilda Display",               value: "'Gilda Display', serif" },
+  { label: "Gochi Hand",                  value: "'Gochi Hand', cursive" },
+  { label: "Godia SemiCondensed",         value: "'Godia SemiCondensed', sans-serif" },
+  { label: "Grand Hotel",                 value: "'Grand Hotel', cursive" },
+  { label: "Grandstander",                value: "'Grandstander', cursive",                previewWeight: 700 },
+  { label: "Great Vibes",                 value: "'Great Vibes', cursive" },
+  { label: "Griffy",                      value: "'Griffy', cursive" },
+  { label: "Gruppo",                      value: "'Gruppo', cursive" },
+  { label: "Gwendolyn",                   value: "'Gwendolyn', cursive" },
+  { label: "Henny Penny",                 value: "'Henny Penny', cursive" },
+  { label: "Ingrid Darling",              value: "'Ingrid Darling', cursive" },
+  { label: "Irish Grover",                value: "'Irish Grover', cursive",                previewWeight: 700 },
+  { label: "Italiana",                    value: "'Italiana', serif" },
+  { label: "Josefin Sans",                value: "'Josefin Sans', sans-serif" },
+  { label: "Jost",                        value: "'Jost', sans-serif" },
+  { label: "Joti One",                    value: "'Joti One', cursive" },
+  { label: "Kalam",                       value: "'Kalam', cursive" },
+  { label: "Lato",                        value: "'Lato', sans-serif" },
+  { label: "Lobster",                     value: "'Lobster', cursive",                     previewWeight: 700 },
+  { label: "Lobster Two",                 value: "'Lobster Two', cursive",                 previewWeight: 700 },
+  { label: "Mallanna",                    value: "'Mallanna', sans-serif" },
+  { label: "Mea Culpa",                   value: "'Mea Culpa', cursive" },
+  { label: "MonteCarlo",                  value: "'MonteCarlo', cursive" },
+  { label: "Montez",                      value: "'Montez', cursive" },
+  { label: "Montserrat",                  value: "'Montserrat', sans-serif",               previewWeight: 700 },
+  { label: "Moon Dance",                  value: "'Moondance', cursive" },
+  { label: "Mr Dafoe",                    value: "'Mr Dafoe', cursive",                    previewWeight: 700 },
+  { label: "Mystery Quest",               value: "'Mystery Quest', cursive" },
+  { label: "Nunito Sans",                 value: "'Nunito Sans', sans-serif" },
+  { label: "Oleo Script Swash Caps",      value: "'Oleo Script Swash Caps', cursive",      previewWeight: 700 },
+  { label: "Open Sans",                   value: "'Open Sans', sans-serif" },
+  { label: "Pacifico",                    value: "'Pacifico', cursive",                    previewWeight: 700 },
+  { label: "Parisienne",                  value: "'Parisienne', cursive" },
+  { label: "Petit Formal Script",         value: "'Petit Formal Script', cursive" },
+  { label: "Pinyon Script",               value: "'Pinyon Script', cursive" },
+  { label: "Pirata One",                  value: "'Pirata One', cursive" },
+  { label: "Playfair Display Black",      value: "'Playfair Display', serif",              previewWeight: 900 },
+  { label: "Poiret One",                  value: "'Poiret One', cursive" },
+  { label: "QT Bookmann",                 value: "'QT Bookmann', serif" },
+  { label: "QT BrushStroke",              value: "'QT BrushStroke', cursive" },
+  { label: "QT Caslan",                   value: "'QT Caslan', serif" },
+  { label: "QT CaslanOpen",               value: "'QT CaslanOpen', serif" },
+  { label: "QT Casual",                   value: "'QT Casual', sans-serif",                previewWeight: 700 },
+  { label: "QT Graveure",                 value: "'QT Graveure', sans-serif" },
+  { label: "QT Impromptu",                value: "'QT Impromptu', sans-serif",             previewWeight: 700 },
+  { label: "QT Jupiter",                  value: "'QT Jupiter', serif",                    previewWeight: 700 },
+  { label: "QT Linoscroll",               value: "'QT Linoscroll', fantasy" },
+  { label: "QT Linostroke",               value: "'QT Linostroke', fantasy" },
+  { label: "QT Military",                 value: "'QT Military', sans-serif",              previewWeight: 700 },
+  { label: "QT OKCorral",                 value: "'QT OKCorral', cursive",                 previewWeight: 700 },
+  { label: "QT OldGoudy",                 value: "'QT OldGoudy', serif" },
+  { label: "QT VagaRound",                value: "'QT VagaRound', sans-serif" },
+  { label: "Quattrocento",                value: "'Quattrocento', serif" },
+  { label: "Quicksand",                   value: "'Quicksand', sans-serif" },
+  { label: "Risque",                      value: "'Risque', cursive" },
+  { label: "Roboto Slab",                 value: "'Roboto Slab', serif" },
+  { label: "Sacramento",                  value: "'Sacramento', cursive" },
+  { label: "Sail",                        value: "'Sail', cursive" },
+  { label: "Sarabun",                     value: "'Sarabun', sans-serif" },
+  { label: "Satisfy",                     value: "'Satisfy', cursive" },
+  { label: "Science Gothic",              value: "'Science Gothic', sans-serif",           previewWeight: 700 },
+  { label: "Secuela",                     value: "'Secuela', sans-serif" },
+  { label: "Shalimar",                    value: "'Shalimar', cursive" },
+  { label: "Shrikhand",                   value: "'Shrikhand', cursive",                   previewWeight: 700 },
+  { label: "Slabo 27Px",                  value: "'Slabo 27px', serif" },
+  { label: "Smooch",                      value: "'Smooch', cursive" },
+  { label: "Sofia",                       value: "'Sofia', cursive" },
+  { label: "Stalemate",                   value: "'Stalemate', cursive" },
+  { label: "Stint Ultra Expanded",        value: "'Stint Ultra Expanded', serif" },
+  { label: "Style Script",                value: "'Style Script', cursive" },
+  { label: "Sunshiney",                   value: "'Sunshiney', cursive" },
+  { label: "Teko",                        value: "'Teko', sans-serif" },
+  { label: "TeXGyre Heros",               value: "'TeX Gyre Heros', sans-serif" },
+  { label: "TeXGyre Termes",              value: "'TeX Gyre Termes', serif" },
+  { label: "Trade Winds",                 value: "'Trade Winds', cursive" },
+  { label: "Troubleside",                 value: "'Troubleside', sans-serif",              previewWeight: 700 },
+  { label: "Truculenta",                  value: "'Truculenta', sans-serif" },
+  { label: "Twinkle Star",                value: "'Twinkle Star', cursive" },
+  { label: "WindSong",                    value: "'WindSong', cursive" },
+  { label: "Yesteryear",                  value: "'Yesteryear', cursive" },
+  { label: "YoungSerif",                  value: "'Young Serif', serif",                   previewWeight: 700 },
+  { label: "Zilla Slab",                  value: "'Zilla Slab', serif" },
 ];
 
 // ─── Shapes ───────────────────────────────────────────────────────────────────
@@ -146,12 +267,10 @@ const PACKAGING_SYMBOLS = [
 
 // ─── Patterns ─────────────────────────────────────────────────────────────────
 const PATTERNS = [
-  { label: "Dots",      svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f3f4f6"/><circle cx="10" cy="10" r="4" fill="#6b7280"/><circle cx="30" cy="10" r="4" fill="#6b7280"/><circle cx="50" cy="10" r="4" fill="#6b7280"/><circle cx="70" cy="10" r="4" fill="#6b7280"/><circle cx="10" cy="30" r="4" fill="#6b7280"/><circle cx="30" cy="30" r="4" fill="#6b7280"/><circle cx="50" cy="30" r="4" fill="#6b7280"/><circle cx="70" cy="30" r="4" fill="#6b7280"/><circle cx="10" cy="50" r="4" fill="#6b7280"/><circle cx="30" cy="50" r="4" fill="#6b7280"/><circle cx="50" cy="50" r="4" fill="#6b7280"/><circle cx="70" cy="50" r="4" fill="#6b7280"/><circle cx="10" cy="70" r="4" fill="#6b7280"/><circle cx="30" cy="70" r="4" fill="#6b7280"/><circle cx="50" cy="70" r="4" fill="#6b7280"/><circle cx="70" cy="70" r="4" fill="#6b7280"/></svg>` },
-  { label: "Stripes",   svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f3f4f6"/><line x1="0" y1="0" x2="80" y2="80" stroke="#6b7280" strokeWidth="4"/><line x1="20" y1="0" x2="100" y2="80" stroke="#6b7280" strokeWidth="4"/><line x1="40" y1="0" x2="120" y2="80" stroke="#6b7280" strokeWidth="4"/><line x1="-20" y1="0" x2="60" y2="80" stroke="#6b7280" strokeWidth="4"/><line x1="-40" y1="0" x2="40" y2="80" stroke="#6b7280" strokeWidth="4"/></svg>` },
-  { label: "Diamonds",  svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f3f4f6"/><polygon points="20,5 35,20 20,35 5,20" fill="none" stroke="#6b7280" strokeWidth="2"/><polygon points="60,5 75,20 60,35 45,20" fill="none" stroke="#6b7280" strokeWidth="2"/><polygon points="20,45 35,60 20,75 5,60" fill="none" stroke="#6b7280" strokeWidth="2"/><polygon points="60,45 75,60 60,75 45,60" fill="none" stroke="#6b7280" strokeWidth="2"/></svg>` },
-  { label: "Checker",   svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f3f4f6"/><rect x="0" y="0" width="20" height="20" fill="#374151"/><rect x="40" y="0" width="20" height="20" fill="#374151"/><rect x="20" y="20" width="20" height="20" fill="#374151"/><rect x="60" y="20" width="20" height="20" fill="#374151"/><rect x="0" y="40" width="20" height="20" fill="#374151"/><rect x="40" y="40" width="20" height="20" fill="#374151"/><rect x="20" y="60" width="20" height="20" fill="#374151"/><rect x="60" y="60" width="20" height="20" fill="#374151"/></svg>` },
-  { label: "Floral",    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#fdf4ff"/><circle cx="20" cy="20" r="8" fill="#e879f9" opacity=".6"/><circle cx="60" cy="20" r="8" fill="#a855f7" opacity=".6"/><circle cx="20" cy="60" r="8" fill="#a855f7" opacity=".6"/><circle cx="60" cy="60" r="8" fill="#e879f9" opacity=".6"/><circle cx="40" cy="40" r="10" fill="#c026d3" opacity=".5"/></svg>` },
-  { label: "Grid",      svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f3f4f6"/><line x1="20" y1="0" x2="20" y2="80" stroke="#d1d5db" strokeWidth="1.5"/><line x1="40" y1="0" x2="40" y2="80" stroke="#d1d5db" strokeWidth="1.5"/><line x1="60" y1="0" x2="60" y2="80" stroke="#d1d5db" strokeWidth="1.5"/><line x1="0" y1="20" x2="80" y2="20" stroke="#d1d5db" strokeWidth="1.5"/><line x1="0" y1="40" x2="80" y2="40" stroke="#d1d5db" strokeWidth="1.5"/><line x1="0" y1="60" x2="80" y2="60" stroke="#d1d5db" strokeWidth="1.5"/></svg>` },
+  { label: "Beige Tartan", svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f0e0c0"/><rect x="0" y="0" width="14" height="80" fill="#7a3015" opacity="0.75"/><rect x="40" y="0" width="14" height="80" fill="#7a3015" opacity="0.75"/><rect x="26" y="0" width="2.5" height="80" fill="#c04020" opacity="0.6"/><rect x="66" y="0" width="2.5" height="80" fill="#c04020" opacity="0.6"/><rect x="0" y="0" width="80" height="14" fill="#7a3015" opacity="0.5"/><rect x="0" y="40" width="80" height="14" fill="#7a3015" opacity="0.5"/><rect x="0" y="26" width="80" height="2.5" fill="#c04020" opacity="0.4"/><rect x="0" y="66" width="80" height="2.5" fill="#c04020" opacity="0.4"/></svg>` },
+  { label: "Blue Tartan",  svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#5aabdc"/><rect x="0" y="0" width="16" height="80" fill="#0a2a5a" opacity="0.85"/><rect x="36" y="0" width="16" height="80" fill="#0a2a5a" opacity="0.85"/><rect x="22" y="0" width="2" height="80" fill="#ffffff" opacity="0.7"/><rect x="62" y="0" width="2" height="80" fill="#ffffff" opacity="0.7"/><rect x="0" y="0" width="80" height="16" fill="#0a2a5a" opacity="0.65"/><rect x="0" y="36" width="80" height="16" fill="#0a2a5a" opacity="0.65"/><rect x="0" y="22" width="80" height="2" fill="#ffffff" opacity="0.7"/><rect x="0" y="62" width="80" height="2" fill="#ffffff" opacity="0.7"/></svg>` },
+  { label: "Floral Damask", svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f5e5c0"/><ellipse cx="20" cy="12" rx="6" ry="9" fill="#b04020"/><ellipse cx="20" cy="28" rx="6" ry="9" fill="#b04020"/><ellipse cx="12" cy="20" rx="9" ry="6" fill="#b04020"/><ellipse cx="28" cy="20" rx="9" ry="6" fill="#b04020"/><circle cx="20" cy="20" r="5" fill="#f5e5c0"/><circle cx="20" cy="20" r="3" fill="#8a5020"/><ellipse cx="60" cy="12" rx="6" ry="9" fill="#b04020"/><ellipse cx="60" cy="28" rx="6" ry="9" fill="#b04020"/><ellipse cx="52" cy="20" rx="9" ry="6" fill="#b04020"/><ellipse cx="68" cy="20" rx="9" ry="6" fill="#b04020"/><circle cx="60" cy="20" r="5" fill="#f5e5c0"/><circle cx="60" cy="20" r="3" fill="#8a5020"/><ellipse cx="20" cy="52" rx="6" ry="9" fill="#b04020"/><ellipse cx="20" cy="68" rx="6" ry="9" fill="#b04020"/><ellipse cx="12" cy="60" rx="9" ry="6" fill="#b04020"/><ellipse cx="28" cy="60" rx="9" ry="6" fill="#b04020"/><circle cx="20" cy="60" r="5" fill="#f5e5c0"/><circle cx="20" cy="60" r="3" fill="#8a5020"/><ellipse cx="60" cy="52" rx="6" ry="9" fill="#b04020"/><ellipse cx="60" cy="68" rx="6" ry="9" fill="#b04020"/><ellipse cx="52" cy="60" rx="9" ry="6" fill="#b04020"/><ellipse cx="68" cy="60" rx="9" ry="6" fill="#b04020"/><circle cx="60" cy="60" r="5" fill="#f5e5c0"/><circle cx="60" cy="60" r="3" fill="#8a5020"/><circle cx="2" cy="2" r="2.5" fill="#b04020" opacity="0.7"/><circle cx="38" cy="2" r="2.5" fill="#b04020" opacity="0.7"/><circle cx="2" cy="38" r="2.5" fill="#b04020" opacity="0.7"/><circle cx="42" cy="2" r="2.5" fill="#b04020" opacity="0.7"/><circle cx="78" cy="2" r="2.5" fill="#b04020" opacity="0.7"/><circle cx="2" cy="42" r="2.5" fill="#b04020" opacity="0.7"/><circle cx="40" cy="40" r="3" fill="#b04020" opacity="0.4"/></svg>` },
+  { label: "Black Lace",   svg: `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#080808"/><circle cx="20" cy="20" r="12" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="20" cy="20" r="7" fill="none" stroke="#fff" stroke-width="1"/><line x1="20" y1="8" x2="20" y2="32" stroke="#fff" stroke-width="1"/><line x1="8" y1="20" x2="32" y2="20" stroke="#fff" stroke-width="1"/><line x1="11.5" y1="11.5" x2="28.5" y2="28.5" stroke="#fff" stroke-width="1"/><line x1="28.5" y1="11.5" x2="11.5" y2="28.5" stroke="#fff" stroke-width="1"/><circle cx="60" cy="20" r="12" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="60" cy="20" r="7" fill="none" stroke="#fff" stroke-width="1"/><line x1="60" y1="8" x2="60" y2="32" stroke="#fff" stroke-width="1"/><line x1="48" y1="20" x2="72" y2="20" stroke="#fff" stroke-width="1"/><line x1="51.5" y1="11.5" x2="68.5" y2="28.5" stroke="#fff" stroke-width="1"/><line x1="68.5" y1="11.5" x2="51.5" y2="28.5" stroke="#fff" stroke-width="1"/><circle cx="20" cy="60" r="12" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="20" cy="60" r="7" fill="none" stroke="#fff" stroke-width="1"/><line x1="20" y1="48" x2="20" y2="72" stroke="#fff" stroke-width="1"/><line x1="8" y1="60" x2="32" y2="60" stroke="#fff" stroke-width="1"/><line x1="11.5" y1="51.5" x2="28.5" y2="68.5" stroke="#fff" stroke-width="1"/><line x1="28.5" y1="51.5" x2="11.5" y2="68.5" stroke="#fff" stroke-width="1"/><circle cx="60" cy="60" r="12" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="60" cy="60" r="7" fill="none" stroke="#fff" stroke-width="1"/><line x1="60" y1="48" x2="60" y2="72" stroke="#fff" stroke-width="1"/><line x1="48" y1="60" x2="72" y2="60" stroke="#fff" stroke-width="1"/><line x1="51.5" y1="51.5" x2="68.5" y2="68.5" stroke="#fff" stroke-width="1"/><line x1="68.5" y1="51.5" x2="51.5" y2="68.5" stroke="#fff" stroke-width="1"/><circle cx="40" cy="40" r="12" fill="none" stroke="#fff" stroke-width="1.5" opacity="0.5"/><circle cx="40" cy="40" r="7" fill="none" stroke="#fff" stroke-width="1" opacity="0.5"/></svg>` },
 ];
 
 // ─── Text combos ─────────────────────────────────────────────────────────────
@@ -161,6 +280,46 @@ const TEXT_COMBOS = [
   { label: "Round Badge", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><circle cx="60" cy="60" r="56" fill="#4338ca" stroke="#6366f1" strokeWidth="3"/><text x="60" y="45" textAnchor="middle" fill="#fde68a" fontFamily="Arial" fontSize="11" fontWeight="bold">YOUR BRAND</text><text x="60" y="62" textAnchor="middle" fill="white" fontFamily="Georgia" fontSize="14" fontWeight="bold">HERE</text><text x="60" y="80" textAnchor="middle" fill="#c7d2fe" fontFamily="Arial" fontSize="8">EST. 2024</text></svg>`, w: 80, h: 80 },
 ];
 
+function FontPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLDivElement>(null);
+  const handleToggle = () => {
+    if (!open && btnRef.current) { const r = btnRef.current.getBoundingClientRect(); setPos({ top: r.bottom + 4, left: r.left }); }
+    setOpen(o => !o);
+  };
+  useEffect(() => {
+    if (!open) return;
+    setTimeout(() => selectedRef.current?.scrollIntoView({ block: "center" }), 0);
+    const handler = (e: MouseEvent) => {
+      if (!btnRef.current?.contains(e.target as Node) && !dropRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const selected = FONT_OPTIONS.find(f => f.value === value) ?? FONT_OPTIONS[0];
+  return (
+    <>
+      <button ref={btnRef} onClick={handleToggle} style={{ padding: "0.3rem 0.5rem 0.3rem 0.6rem", border: "1px solid #d1d5db", borderRadius: "6px", background: "#fff", cursor: "pointer", fontSize: "0.9rem", fontFamily: selected.value, fontWeight: selected.previewWeight ?? "normal", maxWidth: "170px", minWidth: "110px", flexShrink: 0, overflow: "hidden", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "4px" }}>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", fontFamily: selected.value, fontWeight: selected.previewWeight ?? "normal" }}>{selected.label}</span>
+        <span style={{ fontSize: "0.55rem", color: "#9ca3af", flexShrink: 0, fontFamily: "sans-serif", fontWeight: "normal" }}>▼</span>
+      </button>
+      {open && (
+        <div ref={dropRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999, background: "#fff", borderRadius: "14px", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", width: "270px", maxHeight: "380px", overflowY: "auto", padding: "6px 0" }}>
+          {FONT_OPTIONS.map(f => {
+            const isSel = f.value === value;
+            return (
+              <div key={f.value} ref={isSel ? selectedRef : undefined} onMouseDown={e => e.preventDefault()} onClick={() => { onChange(f.value); setOpen(false); }} style={{ padding: "7px 16px", margin: isSel ? "1px 8px" : "0", cursor: "pointer", fontSize: "1.05rem", lineHeight: 1.4, fontFamily: f.value, fontWeight: f.previewWeight ?? "normal", background: isSel ? "#f3f4f6" : "transparent", borderRadius: isSel ? "8px" : "0", userSelect: "none" }}>{f.label}</div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function svgUrl(svg: string) { return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); }
 
@@ -168,7 +327,7 @@ function defaultViewData(): ViewData {
   const fc: Record<string, string> = {};
   FACES_OUTSIDE.forEach(f => { fc[f.id] = "#c8a97e"; });
   fc["back"] = "#c8a97e";
-  return { faceColors: fc, items: {} };
+  return { faceColors: fc, items: {}, globalItems: [] };
 }
 function defaultState(): EditorState {
   return { outside: defaultViewData(), inside: defaultViewData(), insideColor: "#d4b896" };
@@ -233,8 +392,26 @@ async function renderFaceToCanvas(
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
   const ctx = c.getContext("2d")!;
-  ctx.fillStyle = color;
-  ctx.fillRect(0, 0, W, H);
+  // Handle url(...) pattern backgrounds (canvas fillStyle doesn't accept CSS url strings)
+  const urlMatch = color.match(/^url\(["']?(.+?)["']?\)$/);
+  if (urlMatch) {
+    await new Promise<void>((res) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const pat = ctx.createPattern(img, "repeat");
+          ctx.fillStyle = pat ?? "#c8a97e";
+        } catch { ctx.fillStyle = "#c8a97e"; }
+        ctx.fillRect(0, 0, W, H);
+        res();
+      };
+      img.onerror = () => { ctx.fillStyle = "#c8a97e"; ctx.fillRect(0, 0, W, H); res(); };
+      img.src = urlMatch[1];
+    });
+  } else {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, W, H);
+  }
   for (const item of items) {
     if (item.kind === "image") {
       await new Promise<void>((res) => {
@@ -262,6 +439,32 @@ async function renderFaceToCanvas(
 }
 
 // ─── 3D CSS Box ───────────────────────────────────────────────────────────────
+function projectGlobalItemsToFaces(globalItems: CanvasItem[], faces: FaceDef[]): Record<string, CanvasItem[]> {
+  const result: Record<string, CanvasItem[]> = {};
+  for (const item of globalItems) {
+    const ih = item.kind === "image" ? item.h : (item as TextItem).size;
+    // Project item to every face it overlaps — face divs have overflow:hidden so CSS clips the rest
+    const overlapping = faces.filter(f =>
+      item.x < f.x + f.w && item.x + item.w > f.x &&
+      item.y < f.y + f.h && item.y + ih > f.y
+    );
+    // Fallback: closest face by center distance if item is outside all faces
+    const targets = overlapping.length > 0 ? overlapping : (() => {
+      if (faces.length === 0) return [];
+      const cx = item.x + item.w / 2, cy = item.y + ih / 2;
+      return [faces.reduce((best, f) => {
+        const d = Math.hypot(cx - (f.x + f.w / 2), cy - (f.y + f.h / 2));
+        const bd = Math.hypot(cx - (best.x + best.w / 2), cy - (best.y + best.h / 2));
+        return d < bd ? f : best;
+      })];
+    })();
+    for (const face of targets) {
+      result[face.id] = [...(result[face.id] ?? []), { ...item, x: item.x - face.x, y: item.y - face.y }];
+    }
+  }
+  return result;
+}
+
 function renderPreviewItem(item: CanvasItem, s: number) {
   if (item.kind === "text") return (
     <div key={item.id} style={{ position: "absolute", left: item.x * s, top: item.y * s, width: item.w * s, fontFamily: item.font, fontSize: `${item.size * s}px`, fontWeight: item.bold ? 700 : 400, color: item.color, textAlign: item.align, whiteSpace: "pre-wrap", wordBreak: "break-word", pointerEvents: "none", userSelect: "none" }}>{item.text}</div>
@@ -272,13 +475,37 @@ function renderPreviewItem(item: CanvasItem, s: number) {
   return null;
 }
 
-function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems, insideItems, openAmount, rotX, rotY, hideFlaps, squareFaces }: {
+function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems: outsideItemsProp, insideItems: insideItemsProp, outsideGlobalItems, insideGlobalItems, openAmount, rotX, rotY, hideFlaps, squareFaces }: {
   faceColors: Record<string, string>; insideFaceColors: Record<string, string>; insideColor: string;
   outsideItems: Record<string, CanvasItem[]>; insideItems: Record<string, CanvasItem[]>;
+  outsideGlobalItems?: CanvasItem[]; insideGlobalItems?: CanvasItem[];
   openAmount: number; rotX: number; rotY: number; hideFlaps?: boolean; squareFaces?: FaceDef[];
 }) {
   const ps = 0.56;
   const sqMode = !!(hideFlaps && squareFaces);
+
+  // Project global items onto their overlapping faces, then merge with face-specific items
+  const allFaces = sqMode ? squareFaces! : FACES_OUTSIDE;
+  const outProjected = projectGlobalItemsToFaces(outsideGlobalItems ?? [], allFaces);
+  // Inside items are stored in mirrored dieline coords (inside view mirrors the layout).
+  // Project them against mirrored face coords so localX matches the inside dieline position.
+  // The inside face's rotateY(180deg) + canvas rotation cancel out, so CSS left = localX is correct.
+  const sqBackPanel = sqMode ? squareFaces!.find(f => f.id === "sq-back-panel") : undefined;
+  const sqMirrorTotal = sqBackPanel ? sqBackPanel.x + sqBackPanel.w + NX1 : 0;
+  // For regular box (non-sqMode): dieline is also mirrored, so inside items need mirrored-face projection too
+  const regInMirrorMin = !sqMode ? allFaces.reduce((m, f) => Math.min(m, f.x), Infinity) : 0;
+  const regInMirrorMax = !sqMode ? allFaces.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity) : 0;
+  const regInMirrorTotal = regInMirrorMin + regInMirrorMax;
+  const inFaces = sqMode && squareFaces && sqBackPanel
+    ? squareFaces.map(f => ({ ...f, x: sqMirrorTotal - f.x - f.w }))
+    : allFaces.map(f => ({ ...f, x: regInMirrorTotal - f.x - f.w }));
+  const inProjected  = projectGlobalItemsToFaces(insideGlobalItems ?? [], inFaces);
+  const outsideItems: Record<string, CanvasItem[]> = {};
+  const insideItems:  Record<string, CanvasItem[]> = {};
+  for (const face of allFaces) {
+    outsideItems[face.id] = [...(outsideItemsProp[face.id] ?? []), ...(outProjected[face.id] ?? [])];
+    insideItems[face.id]  = [...(insideItemsProp[face.id]  ?? []), ...(inProjected[face.id]  ?? [])];
+  }
   const cW = (sqMode ? Math.max(...squareFaces!.map(f => f.x + f.w)) + PAD : NX3 + PAD) * ps;
   const cH = (sqMode ? Math.max(...squareFaces!.map(f => f.y + f.h)) + PAD : DIELINE_H_FULL) * ps;
 
@@ -313,7 +540,7 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
   const by = NY_BASE * ps;
 
   const fc = faceColors;
-  const ff: React.CSSProperties = { position: "absolute", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box" };
+  const ff: React.CSSProperties = { position: "absolute", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden" };
 
   return (
     <div style={{ width: "100%", height: 620, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700, perspectiveOrigin: "50% 30%", overflow: "hidden" }}>
@@ -896,8 +1123,11 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   const [boxPreviewRotX, setBoxPreviewRotX] = useState(-20);
   const boxPreviewRotRef = useRef({ rx: -20, ry: 210 });
 
+  const [selectedItemIsGlobal, setSelectedItemIsGlobal] = useState(false);
+
   const uploadRef = useRef<HTMLInputElement>(null);
   const rotDragRef = useRef<{ sx: number; sy: number; rx: number; ry: number } | null>(null);
+  const globalDragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   const commit = useCallback((next: EditorState) => {
     setHistory(prev => { const t = prev.slice(0, histIdx + 1); return [...t, next]; });
@@ -915,14 +1145,16 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
         const tag = (e.target as HTMLElement).tagName.toLowerCase();
         if (["input", "textarea", "select"].includes(tag)) return;
         e.preventDefault();
-        if (selectedFace) removeItem(selectedFace, selectedItemId);
+        if (selectedItemIsGlobal) removeGlobalItem(selectedItemId);
+        else if (selectedFace) removeItem(selectedFace, selectedItemId);
         setSelectedItemId(null);
+        setSelectedItemIsGlobal(false);
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [histIdx, history.length, selectedItemId, selectedFace]);
+  }, [histIdx, history.length, selectedItemId, selectedFace, selectedItemIsGlobal]);
 
   const SQUARE_HIDDEN = new Set([
     "dust-flap-top", "dust-flap-bottom",
@@ -967,6 +1199,29 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
         ...squareBaseFaces,
       ].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
     : FACES_OUTSIDE;
+
+  // Mirror total for regular box (non-sqMode): min(face.x) + max(face.x+face.w) over all faces
+  const regMirrorMin = !hideFlaps ? faces.reduce((m, f) => Math.min(m, f.x), Infinity) : 0;
+  const regMirrorMax = !hideFlaps ? faces.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity) : 0;
+  const regMirrorTotal = regMirrorMin + regMirrorMax;
+
+  // Mirror the dieline so panel names match the 3D view (3D uses rotY≈210 which flips LEFT↔RIGHT)
+  const dielineFaces = (hideFlaps && view === "inside")
+    ? faces.map(f => ({ ...f, x: 2 * NX1 + sqPanelW * 4 - f.x - f.w }))
+             .sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
+    : !hideFlaps
+      ? faces.map(f => ({ ...f, x: regMirrorTotal - f.x - f.w }))
+               .sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
+      : faces;
+
+  // Inside global items are stored in mirrored dieline coords; pass as-is (mirrored projection handled in Box3DPreview)
+  const insideGlobalItemsForPreview = state.inside.globalItems ?? [];
+
+  // Outside global items for regular box are stored in mirrored dieline coords; un-mirror for 3D projection
+  const outsideGlobalItemsForPreview = !hideFlaps
+    ? (state.outside.globalItems ?? []).map(item => ({ ...item, x: regMirrorTotal - item.x - item.w }))
+    : (state.outside.globalItems ?? []);
+
   const dilineCanvasW = hideFlaps ? TOTAL_DIELINE_W + SQ_EXTRA_W : TOTAL_DIELINE_W;
 
   const vd = state[view];
@@ -979,6 +1234,12 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     const fc = { ...vd.faceColors };
     FACES_OUTSIDE.forEach(f => { fc[f.id] = color; });
     fc["back"] = color;
+    // Also update square-mode virtual faces (sq-* IDs used when hideFlaps=true)
+    [
+      "sq-dust-flap", "sq-inner-flap", "sq-outer-flap", "sq-lock-flap",
+      "sq-left-side-panel", "sq-front-panel", "sq-right-side-panel", "sq-back-panel",
+      "sq-inner-base-flap", "sq-outer-base-flap", "sq-support-flap", "sq-closure-flap",
+    ].forEach(id => { fc[id] = color; });
     commit({ ...state, [view]: { ...vd, faceColors: fc } });
   }
 
@@ -993,6 +1254,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   function addItem(faceId: string, item: CanvasItem) {
     commit({ ...state, [view]: { ...vd, items: { ...vd.items, [faceId]: [...(vd.items[faceId] ?? []), item] } } });
     setSelectedItemId(item.id);
+    setSelectedItemIsGlobal(false);
   }
 
   function updateItem(faceId: string, id: string, updates: Partial<CanvasItem>) {
@@ -1003,36 +1265,48 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     commit({ ...state, [view]: { ...vd, items: { ...vd.items, [faceId]: (vd.items[faceId] ?? []).filter((it: CanvasItem) => it.id !== id) } } });
   }
 
+  function addGlobalItem(item: CanvasItem) {
+    commit({ ...state, [view]: { ...vd, globalItems: [...(vd.globalItems ?? []), item] } });
+    setSelectedItemId(item.id);
+    setSelectedItemIsGlobal(true);
+  }
+
+  function updateGlobalItem(id: string, updates: Partial<CanvasItem>) {
+    commit({ ...state, [view]: { ...vd, globalItems: (vd.globalItems ?? []).map((it: CanvasItem) => it.id === id ? { ...it, ...updates } as CanvasItem : it) } });
+  }
+
+  function removeGlobalItem(id: string) {
+    commit({ ...state, [view]: { ...vd, globalItems: (vd.globalItems ?? []).filter((it: CanvasItem) => it.id !== id) } });
+  }
+
+  function updateSelectedItem(id: string, updates: Partial<CanvasItem>) {
+    if (selectedItemIsGlobal) updateGlobalItem(id, updates);
+    else if (selectedFace) updateItem(selectedFace, id, updates);
+  }
+
   function addText() {
-    if (!selectedFace) return;
-    const face = faces.find(f => f.id === selectedFace);
-    if (!face) return;
-    const item: TextItem = { id: uid(), kind: "text", text: "Add text", x: face.w / 2 - 60, y: face.h / 2 - 12, w: 140, font: "Arial, sans-serif", size: 16, bold: false, color: "#000000", align: "center" };
-    addItem(selectedFace, item);
+    const item: TextItem = { id: uid(), kind: "text", text: "Add text", x: dilineCanvasW / 2 - 70, y: DIELINE_H_FULL / 2 - 12, w: 140, font: "Arial, sans-serif", size: 16, bold: false, color: "#000000", align: "center" };
+    addGlobalItem(item);
   }
 
   function addSvgItem(shape: { svg: string; w: number; h: number }) {
-    if (!selectedFace) return;
-    const face = faces.find(f => f.id === selectedFace);
-    if (!face) return;
-    const item: ImageItem = { id: uid(), kind: "image", src: svgUrl(shape.svg), x: Math.max(0, face.w / 2 - shape.w / 2), y: Math.max(0, face.h / 2 - shape.h / 2), w: shape.w, h: shape.h };
-    addItem(selectedFace, item);
+    const item: ImageItem = { id: uid(), kind: "image", src: svgUrl(shape.svg), x: Math.max(0, dilineCanvasW / 2 - shape.w / 2), y: Math.max(0, DIELINE_H_FULL / 2 - shape.h / 2), w: shape.w, h: shape.h };
+    addGlobalItem(item);
   }
 
   function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !selectedFace) return;
-    const face = faces.find(f => f.id === selectedFace);
-    if (!face) return;
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
       const src = ev.target?.result as string;
       const img = new window.Image();
       img.onload = () => {
-        const maxW = face.w - 20, maxH = face.h - 20;
+        const maxW = dilineCanvasW - 20, maxH = DIELINE_H_FULL - 20;
         const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
-        const item: ImageItem = { id: uid(), kind: "image", src, x: 10, y: 10, w: Math.round(img.naturalWidth * ratio), h: Math.round(img.naturalHeight * ratio) };
-        addItem(selectedFace, item);
+        const w = Math.round(img.naturalWidth * ratio), h = Math.round(img.naturalHeight * ratio);
+        const item: ImageItem = { id: uid(), kind: "image", src, x: Math.max(0, dilineCanvasW / 2 - w / 2), y: Math.max(0, DIELINE_H_FULL / 2 - h / 2), w, h };
+        addGlobalItem(item);
       };
       img.src = src;
     };
@@ -1041,8 +1315,10 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   }
 
   const currentItems = selectedFace ? getFaceItems(selectedFace) : [];
-  const selectedItem = selectedItemId ? currentItems.find(i => i.id === selectedItemId) ?? null : null;
-  const selectedText = selectedItem?.kind === "text" ? selectedItem : null;
+  const selectedFaceItem = selectedItemId && !selectedItemIsGlobal ? currentItems.find(i => i.id === selectedItemId) ?? null : null;
+  const selectedGlobalItem = selectedItemId && selectedItemIsGlobal ? (vd.globalItems ?? []).find(i => i.id === selectedItemId) ?? null : null;
+  const selectedItem = selectedFaceItem ?? selectedGlobalItem;
+  const selectedText = selectedItem?.kind === "text" ? selectedItem as TextItem : null;
 
   const dragRef = useRef<{ id: string; faceId: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
@@ -1095,6 +1371,50 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
+  function startDragGlobalItem(e: React.PointerEvent, item: CanvasItem) {
+    e.preventDefault(); e.stopPropagation();
+    globalDragRef.current = { id: item.id, sx: e.clientX, sy: e.clientY, ox: item.x, oy: item.y };
+    setSelectedItemId(item.id);
+    setSelectedItemIsGlobal(true);
+    const onMove = (ev: PointerEvent) => {
+      const d = globalDragRef.current;
+      if (!d) return;
+      const dx = (ev.clientX - d.sx) / zoom, dy = (ev.clientY - d.sy) / zoom;
+      setHistory(prev => {
+        const cur = prev[histIdx];
+        const curVd = cur[view];
+        const updated = { ...cur, [view]: { ...curVd, globalItems: (curVd.globalItems ?? []).map((it: CanvasItem) => it.id !== d.id ? it : { ...it, x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) } as CanvasItem) } };
+        const copy = [...prev]; copy[histIdx] = updated; return copy;
+      });
+    };
+    const onUp = () => { globalDragRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+  }
+
+  function startResizeGlobalItem(e: React.PointerEvent, item: CanvasItem, corner: "tl"|"tr"|"bl"|"br"|"l"|"r") {
+    e.preventDefault(); e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY;
+    const ox = item.x, oy = item.y;
+    const ow = item.kind === "image" ? item.w : (item as TextItem).w;
+    const oh = item.kind === "image" ? item.h : 0;
+    const MIN = 20;
+    const onMove = (ev: PointerEvent) => {
+      const dx = (ev.clientX - sx) / zoom, dy = (ev.clientY - sy) / zoom;
+      let nx = ox, ny = oy, nw = ow, nh = oh;
+      if (corner === "r")  { nw = Math.max(MIN, ow + dx); }
+      else if (corner === "l")  { nw = Math.max(MIN, ow - dx); nx = ox + ow - nw; }
+      else if (corner === "tr") { nw = Math.max(MIN, ow + dx); if (item.kind === "image") { nh = Math.max(MIN, oh - dy); ny = oy + oh - nh; } }
+      else if (corner === "tl") { nw = Math.max(MIN, ow - dx); nx = ox + ow - nw; if (item.kind === "image") { nh = Math.max(MIN, oh - dy); ny = oy + oh - nh; } }
+      else if (corner === "br") { nw = Math.max(MIN, ow + dx); if (item.kind === "image") nh = Math.max(MIN, oh + dy); }
+      else if (corner === "bl") { nw = Math.max(MIN, ow - dx); nx = ox + ow - nw; if (item.kind === "image") nh = Math.max(MIN, oh + dy); }
+      const updates: Partial<CanvasItem> = { x: nx, w: nw } as Partial<CanvasItem>;
+      if (item.kind === "image") { (updates as Partial<ImageItem>).h = nh; (updates as Partial<ImageItem>).y = ny; }
+      setHistory(prev => { const cur = prev[histIdx]; const curVd = cur[view]; const copy = [...prev]; copy[histIdx] = { ...cur, [view]: { ...curVd, globalItems: (curVd.globalItems ?? []).map((it: CanvasItem) => it.id !== item.id ? it : { ...it, ...updates } as CanvasItem) } }; return copy; });
+    };
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+  }
+
   // 3D drag to rotate
   function start3DRotate(e: React.PointerEvent) {
     e.preventDefault();
@@ -1109,7 +1429,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
   }
 
-  const selectedFaceDef = selectedFace ? faces.find(f => f.id === selectedFace) ?? null : null;
+  const selectedFaceDef = selectedFace ? dielineFaces.find(f => f.id === selectedFace) ?? null : null;
 
   // ─── Horizontal scroll section ────────────────────────────────────────────
   function HScrollSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -1137,9 +1457,39 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="15 18 9 12 15 6"/></svg>
           Back
         </button>
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{product.name}</span>
-        </div>
+        {selectedText ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "6px", overflowX: "auto", minWidth: 0 }}>
+            <FontPicker value={selectedText.font} onChange={v => updateSelectedItem(selectedText.id, { font: v })} />
+            <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
+            <select value={selectedText.size} onChange={e => updateSelectedItem(selectedText.id, { size: Number(e.target.value) })} style={{ padding: "0.4rem 0.5rem", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "0.82rem", color: "#374151", width: "72px", flexShrink: 0, background: "#fafafa", fontWeight: 600, cursor: "pointer" }}>
+              {[10,12,14,16,18,20,24,28,32,36,42,48,56,64].map(s => <option key={s} value={s}>{s}px</option>)}
+            </select>
+            <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
+            <button onClick={() => updateSelectedItem(selectedText.id, { bold: !selectedText.bold })} style={{ width: "36px", height: "36px", border: "1.5px solid #e5e7eb", borderRadius: "8px", background: selectedText.bold ? "linear-gradient(135deg,#7c3aed,#db2777)" : "#fff", color: selectedText.bold ? "#fff" : "#374151", fontWeight: 800, fontSize: "0.95rem", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: selectedText.bold ? "0 2px 8px rgba(124,58,237,0.35)" : "none" }}>B</button>
+            <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
+            <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
+              {(["left","center","right"] as const).map(a => (
+                <button key={a} onClick={() => updateSelectedItem(selectedText.id, { align: a })} title={a} style={{ width: "34px", height: "34px", border: "1.5px solid #e5e7eb", borderRadius: "8px", background: selectedText.align === a ? "#f3f0ff" : "#fff", color: selectedText.align === a ? "#7c3aed" : "#6b7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {a === "left"   && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>}
+                  {a === "center" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>}
+                  {a === "right"  && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>}
+                </button>
+              ))}
+            </div>
+            <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
+            <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+              {TEXT_COLORS.map(c => (
+                <button key={c} onClick={() => updateSelectedItem(selectedText.id, { color: c })} title={c} style={{ width: "24px", height: "24px", borderRadius: "50%", background: c, border: `2.5px solid ${selectedText.color === c ? "#7c3aed" : "#e5e7eb"}`, cursor: "pointer", padding: 0, flexShrink: 0, boxShadow: c === "#ffffff" ? "inset 0 0 0 1px #d1d5db" : "0 1px 4px rgba(0,0,0,0.15)", outline: selectedText.color === c ? "2px solid rgba(124,58,237,0.25)" : "none", outlineOffset: "2px", transform: selectedText.color === c ? "scale(1.15)" : "scale(1)", transition: "transform 0.1s" }} />
+              ))}
+            </div>
+            <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
+            <button onClick={() => { if (selectedItemIsGlobal) removeGlobalItem(selectedText.id); else if (selectedFace) removeItem(selectedFace, selectedText.id); setSelectedItemId(null); setSelectedItemIsGlobal(false); }} style={{ padding: "0.4rem 1rem", border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, flexShrink: 0 }}>Delete</button>
+          </div>
+        ) : (
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{product.name}</span>
+          </div>
+        )}
         <button onClick={() => setFinalStepsOpen(true)} style={{ padding: "0.4rem 1.5rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: "0.875rem", fontWeight: 700 }}>Save and Continue</button>
       </div>
 
@@ -1176,13 +1526,10 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           {/* ── Uploads panel ── */}
           {activeTab === "uploads" && (
             <div style={{ padding: "1rem" }}>
-              {!selectedFace && (
-                <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "0.75rem", textAlign: "center" }}>Select a face first</p>
-              )}
               <input ref={uploadRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImageUpload} />
               <button
-                onClick={() => selectedFace && uploadRef.current?.click()}
-                style={{ width: "100%", padding: "1.25rem 0.75rem", border: "2px dashed #d1d5db", borderRadius: 12, background: selectedFace ? "#fafafa" : "#f3f4f6", cursor: selectedFace ? "pointer" : "not-allowed", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: "#6b7280", fontSize: "0.8rem" }}
+                onClick={() => uploadRef.current?.click()}
+                style={{ width: "100%", padding: "1.25rem 0.75rem", border: "2px dashed #d1d5db", borderRadius: 12, background: "#fafafa", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: "#6b7280", fontSize: "0.8rem" }}
               >
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5">
                   <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
@@ -1200,47 +1547,22 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           {/* ── Elements panel ── */}
           {activeTab === "elements" && (
             <div style={{ padding: "1rem" }}>
-              {!selectedFace && (
-                <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "0.75rem", textAlign: "center" }}>Select a face first</p>
-              )}
-
               {/* Text */}
               <div style={{ marginBottom: "1.25rem" }}>
                 <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#111827", display: "block", marginBottom: "0.6rem" }}>Text</span>
                 <button
                   onClick={addText}
-                  disabled={!selectedFace}
-                  style={{ width: 80, height: 80, border: "1.5px solid #e5e7eb", borderRadius: 12, background: "#fff", cursor: selectedFace ? "pointer" : "not-allowed", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, opacity: selectedFace ? 1 : 0.5 }}
+                  style={{ width: 80, height: 80, border: "1.5px solid #e5e7eb", borderRadius: 12, background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}
                 >
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="1.5"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
                   <span style={{ fontSize: "0.68rem", fontWeight: 600, color: "#374151" }}>Add text</span>
                 </button>
               </div>
 
-              {/* Text style (when text selected) */}
-              {selectedText && selectedFace && (
-                <div style={{ marginBottom: "1.25rem", padding: "0.75rem", background: "#f9fafb", borderRadius: 10 }}>
-                  <p style={{ margin: "0 0 0.6rem", fontSize: "0.75rem", fontWeight: 700, color: "#374151" }}>Text style</p>
-                  <select value={selectedText.font} onChange={e => updateItem(selectedFace, selectedText.id, { font: e.target.value })} style={{ width: "100%", padding: "0.3rem 0.4rem", border: "1px solid #d1d5db", borderRadius: 6, fontSize: "0.75rem", marginBottom: 6 }}>
-                    {FONT_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                  </select>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <select value={selectedText.size} onChange={e => updateItem(selectedFace, selectedText.id, { size: Number(e.target.value) })} style={{ flex: 1, padding: "0.3rem 0.4rem", border: "1px solid #d1d5db", borderRadius: 6, fontSize: "0.75rem" }}>
-                      {[10,12,14,16,18,20,24,28,32,36].map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <button onClick={() => updateItem(selectedFace, selectedText.id, { bold: !selectedText.bold })} style={{ padding: "0.3rem 0.6rem", border: "1px solid #d1d5db", borderRadius: 6, background: selectedText.bold ? "#1d4ed8" : "#fff", color: selectedText.bold ? "#fff" : "#374151", fontWeight: 700, cursor: "pointer" }}>B</button>
-                  </div>
-                  <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginBottom: 8 }}>
-                    {TEXT_COLORS.map(c => <button key={c} onClick={() => updateItem(selectedFace, selectedText.id, { color: c })} style={{ width: 20, height: 20, borderRadius: "50%", background: c, padding: 0, cursor: "pointer", border: `2px solid ${selectedText.color === c ? "#3b82f6" : "#e5e7eb"}` }} />)}
-                  </div>
-                  <button onClick={() => { removeItem(selectedFace, selectedText.id); setSelectedItemId(null); }} style={{ width: "100%", padding: "0.35rem", border: "1px solid #fca5a5", borderRadius: 6, background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontSize: "0.75rem", fontWeight: 600 }}>Delete text</button>
-                </div>
-              )}
-
               {/* Shape */}
               <HScrollSection title="Shape">
                 {SHAPES.map(s => (
-                  <button key={s.label} onClick={() => addSvgItem(s)} disabled={!selectedFace} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: selectedFace ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedFace ? 1 : 0.5 }}>
+                  <button key={s.label} onClick={() => addSvgItem(s)} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <img src={svgUrl(s.svg)} alt={s.label} style={{ width: 44, height: 44, objectFit: "contain" }} />
                   </button>
                 ))}
@@ -1249,7 +1571,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Packaging Symbols */}
               <HScrollSection title="Packaging Symbols">
                 {PACKAGING_SYMBOLS.map(s => (
-                  <button key={s.label} onClick={() => addSvgItem({ svg: s.svg, w: 56, h: 56 })} disabled={!selectedFace} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: selectedFace ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedFace ? 1 : 0.5 }}>
+                  <button key={s.label} onClick={() => addSvgItem({ svg: s.svg, w: 56, h: 56 })} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <img src={svgUrl(s.svg)} alt={s.label} style={{ width: 44, height: 44, objectFit: "contain" }} />
                   </button>
                 ))}
@@ -1258,7 +1580,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Text Combinations */}
               <HScrollSection title="Text Combinations">
                 {TEXT_COMBOS.map(tc => (
-                  <button key={tc.label} onClick={() => addSvgItem({ svg: tc.svg, w: tc.w, h: tc.h })} disabled={!selectedFace} title={tc.label} style={{ flexShrink: 0, width: 100, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#f9fafb", cursor: selectedFace ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", opacity: selectedFace ? 1 : 0.5 }}>
+                  <button key={tc.label} onClick={() => addSvgItem({ svg: tc.svg, w: tc.w, h: tc.h })} title={tc.label} style={{ flexShrink: 0, width: 100, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#f9fafb", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                     <img src={svgUrl(tc.svg)} alt={tc.label} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                   </button>
                 ))}
@@ -1267,7 +1589,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Patterns */}
               <HScrollSection title="Patterns">
                 {PATTERNS.map(p => (
-                  <button key={p.label} onClick={() => addSvgItem({ svg: p.svg, w: BW - 20, h: BH - 20 })} disabled={!selectedFace} title={p.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden", cursor: selectedFace ? "pointer" : "not-allowed", opacity: selectedFace ? 1 : 0.5, padding: 0 }}>
+                  <button key={p.label} onClick={() => setBoxColor("url(" + svgUrl(p.svg) + ")")} title={p.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden", cursor: "pointer", padding: 0 }}>
                     <img src={svgUrl(p.svg)} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   </button>
                 ))}
@@ -1295,7 +1617,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           <div
             ref={canvasScrollRef}
             style={{ flex: 1, height: 0, overflowY: "auto", overflowX: "auto", cursor: toolMode === "pan" ? "grab" : "default" }}
-            onClick={() => { setSelectedFace(null); setSelectedItemId(null); setEditingItemId(null); setShowFaceColorPopup(false); }}
+            onClick={() => { setSelectedFace(null); setSelectedItemId(null); setSelectedItemIsGlobal(false); setEditingItemId(null); setShowFaceColorPopup(false); }}
           >
             <div style={{ minHeight: "150vh", minWidth: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem", boxSizing: "border-box" }}>
             <div style={{ position: "relative", width: dilineCanvasW * zoom, height: DIELINE_H_FULL * zoom, flexShrink: 0 }}>
@@ -1390,26 +1712,12 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                   <svg style={{ position: "absolute", inset: 0, pointerEvents: "none" }} width={W} height={H}>
                     {/* Fold lines */}
                     <path d={folds} fill="none" stroke="#3b82f6" strokeWidth={s(0.9)} strokeDasharray={`${s(4)} ${s(2.5)}`} />
-
-                    {/* Dimensions */}
-                    <g fill="none" stroke="#3b82f6" strokeWidth={s(0.8)}>
-                      {/* Width 315mm */}
-                      <line x1={x2} y1={y3+s(16)} x2={x3} y2={y3+s(16)} />
-                      <line x1={x2} y1={y3+s(16)-tk} x2={x2} y2={y3+s(16)+tk} />
-                      <line x1={x3} y1={y3+s(16)-tk} x2={x3} y2={y3+s(16)+tk} />
-                      <text x={(x2+x3)/2} y={y3+s(12)} textAnchor="middle" fill="#3b82f6" stroke="none" fontSize={dz} fontWeight="700">{BW} mm</text>
-                      {/* Height 202mm */}
-                      <line x1={x3+s(16)} y1={y2} x2={x3+s(16)} y2={y3} />
-                      <line x1={x3+s(16)-tk} y1={y2} x2={x3+s(16)+tk} y2={y2} />
-                      <line x1={x3+s(16)-tk} y1={y3} x2={x3+s(16)+tk} y2={y3} />
-                      <text x={x3+s(22)} y={(y2+y3)/2+dz/3} fill="#3b82f6" stroke="none" fontSize={dz} fontWeight="700">{BH} mm</text>
-                    </g>
                   </svg>
                 );
               })()}
 
               {/* Face panels */}
-              {faces.map(face => {
+              {dielineFaces.map(face => {
                 const faceColor = state[view].faceColors[face.id] ?? "#c8a97e";
                 return (
                   <DielineFace
@@ -1428,7 +1736,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
               {/* Locking tabs on side-left-flap (protrude left from left edge) */}
               {(() => {
-                const face = faces.find(f => f.id === "side-left-flap");
+                const face = dielineFaces.find(f => f.id === "side-left-flap");
                 if (!face) return null;
                 const faceColor = state[view].faceColors["side-left-flap"] ?? "#c8a97e";
                 const nW = 10 * zoom;
@@ -1445,7 +1753,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
               {/* Locking slots on side-left right edge (white cutouts, same Y as tabs) */}
               {(() => {
-                const face = faces.find(f => f.id === "side-left");
+                const face = dielineFaces.find(f => f.id === "side-left");
                 if (!face) return null;
                 const nW = 10 * zoom;
                 const nH = 38 * zoom;
@@ -1461,7 +1769,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
               {/* Locking tabs on side-right-flap (protrude right from right edge) */}
               {(() => {
-                const face = faces.find(f => f.id === "side-right-flap");
+                const face = dielineFaces.find(f => f.id === "side-right-flap");
                 if (!face) return null;
                 const faceColor = state[view].faceColors["side-right-flap"] ?? "#c8a97e";
                 const nW = 10 * zoom;
@@ -1478,7 +1786,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
               {/* Locking slots on side-right left edge (white cutouts into Base) */}
               {(() => {
-                const face = faces.find(f => f.id === "side-right");
+                const face = dielineFaces.find(f => f.id === "side-right");
                 if (!face) return null;
                 const nW = 10 * zoom;
                 const nH = 38 * zoom;
@@ -1489,6 +1797,39 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                     <div style={{ ...style, left: nX, top: (face.y + face.h * 0.30 - 19) * zoom }} />
                     <div style={{ ...style, left: nX, top: (face.y + face.h * 0.65 - 19) * zoom }} />
                   </>
+                );
+              })()}
+
+              {/* Square mode — Right Side Panel 305 mm dimension indicator */}
+              {hideFlaps && (() => {
+                const z = zoom;
+                const s = (n: number) => n * z;
+                const tk = s(5);
+                const rsp = dielineFaces.find(f => f.id === "sq-right-side-panel");
+                const fp  = dielineFaces.find(f => f.id === "sq-front-panel");
+                if (!rsp || !fp) return null;
+                const panelX1 = s(rsp.x) + s(10);
+                const panelX2 = s(rsp.x + rsp.w) - s(10);
+                const panelCX = (panelX1 + panelX2) / 2;
+                const hy = s(sqBaseY + frontFace.h) - s(20);
+                const vy1 = s(sqBaseY) + s(10);
+                const vy2 = s(sqBaseY + frontFace.h) - s(10);
+                const vx  = s(fp.x + fp.w / 2);
+                return (
+                  <svg style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 10 }} width={(TOTAL_DIELINE_W + SQ_EXTRA_W) * z} height={DIELINE_H_FULL * z}>
+                    <g fill="none" stroke="#3b82f6" strokeWidth={s(1.5)}>
+                      {/* 305 mm horizontal width */}
+                      <line x1={panelX1} y1={hy} x2={panelX2} y2={hy} />
+                      <line x1={panelX1} y1={hy - tk} x2={panelX1} y2={hy + tk} />
+                      <line x1={panelX2} y1={hy - tk} x2={panelX2} y2={hy + tk} />
+                      <text x={panelCX} y={hy - s(6)} textAnchor="middle" fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">305 mm</text>
+                      {/* vertical height */}
+                      <line x1={vx} y1={vy1} x2={vx} y2={vy2} />
+                      <line x1={vx - tk} y1={vy1} x2={vx + tk} y2={vy1} />
+                      <line x1={vx - tk} y1={vy2} x2={vx + tk} y2={vy2} />
+                      <text x={vx + s(6)} y={(vy1 + vy2) / 2 + s(6)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">305 mm</text>
+                    </g>
+                  </svg>
                 );
               })()}
 
@@ -1565,7 +1906,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
               {/* Draggable items on selected face */}
               {selectedFace && (() => {
-                const face = faces.find(f => f.id === selectedFace);
+                const face = dielineFaces.find(f => f.id === selectedFace);
                 if (!face) return null;
                 return getFaceItems(selectedFace).map(item => {
                   const isSel = selectedItemId === item.id;
@@ -1616,6 +1957,56 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                   return null;
                 });
               })()}
+
+              {/* ── Global items layer (above all face panels, full dieline canvas) ── */}
+              {(vd.globalItems ?? []).map(item => {
+                const isSel = selectedItemId === item.id && selectedItemIsGlobal;
+                const isEd = editingItemId === item.id;
+                if (item.kind === "text") {
+                  return (
+                    <div key={item.id + (isEd ? "-e" : "")} contentEditable={isEd} suppressContentEditableWarning
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      autoFocus={isEd}
+                      style={{ position: "absolute", left: item.x * zoom, top: item.y * zoom, width: item.w * zoom, fontFamily: item.font, fontSize: `${item.size * zoom}px`, fontWeight: item.bold ? 700 : 400, color: item.color, textAlign: item.align, padding: "2px 4px", outline: isEd ? "none" : isSel ? "1.5px solid #3b82f6" : "none", outlineOffset: "0px", borderRadius: 2, cursor: isEd ? "text" : "move", userSelect: isEd ? "text" : "none", whiteSpace: "pre-wrap", wordBreak: "break-word", zIndex: isSel ? 50 : 40, background: "transparent" }}
+                      onPointerDown={e => { if (isEd) return; e.stopPropagation(); setSelectedItemId(item.id); setSelectedItemIsGlobal(true); startDragGlobalItem(e, item); }}
+                      onDoubleClick={e => { e.stopPropagation(); setEditingItemId(item.id); }}
+                      onBlur={e => { updateGlobalItem(item.id, { text: e.currentTarget.textContent ?? item.text }); setEditingItemId(null); }}
+                      onClick={e => e.stopPropagation()}
+                    >{item.text}
+                      {isSel && !isEd && (
+                        <>
+                          {(["tl","tr","bl","br"] as const).map(c => (
+                            <div key={c} onPointerDown={e => startResizeGlobalItem(e, item, c)} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: c === "tl" ? "nw-resize" : c === "tr" ? "ne-resize" : c === "bl" ? "sw-resize" : "se-resize", ...(c[0]==="t" ? { top: -4 } : { bottom: -4 }), ...(c[1]==="l" ? { left: -4 } : { right: -4 }) }} />
+                          ))}
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "l")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", left: -4, top: "calc(50% - 4px)" }} />
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "r")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", right: -4, top: "calc(50% - 4px)" }} />
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+                if (item.kind === "image") {
+                  return (
+                    <div key={item.id} style={{ position: "absolute", left: item.x * zoom, top: item.y * zoom, width: item.w * zoom, height: item.h * zoom, outline: isSel ? "1.5px solid #3b82f6" : "none", outlineOffset: "0px", cursor: "move", zIndex: isSel ? 50 : 40, overflow: "visible" }}
+                      onPointerDown={e => { e.stopPropagation(); setSelectedItemId(item.id); setSelectedItemIsGlobal(true); startDragGlobalItem(e, item); }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <img src={item.src} alt="" draggable={false} style={{ width: `${item.w * zoom}px`, height: `${item.h * zoom}px`, display: "block", pointerEvents: "none" }} />
+                      {isSel && (
+                        <>
+                          <button onClick={e => { e.stopPropagation(); removeGlobalItem(item.id); setSelectedItemId(null); setSelectedItemIsGlobal(false); }} style={{ position: "absolute", top: -8, right: -8, width: 18, height: 18, borderRadius: "50%", background: "#ef4444", color: "#fff", border: "none", cursor: "pointer", fontSize: "0.6rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>✕</button>
+                          {(["tl","tr","bl","br"] as const).map(c => (
+                            <div key={c} onPointerDown={e => startResizeGlobalItem(e, item, c)} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: c === "tl" ? "nw-resize" : c === "tr" ? "ne-resize" : c === "bl" ? "sw-resize" : "se-resize", ...(c[0]==="t" ? { top: -4 } : { bottom: -4 }), ...(c[1]==="l" ? { left: -4 } : { right: -4 }) }} />
+                          ))}
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "l")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", left: -4, top: "calc(50% - 4px)" }} />
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "r")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", right: -4, top: "calc(50% - 4px)" }} />
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+                return null;
+              })}
 </div>
             </div>
           </div>
@@ -1672,7 +2063,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               style={{ cursor: "grab", borderRadius: 12, overflow: "hidden", background: "#f0f0f0", userSelect: "none", position: "relative" }}
             >
               <div style={{ transform: `scale(${preview3dZoom})`, transformOrigin: "center 65%", transition: "transform 0.15s" }}>
-                <Box3DPreview faceColors={state.outside.faceColors} insideFaceColors={state.inside.faceColors} insideColor={state.insideColor} outsideItems={state.outside.items} insideItems={state.inside.items} openAmount={openAmount} rotX={rotX} rotY={rotY} hideFlaps={hideFlaps} squareFaces={hideFlaps ? faces : undefined} />
+                <Box3DPreview faceColors={state.outside.faceColors} insideFaceColors={state.inside.faceColors} insideColor={state.insideColor} outsideItems={state.outside.items} insideItems={state.inside.items} outsideGlobalItems={outsideGlobalItemsForPreview} insideGlobalItems={insideGlobalItemsForPreview} openAmount={openAmount} rotX={rotX} rotY={rotY} hideFlaps={hideFlaps} squareFaces={hideFlaps ? faces : undefined} />
               </div>
               {/* Zoom buttons — bottom right */}
               <div style={{ position: "absolute", bottom: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
@@ -1759,6 +2150,8 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 insideColor={state.insideColor}
                 outsideItems={state.outside.items}
                 insideItems={state.inside.items}
+                outsideGlobalItems={outsideGlobalItemsForPreview}
+                insideGlobalItems={insideGlobalItemsForPreview}
                 openAmount={100}
                 rotX={finalRotX}
                 rotY={finalRotY}
@@ -1944,7 +2337,15 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 // Generate per-face canvas snapshots (color + images) for admin preview
                 const DEFAULT_FC = "#c8a97e";
                 const fc2 = state.outside.faceColors;
-                const fi = (id: string) => state.outside.items[id] ?? [];
+                // Project global items onto faces with face-relative coordinates
+                const globalProjected = projectGlobalItemsToFaces(state.outside.globalItems ?? [], faces);
+                const fi = (id: string): CanvasItem[] => {
+                  const fDef = faces.find(f => f.id === id);
+                  const perFace = state.outside.items[id] ?? [];
+                  if (!fDef) return perFace;
+                  const translated = (globalProjected[id] ?? []).map(item => ({ ...item, x: item.x - fDef.x, y: item.y - fDef.y }));
+                  return [...translated, ...perFace];
+                };
                 let boxFaceImages: { front?: string; right?: string; top?: string } = {};
                 try {
                   const [front, right, top] = await Promise.all([
@@ -1961,7 +2362,9 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                   const raw = product.startingPrice?.trim() ?? "";
                   const ppu = parseFloat(raw.replace(/[^0-9.]/g, "")) || 0;
                   const existing = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<Record<string, unknown>>;
-                  existing.push({ id: cartId, name: product.name, qty: selectedQty, pricePerUnit: ppu, total: ppu * selectedQty, thumb, boxFaceImages });
+                  const previewBoxColor = Object.values(state.outside.faceColors)[0] ?? "#c8a97e";
+                  const pW = hideFlaps ? sqPanelW : BW, pD = hideFlaps ? sqPanelW : BD;
+                  existing.push({ id: cartId, name: product.name, qty: selectedQty, pricePerUnit: ppu, total: ppu * selectedQty, thumb, boxFaceImages, previewBoxColor, previewW: pW, previewH: BH, previewD: pD });
                   localStorage.setItem("wp_cart", JSON.stringify(existing));
                   localStorage.setItem("wp_cart_count", String(existing.length));
                   window.dispatchEvent(new CustomEvent("wp-cart-updated", { detail: { count: existing.length } }));
@@ -2017,6 +2420,22 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
             setBoxPreviewRotY(210);
             setBoxPreviewOpen(true);
           }}
+          previewRender={(rx, ry) => (
+            <Box3DPreview
+              faceColors={state.outside.faceColors}
+              insideFaceColors={state.inside.faceColors}
+              insideColor={state.insideColor}
+              outsideItems={state.outside.items}
+              insideItems={state.inside.items}
+              outsideGlobalItems={outsideGlobalItemsForPreview}
+              insideGlobalItems={insideGlobalItemsForPreview}
+              openAmount={100}
+              rotX={rx}
+              rotY={ry}
+              hideFlaps={hideFlaps}
+              squareFaces={hideFlaps ? faces : undefined}
+            />
+          )}
         />
       );
     })()}
@@ -2053,6 +2472,8 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               insideColor={state.insideColor}
               outsideItems={state.outside.items}
               insideItems={state.inside.items}
+              outsideGlobalItems={outsideGlobalItemsForPreview}
+              insideGlobalItems={insideGlobalItemsForPreview}
               openAmount={100}
               rotX={boxPreviewRotX}
               rotY={boxPreviewRotY}

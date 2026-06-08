@@ -1330,6 +1330,11 @@ body:has(.landing-page) {
   transition: opacity 0.2s;
 }
 .lp-pop-btn:hover { opacity: 0.88; }
+.lp-shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: lp-shimmer 1.4s infinite linear;
+}
 
 /* ── HOW IT WORKS ────────────────────────────────────────── */
 .lp-how { background: #ffffff; scroll-margin-top: 60px; }

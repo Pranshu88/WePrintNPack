@@ -262,7 +262,22 @@ export default function PopularProductsCarousel({ products }: { products: Produc
     scrollRef.current?.scrollBy({ left: dir === "right" ? 360 : -360, behavior: "smooth" });
   };
 
-  if (items.length === 0) return null;
+  if (items.length === 0) return (
+    <div className="lp-pop-carousel">
+      <div className="lp-pop-row" style={{ overflow: "hidden" }}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="lp-pop-card" style={{ pointerEvents: "none" }}>
+            <div className="lp-pop-img lp-shimmer" />
+            <div className="lp-pop-info" style={{ gap: 8 }}>
+              <div className="lp-shimmer" style={{ height: 14, borderRadius: 6, width: "70%" }} />
+              <div className="lp-shimmer" style={{ height: 12, borderRadius: 6, width: "45%" }} />
+              <div className="lp-shimmer" style={{ height: 38, borderRadius: 8, marginTop: "auto" }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="lp-pop-carousel">

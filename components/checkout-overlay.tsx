@@ -1,11 +1,39 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import AuthModal from "@/components/auth-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AuthCustomer = { id: string; firstName: string; lastName: string; email: string };
-type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; boxFaceImages?: { front?: string; right?: string; top?: string } };
+type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; boxFaceImages?: { front?: string; right?: string; top?: string }; previewBoxColor?: string; previewW?: number; previewH?: number; previewD?: number };
+
+function SimpleCube3D({ bg, faceImages, previewW = 1, previewH = 1, previewD = 1 }: { bg: string; faceImages?: { front?: string; right?: string; top?: string }; previewW?: number; previewH?: number; previewD?: number }) {
+  const MAX = 44;
+  const sc = MAX / Math.max(previewW, previewH, previewD);
+  const fw = previewW * sc, fh = previewH * sc;
+  const fd = Math.max(previewD * sc, 11);
+
+  const face = (w: number, h: number, imgSrc: string | undefined, transform: string): React.CSSProperties => ({
+    position: "absolute", width: w, height: h,
+    left: (fw - w) / 2, top: (fh - h) / 2,
+    background: imgSrc ? `url(${imgSrc}) center/cover no-repeat` : bg,
+    border: "1px solid rgba(0,0,0,0.13)",
+    backfaceVisibility: "hidden", boxSizing: "border-box",
+    transform,
+  });
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", perspective: 220 }}>
+      <div style={{ position: "relative", width: fw, height: fh, transformStyle: "preserve-3d", transform: "rotateX(-30deg) rotateY(30deg)" }}>
+        <div style={face(fw, fh, faceImages?.front,  `translateZ(${fd/2}px)`)} />
+        <div style={face(fw, fh, faceImages?.front,  `rotateY(180deg) translateZ(${fd/2}px)`)} />
+        <div style={face(fd, fh, faceImages?.right,  `rotateY(-90deg) translateZ(${fw/2}px)`)} />
+        <div style={face(fd, fh, faceImages?.right,  `rotateY(90deg) translateZ(${fw/2}px)`)} />
+        <div style={face(fw, fd, faceImages?.top,    `rotateX(-90deg) translateZ(${fh/2}px)`)} />
+        <div style={face(fw, fd, faceImages?.top,    `rotateX(90deg) translateZ(${fh/2}px)`)} />
+      </div>
+    </div>
+  );
+}
 
 type CheckoutOverlayProps = {
   productName: string;
@@ -19,6 +47,7 @@ type CheckoutOverlayProps = {
   onClose: () => void;
   onCloseAll: () => void;
   onPreviewClick?: () => void;
+  previewRender?: (rotX: number, rotY: number) => React.ReactNode;
 };
 
 export default function CheckoutOverlay({
@@ -33,9 +62,13 @@ export default function CheckoutOverlay({
   onClose,
   onCloseAll,
   onPreviewClick,
+  previewRender,
 }: CheckoutOverlayProps) {
   // ── Internal state ──────────────────────────────────────────────────────────
   const [cartUser, setCartUser] = useState<AuthCustomer | null>(null);
+  const [previewRotX, setPreviewRotX] = useState(-20);
+  const [previewRotY, setPreviewRotY] = useState(210);
+  const previewRotRef = useRef({ rx: -20, ry: 210 });
   const [authForCartOpen, setAuthForCartOpen] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [existingCartItems, setExistingCartItems] = useState<SavedCartItem[]>([]);
@@ -193,41 +226,49 @@ export default function CheckoutOverlay({
                 border: "1.5px solid #e5e7eb", borderRadius: 14, padding: "16px 20px",
                 display: "flex", alignItems: "center", gap: 18, background: "#fff",
               }}>
-                {/* Thumbnail — click opens 3D preview if handler provided */}
+                {/* Thumbnail — draggable 3D preview if provided, else thumb image */}
                 <div
-                  onClick={onPreviewClick}
                   style={{
-                    width: 110, height: 80, borderRadius: 8,
-                    overflow: "hidden", background: thumb ? "transparent" : "#e5e7eb", flexShrink: 0,
+                    width: 110, height: 110, borderRadius: 8,
+                    overflow: "hidden", flexShrink: 0,
                     border: "1px solid #e5e7eb",
-                    cursor: onPreviewClick ? "pointer" : "default",
                     position: "relative",
+                    background: "transparent",
+                    cursor: previewRender ? "grab" : "default",
                   }}
+                  onMouseDown={previewRender ? (e) => {
+                    const startX = e.clientX, startY = e.clientY;
+                    const startRX = previewRotRef.current.rx, startRY = previewRotRef.current.ry;
+                    const onMove = (me: MouseEvent) => {
+                      previewRotRef.current.ry = startRY + (me.clientX - startX) * 0.5;
+                      previewRotRef.current.rx = Math.max(-80, Math.min(80, startRX - (me.clientY - startY) * 0.5));
+                      setPreviewRotY(previewRotRef.current.ry);
+                      setPreviewRotX(previewRotRef.current.rx);
+                    };
+                    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+                    window.addEventListener("mousemove", onMove);
+                    window.addEventListener("mouseup", onUp);
+                  } : undefined}
                 >
-                  {thumb
-                    ? <img src={thumb} alt="preview" style={{ width: "100%", height: "100%", objectFit: "fill", display: "block" }} />
-                    : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af", fontSize: "0.72rem" }}>No preview</div>}
-                  {onPreviewClick && thumb && (
+                  {previewRender ? (
                     <div style={{
-                      position: "absolute", inset: 0, background: "rgba(0,0,0,0)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      transition: "background 0.18s",
-                    }}
-                      onMouseEnter={e => (e.currentTarget.style.background = "rgba(0,0,0,0.32)")}
-                      onMouseLeave={e => (e.currentTarget.style.background = "rgba(0,0,0,0)")}
-                    >
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" style={{ opacity: 0, transition: "opacity 0.18s" }}
-                        ref={el => {
-                          if (el) {
-                            const parent = el.parentElement!;
-                            parent.onmouseenter = () => { parent.style.background = "rgba(0,0,0,0.32)"; el.style.opacity = "1"; };
-                            parent.onmouseleave = () => { parent.style.background = "rgba(0,0,0,0)";    el.style.opacity = "0"; };
-                          }
-                        }}
-                      >
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-                      </svg>
+                      position: "absolute",
+                      width: "760px",
+                      height: "620px",
+                      top: "50%",
+                      left: "50%",
+                      marginLeft: "-380px",
+                      marginTop: "-310px",
+                      transform: "scale(0.33)",
+                      transformOrigin: "center center",
+                      pointerEvents: "none",
+                    }}>
+                      {previewRender(previewRotX, previewRotY)}
                     </div>
+                  ) : thumb ? (
+                    <img src={thumb} alt="preview" style={{ width: "100%", height: "100%", objectFit: "fill", display: "block" }} />
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af", fontSize: "0.72rem" }}>No preview</div>
                   )}
                 </div>
 
@@ -293,15 +334,17 @@ export default function CheckoutOverlay({
                       border: "1.5px solid #e5e7eb", borderRadius: 14, padding: "16px 20px",
                       display: "flex", alignItems: "center", gap: 18, background: "#fff",
                     }}>
-                      {/* Thumbnail */}
+                      {/* Thumbnail — 3D cube if previewBoxColor saved, else canvas thumb */}
                       <div style={{
-                        width: 110, height: 66, borderRadius: 8, overflow: "hidden", flexShrink: 0,
-                        background: item.thumb ? "transparent" : "linear-gradient(135deg,#1e1b4b,#312e81)",
-                        border: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center",
+                        width: 110, height: 110, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+                        background: "transparent",
+                        border: "1px solid #e5e7eb",
                       }}>
-                        {item.thumb
-                          ? <img src={item.thumb} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                          : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                        {item.boxFaceImages?.front
+                          ? <SimpleCube3D bg={item.previewBoxColor ?? "#c8a97e"} faceImages={item.boxFaceImages} previewW={item.previewW ?? 315} previewH={item.previewH ?? 202} previewD={item.previewD ?? 62} />
+                          : item.thumb
+                            ? <img src={item.thumb} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                            : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
                         }
                       </div>
 
