@@ -3,63 +3,87 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-function TileCard({ tile }: { tile: { id: string; name: string; price: string; image: string; link: string } }) {
+function TileCard({ tile }: { tile: { id: string; name: string; price: string; image: string; link: string; dielineSlug: string } }) {
   const [hovered, setHovered] = useState(false);
   return (
-    <Link href={tile.link} style={{ textDecoration: "none", color: "inherit" }}>
-      <div
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        style={{
-          borderRadius: "14px", overflow: "hidden",
-          border: "1.5px solid #e5e7eb",
-          background: "#fff", cursor: "pointer",
-          boxShadow: hovered ? "0 6px 20px rgba(0,0,0,0.1)" : "none",
-          transition: "box-shadow 0.2s, transform 0.2s",
-          transform: hovered ? "translateY(-2px)" : "translateY(0)",
-        }}
-      >
-        <div style={{ position: "relative", aspectRatio: "4/3", overflow: "hidden", background: "#f9fafb" }}>
-          <img
-            src={tile.image}
-            alt={tile.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-          {hovered && (
-            <div style={{
-              position: "absolute", inset: 0,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              pointerEvents: "none",
-            }}>
-              <span style={{
-                padding: "0.45rem 1.3rem",
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        borderRadius: "14px", overflow: "hidden",
+        border: "1.5px solid #e5e7eb",
+        background: "#fff", cursor: "pointer",
+        boxShadow: hovered ? "0 6px 20px rgba(0,0,0,0.1)" : "none",
+        transition: "box-shadow 0.2s, transform 0.2s",
+        transform: hovered ? "translateY(-2px)" : "translateY(0)",
+        textDecoration: "none", color: "inherit",
+      }}
+    >
+      <div style={{ position: "relative", aspectRatio: "4/3", overflow: "hidden", background: "#f9fafb" }}>
+        <img
+          src={tile.image}
+          alt={tile.name}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+        {hovered && (
+          <div style={{
+            position: "absolute", inset: 0,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+            background: "rgba(0,0,0,0.18)",
+          }}>
+            <Link
+              href={tile.link}
+              style={{
+                padding: "0.45rem 1.2rem",
                 borderRadius: "999px",
                 background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)",
                 color: "#fff",
                 fontWeight: 700,
-                fontSize: "0.85rem",
+                fontSize: "0.82rem",
                 letterSpacing: "0.02em",
                 boxShadow: "0 4px 16px rgba(124,58,237,0.4)",
-              }}>
-                Continue →
-              </span>
-            </div>
-          )}
-        </div>
-        <div style={{ padding: "1rem" }}>
-          <p style={{ margin: "0 0 0.25rem", fontWeight: 700, fontSize: "1rem", color: "#111827" }}>{tile.name}</p>
-          <p style={{ margin: 0, fontSize: "0.85rem", color: "#6b7280" }}>{tile.price}</p>
-        </div>
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Mockup
+            </Link>
+            <Link
+              href={`/dieline/${tile.dielineSlug}`}
+              style={{
+                padding: "0.45rem 1.2rem",
+                borderRadius: "999px",
+                background: "#fff",
+                color: "#111827",
+                fontWeight: 700,
+                fontSize: "0.82rem",
+                letterSpacing: "0.02em",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+                border: "1.5px solid #e5e7eb",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Dieline
+            </Link>
+          </div>
+        )}
       </div>
-    </Link>
+      <Link href={tile.link} style={{ textDecoration: "none", color: "inherit", display: "block", padding: "1rem" }}>
+        <p style={{ margin: "0 0 0.25rem", fontWeight: 700, fontSize: "1rem", color: "#111827" }}>{tile.name}</p>
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "#6b7280" }}>{tile.price}</p>
+      </Link>
+    </div>
   );
 }
 
 const PACKAGING_DEFAULTS = [
-  { id: "pb-standard",  title: "Pizza Box",            price: "$150 + tax", metaKey: "pizzabox-packages-meta",     subSlug: "pizza-boxes" },
-  { id: "mb-standard",  title: "Mailer Box",           price: "$200 + tax", metaKey: "mb-packages-meta",           subSlug: "mailer-boxes" },
-  { id: "sb-standard",  title: "Shipping Box",         price: "$220 + tax", metaKey: "sb-packages-meta",           subSlug: "shipping-boxes" },
-  { id: "ssb-standard", title: "Square Shipping Box",  price: "$230 + tax", metaKey: "ssb-packages-meta",          subSlug: "square-shipping-boxes" },
+  { id: "pb-standard",  title: "Pizza Box",            price: "$150 + tax", metaKey: "pizzabox-packages-meta",     subSlug: "pizza-boxes",           dielineSlug: "pizza-boxes" },
+  { id: "mb-standard",  title: "Mailer Box",           price: "$200 + tax", metaKey: "mb-packages-meta",           subSlug: "mailer-boxes",           dielineSlug: "mailer-boxes" },
+  { id: "sb-standard",  title: "Shipping Box",         price: "$220 + tax", metaKey: "sb-packages-meta",           subSlug: "shipping-boxes",         dielineSlug: "shipping-boxes" },
+  { id: "ssb-standard", title: "Square Shipping Box",  price: "$230 + tax", metaKey: "ssb-packages-meta",          subSlug: "square-shipping-boxes",  dielineSlug: "square-shipping-boxes" },
 ];
 
 function openIDB(): Promise<IDBDatabase> {
@@ -85,7 +109,7 @@ async function loadIDBImage(id: string): Promise<string> {
   }
 }
 
-type Tile = { id: string; name: string; price: string; image: string; link: string };
+type Tile = { id: string; name: string; price: string; image: string; link: string; dielineSlug: string };
 
 export default function PackagingBoxPage() {
   const [tiles, setTiles] = useState<Tile[]>([]);
@@ -110,6 +134,7 @@ export default function PackagingBoxPage() {
           price: saved?.price ?? pkg.price,
           image: img || "",
           link: `/products/packaging-box/${pkg.subSlug}`,
+          dielineSlug: pkg.dielineSlug,
         });
       }
 
