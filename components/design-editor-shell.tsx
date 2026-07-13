@@ -1155,6 +1155,10 @@ type Props = {
   initialBackItems?: SerializableItem[];
   initialFrontBgColor?: string;
   initialBackBgColor?: string;
+  // Colors configured on the gallery template's own Color spec (via the admin swatch
+  // picker) — shown as the pickable "Background Color" swatches instead of the generic
+  // BG_COLOR_PRESETS list, so the editor offers exactly the colors admin curated.
+  materialColors?: string[];
   onSaveAdmin?: (
     frontItems: SerializableItem[],
     backItems: SerializableItem[],
@@ -1168,6 +1172,9 @@ type Props = {
   onSaveAndContinue?: (quantity: number, frontPng: string, backPng: string) => void;
   productName?: string;
   pricePerUnit?: number;
+  // Overrides the fixed category dims below with a custom physical size (used for
+  // admin-created custom gallery templates that declared their own Width/Length).
+  customDimsInches?: { width: number; height: number };
 };
 
 // ─── SidebarIcon ──────────────────────────────────────────────────────────────
@@ -1356,10 +1363,12 @@ export default function DesignEditorShell({
   initialBackItems,
   initialFrontBgColor,
   initialBackBgColor,
+  materialColors,
   onSaveAdmin,
   onSaveAndContinue,
   productName,
   pricePerUnit,
+  customDimsInches,
 }: Props) {
   type AuthCustomer = { id: string; firstName: string; lastName: string; email: string };
   const isBusinessCard  = productType === "business-card";
@@ -1378,9 +1387,21 @@ export default function DesignEditorShell({
   const isYardSign         = productType === "yard-sign";
   const isFlatArt          = isBusinessCard || isFlyer || isPosterSmall || isPosterLarge || isBanner || isLabel || isYardSign;
   const isSingleSide       = isPosterSmall || isPosterLarge || isBanner || isLabel || isYardSign;
+  const colorPresets = materialColors && materialColors.length > 0
+    ? materialColors.map((hex) => ({ label: hex, value: hex }))
+    : BG_COLOR_PRESETS;
   // labelDims is set dynamically from the SVG viewBox once the template loads
   const [labelDims, setLabelDims] = useState(LABEL_DIMS_DEFAULT);
-  const dims = isBusinessCard  ? BC_DIMS
+  const PX_PER_INCH = 130;
+  const customDims = customDimsInches ? (() => {
+    const CW = Math.round(customDimsInches.width * PX_PER_INCH);
+    const CH = Math.round(customDimsInches.height * PX_PER_INCH);
+    const PX = Math.round(CW * 0.065);
+    const PY = Math.round(CH * 0.065);
+    return { CW, CH, PX, PY, PW: CW - PX * 2, PH: CH - PY * 2 };
+  })() : null;
+  const dims = customDims       ? customDims
+             : isBusinessCard  ? BC_DIMS
              : isFlyerExpress  ? FLYER_EXPRESS_DIMS
              : isFlyerPrime    ? FLYER_PRIME_DIMS
              : isPosterSmall   ? POSTER_SMALL_DIMS
@@ -3005,17 +3026,17 @@ export default function DesignEditorShell({
 
                 {/* ── Background Color section ── */}
                 <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: "0.88rem", color: "#111827" }}>
-                  Background Color
+                  {materialColors && materialColors.length > 0 ? "Material color" : "Background Color"}
                 </p>
                 <p style={{ margin: "0 0 0.75rem", fontSize: "0.78rem", color: "#6b7280" }}>
                   Card Background
                   <br />
                   <span style={{ color: "#374151", fontWeight: 600 }}>
-                    Selected: {BG_COLOR_PRESETS.find(p => p.value === bgColors[activeSide])?.label ?? bgColors[activeSide]}
+                    Selected: {colorPresets.find(p => p.value === bgColors[activeSide])?.label ?? bgColors[activeSide]}
                   </span>
                 </p>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "1.25rem" }}>
-                  {BG_COLOR_PRESETS.map((p) => {
+                  {colorPresets.map((p) => {
                     const isActive = bgColors[activeSide] === p.value;
                     return (
                       <button
@@ -3305,6 +3326,27 @@ export default function DesignEditorShell({
             height: CANVAS_H,
           }}>
 
+            {/* Safety area / Bleed legend — top right, above the card */}
+            <div style={{
+              position: "absolute", top: -60, right: 0,
+              display: "flex", gap: 12, pointerEvents: "none", zIndex: 10,
+            }}>
+              <span style={{
+                display: "inline-flex", alignItems: "center", padding: "9px 24px",
+                borderRadius: 999, border: "2.5px solid #22c55e", background: "#f0fdf4",
+                color: "#15803d", fontSize: "1.3rem", fontWeight: 700, whiteSpace: "nowrap",
+              }}>
+                Safety Area
+              </span>
+              <span style={{
+                display: "inline-flex", alignItems: "center", padding: "9px 24px",
+                borderRadius: 999, border: "2.5px solid #3b82f6", background: "#eff6ff",
+                color: "#1d4ed8", fontSize: "1.3rem", fontWeight: 700, whiteSpace: "nowrap",
+              }}>
+                Bleed
+              </span>
+            </div>
+
             {/* Vertical dimension line — left of card, outside */}
             <div style={{
               position: "absolute", right: "100%", top: 0,
@@ -3323,7 +3365,7 @@ export default function DesignEditorShell({
                   writingMode: "vertical-rl", transform: "rotate(180deg)",
                   whiteSpace: "nowrap", margin: "6px 0", letterSpacing: "0.02em",
                 }}>
-                  {isBusinessCard ? "2 inches" : isFlyerExpress ? "5.5 inches" : isFlyerPrime ? "11 inches" : isPosterSmall ? "17 inches" : isPosterLarge ? "24 inches" : isBannerVinyl ? "3 inches" : isBannerOutdoor ? "4 inches" : isBannerRollup ? "81 inches" : isLabel ? "4 inches" : isYardSign ? "24 inches" : "30.48cm"}
+                  {customDimsInches ? `${customDimsInches.height} inches` : isBusinessCard ? "2 inches" : isFlyerExpress ? "5.5 inches" : isFlyerPrime ? "11 inches" : isPosterSmall ? "17 inches" : isPosterLarge ? "24 inches" : isBannerVinyl ? "3 inches" : isBannerOutdoor ? "4 inches" : isBannerRollup ? "81 inches" : isLabel ? "4 inches" : isYardSign ? "24 inches" : "30.48cm"}
                 </span>
                 {/* Bottom line */}
                 <div style={{ flex: 1, width: "3px", background: "rgba(40,40,40,0.85)" }} />
@@ -3349,7 +3391,7 @@ export default function DesignEditorShell({
                   fontSize: "1.15rem", color: "rgba(20,20,20,1)", fontWeight: 900,
                   whiteSpace: "nowrap", margin: "0 8px", letterSpacing: "0.02em",
                 }}>
-                  {isBusinessCard ? "3.5 inches" : isFlyer ? "8.5 inches" : isPosterSmall ? "11 inches" : isPosterLarge ? "18 inches" : isBannerVinyl ? "6 inches" : isBannerOutdoor ? "8 inches" : isBannerRollup ? "33 inches" : isLabel ? "4 inches" : isYardSign ? "18 inches" : "30.48cm"}
+                  {customDimsInches ? `${customDimsInches.width} inches` : isBusinessCard ? "3.5 inches" : isFlyer ? "8.5 inches" : isPosterSmall ? "11 inches" : isPosterLarge ? "18 inches" : isBannerVinyl ? "6 inches" : isBannerOutdoor ? "8 inches" : isBannerRollup ? "33 inches" : isLabel ? "4 inches" : isYardSign ? "18 inches" : "30.48cm"}
                 </span>
                 {/* Right line */}
                 <div style={{ flex: 1, height: "3px", background: "rgba(40,40,40,0.85)" }} />
@@ -3361,14 +3403,13 @@ export default function DesignEditorShell({
             {/* Inner canvas — has borderRadius + overflow clipping for BC */}
             <div style={{
               position: "absolute", inset: 0,
-              outline: "2.5px solid #3b82f6",
-              outlineOffset: "1px",
-              ...(isFlatArt ? { borderRadius: isBusinessCard ? "10px" : "0px", overflow: "hidden" } : {}),
+              boxShadow: "0 0 0 2.5px #3b82f6",
+              ...(isFlatArt ? { borderRadius: "0px", overflow: "hidden" } : {}),
             }}>
             {/* Canvas background for business card — only shown when no SVG template (pure colour designs) */}
             {isFlatArt && !bgSvg[activeSide] && (
               <div style={{
-                position: "absolute", inset: 0, borderRadius: isBusinessCard ? "10px" : "0px",
+                position: "absolute", inset: 0, borderRadius: "0px",
                 background: bgColors[activeSide],
                 zIndex: 0,
               }} />
@@ -3376,7 +3417,7 @@ export default function DesignEditorShell({
 
             {/* Base image — inline SVG when bgSvg available (allows shape click-to-edit) */}
             <div
-              style={{ position: "absolute", inset: 0, borderRadius: isBusinessCard ? "12px" : "0px", overflow: "hidden", zIndex: 1 }}
+              style={{ position: "absolute", inset: 0, borderRadius: "0px", overflow: "hidden", zIndex: 1 }}
               onClick={bgSvg[activeSide] ? handleShapeClick : undefined}
             >
               {bgSvg[activeSide] ? (
@@ -3388,7 +3429,7 @@ export default function DesignEditorShell({
                 <img
                   src={baseImageSrc}
                   alt={shirt?.name ?? "design"}
-                  style={{ width: "100%", height: "100%", objectFit: isFlatArt ? "contain" : "cover", display: "block" }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
               ) : null}
             </div>
@@ -3461,8 +3502,8 @@ export default function DesignEditorShell({
                 bottom: -(CANVAS_H - PRINT_Y - PRINT_H - 5),
                 left:   -(PRINT_X - 5),
                 right:  -(CANVAS_W - PRINT_X - PRINT_W - 5),
-                border: "1px dashed rgba(148,163,184,0.6)",
-                borderRadius: "8px", pointerEvents: "none",
+                border: "1px dashed #22c55e",
+                borderRadius: "0px", pointerEvents: "none",
               }} />
 
               {/* Design items */}
@@ -3824,9 +3865,14 @@ export default function DesignEditorShell({
                 </div>
 
                 {/* Mini canvas thumbnail */}
+                {(() => {
+                  const thumbW = customDimsInches ? 100 : isBusinessCard ? 100 : isFlyerExpress ? 100 : isFlyerPrime ? 90 : isLabel ? 70 : 70;
+                  const thumbH = customDimsInches ? Math.round(100 * (customDimsInches.height / customDimsInches.width)) : isBusinessCard ? 58 : isFlyerExpress ? 65 : isFlyerPrime ? 71 : isLabel ? 70 : 88;
+                  const thumbScale = thumbW / CANVAS_W;
+                  return (
                 <div style={{
-                  width: isBusinessCard ? "100px" : isFlyerExpress ? "100px" : isFlyerPrime ? "90px" : isLabel ? "70px" : "70px",
-                  height: isBusinessCard ? "58px" : isFlyerExpress ? "65px" : isFlyerPrime ? "71px" : isLabel ? "70px" : "88px",
+                  width: `${thumbW}px`,
+                  height: `${thumbH}px`,
                   background: thumbBg,
                   borderRadius: isLabel ? "50%" : "7px", overflow: "hidden",
                   position: "relative", border: "1px solid rgba(0,0,0,0.08)",
@@ -3851,11 +3897,10 @@ export default function DesignEditorShell({
                       </svg>
                       <span style={{ fontSize: "0.5rem", color: "#f97316", fontWeight: 700, textAlign: "center", lineHeight: 1.2 }}>Pick back</span>
                     </div>
-                  ) : adminMode ? (
+                  ) : adminMode && (sides[side].template?.baseImage || (side === "front" ? adminFrontImage : adminBackImage)) ? (
                     <img
                       src={sides[side].template?.baseImage
-                        ?? (side === "front" ? adminFrontImage : adminBackImage)
-                        ?? ""}
+                        ?? (side === "front" ? adminFrontImage : adminBackImage)}
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "contain" }}
                     />
@@ -3870,15 +3915,50 @@ export default function DesignEditorShell({
                   ) : !isBusinessCard && shirt?.images[0] ? (
                     <img src={shirt.images[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45, mixBlendMode: "multiply" }} />
                   ) : null}
-                  {sd.items.length > 0 && !(isBusinessCard && side === "back" && !bgSvg["back"] && !sides["back"].template?.baseImage) && (
-                    <div style={{
-                      position: "absolute", inset: "18% 10%",
-                      border: "1px dashed rgba(124,58,237,0.5)",
-                      borderRadius: "2px",
-                      background: "rgba(124,58,237,0.04)",
-                    }} />
-                  )}
+                  {sd.items.length > 0 && !(isBusinessCard && side === "back" && !bgSvg["back"] && !sides["back"].template?.baseImage) && sd.items.map((item) => (
+                    item.kind === "image" ? (
+                      <img
+                        key={item.id}
+                        src={item.src}
+                        alt=""
+                        style={{
+                          position: "absolute",
+                          left: `${item.x * thumbScale}px`,
+                          top: `${item.y * thumbScale}px`,
+                          width: `${item.w * thumbScale}px`,
+                          height: `${(item.h ?? item.w) * thumbScale}px`,
+                          objectFit: "cover",
+                          transform: item.rotation ? `rotate(${item.rotation}deg)` : undefined,
+                          pointerEvents: "none",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        key={item.id}
+                        style={{
+                          position: "absolute",
+                          left: `${item.x * thumbScale}px`,
+                          top: `${item.y * thumbScale}px`,
+                          width: `${item.w * thumbScale}px`,
+                          fontSize: `${Math.max(2, (item.size ?? 16) * thumbScale)}px`,
+                          fontFamily: item.font,
+                          fontWeight: item.bold ? 700 : 400,
+                          color: item.color ?? "#111827",
+                          textAlign: item.align ?? "left",
+                          lineHeight: 1.1,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          transformOrigin: "top left",
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {item.text}
+                      </div>
+                    )
+                  ))}
                 </div>
+                  );
+                })()}
                 <span style={{
                   fontSize: "0.7rem", fontWeight: 800,
                   textTransform: "uppercase", letterSpacing: "0.06em",
@@ -4146,58 +4226,45 @@ export default function DesignEditorShell({
                   onClick={() => {
                     pushBgHistory();
                     setBgColors((prev) => ({ ...prev, back: frontBg }));
-                    if (isFlyer) {
-                      // Scale items from BC viewBox (460×270) → flyer canvas
-                      const SVG_W = 460, SVG_H = 270;
-                      const xScale = dims.CW / SVG_W;
-                      const yScale = dims.CH / SVG_H;
-                      const parsed = parseSVGForEditing(previewUrl, { extractGraphics: true, px: BC_DIMS.PX, py: BC_DIMS.PY });
-                      const scaleItems = (items: CanvasItem[]): CanvasItem[] => items.map((it) => {
-                        if (it.kind === "text") {
-                          const s = Math.max(xScale, yScale);
-                          return { ...it, x: (BC_DIMS.PX + it.x) * xScale - dims.PX, y: (BC_DIMS.PY + it.y) * yScale - dims.PY, w: it.w * xScale, size: it.size * s };
-                        }
-                        if (it.kind === "image") return { ...it, x: (BC_DIMS.PX + it.x) * xScale - dims.PX, y: (BC_DIMS.PY + it.y) * yScale - dims.PY, w: it.w * xScale, h: it.h * yScale };
-                        return it;
-                      });
-                      const scaledSvg = coloredSvg.replace(/<svg([^>]*)>/i, (_m, attrs) => {
-                        const cleaned = attrs
-                          .replace(/\s*width="[^"]*"/g, "")
-                          .replace(/\s*height="[^"]*"/g, "")
-                          .replace(/\s*preserveAspectRatio="[^"]*"/g, "");
-                        return `<svg${cleaned} width="100%" height="100%" preserveAspectRatio="none">`;
-                      });
-                      const patchFull = (svg: string) => svg.replace(/<svg([^>]*)>/i, (_m, a) => {
-                        const c = a.replace(/\s*width="[^"]*"/g,"").replace(/\s*height="[^"]*"/g,"").replace(/\s*preserveAspectRatio="[^"]*"/g,"");
-                        return `<svg${c} width="100%" height="100%" preserveAspectRatio="none">`;
-                      });
-                      const bgStr = parsed ? patchFull(patchSvgBackground(parsed.bgStr, frontBg)) : patchFull(scaledSvg);
-                      setBgSvg((prev) => ({ ...prev, back: bgStr }));
-                      setSides((prev) => ({
-                        ...prev,
-                        back: {
-                          ...prev.back,
-                          template: { baseImage: previewUrl, overlayImage: undefined, overlayColor: "#ffffff" },
-                          items: parsed ? scaleItems([...parsed.graphicItems, ...parsed.textItems.map((t) => ({ ...t, kind: "text" as const }))]) : [],
-                        },
-                      }));
-                    } else {
-                      const parsed = parseSVGForEditing(previewUrl, { extractGraphics: true });
-                      setBgSvg((prev) => ({ ...prev, back: parsed ? parsed.bgStr : "" }));
-                      setSides((prev) => ({
-                        ...prev,
-                        back: {
-                          ...prev.back,
-                          template: { baseImage: previewUrl, overlayImage: undefined, overlayColor: "#ffffff" },
-                          items: parsed
-                            ? [
-                                ...parsed.graphicItems,
-                                ...parsed.textItems.map((t) => ({ ...t, kind: "text" as const })),
-                              ]
-                            : [],
-                        },
-                      }));
-                    }
+                    // Every back template is drawn on a fixed 460×270 (business-card-ratio)
+                    // viewBox, so it must always be rescaled to the current product's actual
+                    // canvas size (dims.CW/CH) — otherwise anything that isn't business-card
+                    // shaped (a tall custom-size label, a poster, etc.) letterboxes into a
+                    // small strip instead of filling the page. For business cards this scale
+                    // factor is exactly 1 (BC_DIMS already is 460×270), so it's a no-op there.
+                    const SVG_W = 460, SVG_H = 270;
+                    const xScale = dims.CW / SVG_W;
+                    const yScale = dims.CH / SVG_H;
+                    const parsed = parseSVGForEditing(previewUrl, { extractGraphics: true, px: BC_DIMS.PX, py: BC_DIMS.PY });
+                    const scaleItems = (items: CanvasItem[]): CanvasItem[] => items.map((it) => {
+                      if (it.kind === "text") {
+                        const s = Math.max(xScale, yScale);
+                        return { ...it, x: (BC_DIMS.PX + it.x) * xScale - dims.PX, y: (BC_DIMS.PY + it.y) * yScale - dims.PY, w: it.w * xScale, size: it.size * s };
+                      }
+                      if (it.kind === "image") return { ...it, x: (BC_DIMS.PX + it.x) * xScale - dims.PX, y: (BC_DIMS.PY + it.y) * yScale - dims.PY, w: it.w * xScale, h: it.h * yScale };
+                      return it;
+                    });
+                    const scaledSvg = coloredSvg.replace(/<svg([^>]*)>/i, (_m, attrs) => {
+                      const cleaned = attrs
+                        .replace(/\s*width="[^"]*"/g, "")
+                        .replace(/\s*height="[^"]*"/g, "")
+                        .replace(/\s*preserveAspectRatio="[^"]*"/g, "");
+                      return `<svg${cleaned} width="100%" height="100%" preserveAspectRatio="none">`;
+                    });
+                    const patchFull = (svg: string) => svg.replace(/<svg([^>]*)>/i, (_m, a) => {
+                      const c = a.replace(/\s*width="[^"]*"/g,"").replace(/\s*height="[^"]*"/g,"").replace(/\s*preserveAspectRatio="[^"]*"/g,"");
+                      return `<svg${c} width="100%" height="100%" preserveAspectRatio="none">`;
+                    });
+                    const bgStr = parsed ? patchFull(patchSvgBackground(parsed.bgStr, frontBg)) : patchFull(scaledSvg);
+                    setBgSvg((prev) => ({ ...prev, back: bgStr }));
+                    setSides((prev) => ({
+                      ...prev,
+                      back: {
+                        ...prev.back,
+                        template: { baseImage: previewUrl, overlayImage: undefined, overlayColor: "#ffffff" },
+                        items: parsed ? scaleItems([...parsed.graphicItems, ...parsed.textItems.map((t) => ({ ...t, kind: "text" as const }))]) : [],
+                      },
+                    }));
                     setActiveSide("back");
                     setBackTemplateOpen(false);
                   }}

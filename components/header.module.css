@@ -29,33 +29,10 @@
 }
 
 .brandImg {
-  width: 52px;
+  width: 180px;
   height: 52px;
   border-radius: 10px;
-  object-fit: cover;
-}
-
-.brandText {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.brandText strong {
-  font-size: 1rem;
-  font-weight: 800;
-  color: #111827;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.brandText span {
-  font-size: 0.68rem;
-  font-weight: 500;
-  color: #9ca3af;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
+  object-fit: contain;
 }
 
 /* ── Nav ── */
@@ -206,8 +183,3 @@ color: #ffffff !important;
   }
 }
 
-@media (max-width: 480px) {
-  .brandText span {
-    display: none;
-  }
-}

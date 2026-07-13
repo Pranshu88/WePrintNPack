@@ -3,93 +3,154 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Fragment } from "react";
 import type { Product } from "@/lib/types";
 import CheckoutOverlay from "@/components/checkout-overlay";
-import { type MaterialOption, MATERIAL_CATEGORIES, CUSTOM_MATERIAL_RANGES, CUSTOM_DELTA_TABLES, WHITE_PAPERBOARD_OPTIONS, KRAFT_PAPERBOARD_OPTIONS, ART_PAPER_OPTIONS, CORRUGATED_OPTIONS } from "@/lib/box-materials";
+import {
+  type MaterialOption,
+  WHITE_PAPERBOARD_OPTIONS, KRAFT_PAPERBOARD_OPTIONS, ART_PAPER_OPTIONS, CORRUGATED_OPTIONS,
+  CUSTOM_MATERIAL_RANGES, CUSTOM_DELTA_TABLES, MATERIAL_CATEGORIES,
+} from "@/lib/box-materials";
 
 // ─── Mailer Box geometry (mm / px at zoom=1) ────────────────────────────────
 const BW   = 315;  // base / front / back wall width
-const BH   = 202;  // base / side wall height
 const BD   = 62;   // depth  = side wall width = front/back wall height
 const DWST = 24;   // dust flap height
 const PAD  = 22;   // canvas padding
 
-// ─── Key X positions ─────────────────────────────────────────────────────────
-const NX0 = PAD;
-const NX1 = PAD + BD;
-const NX2 = PAD + BD + BW;
-const NX3 = PAD + BD + BW + BD;
-
-// ─── Key Y positions ─────────────────────────────────────────────────────────
-const NY0 = PAD;
-const NY1 = PAD + DWST;
-const NY2 = PAD + DWST + BD;
-const NY3 = PAD + DWST + BD + BH;
-const NY4 = PAD + DWST + BD + BH + BD;
-const NY5 = PAD + DWST + BD + BH + BD + DWST;
-
-// ─── Dust Flap geometry ───────────────────────────────────────────────────────
-const DUST_H  = BH / 2;                  // Dust Flap (Top) height — half of base height
-const LID_H   = BD + DWST - 15;         // Back Side row height — same as Bot row
-const BOT_H   = BD + DWST - 15;         // Bottom row height
-const SUPER_H = LID_H;                  // Dust Flap Super Top height — same as Back Side
-const NY_DUST = NY0 + SUPER_H;          // Dust Flap top y
-const NY_LID  = NY_DUST + DUST_H;       // Back Side top y
-const NY_BASE = NY_LID + LID_H;         // Base row top y
-const NY_BOT  = NY_BASE + BH;           // Bottom row top y
-const NY_DBOT        = NY_BOT + BOT_H;         // Dust Flap Bottom start y (below Front Side)
-const DIELINE_H_FULL = NY_DBOT + DUST_H + PAD; // Total canvas height
+// ─── Uniform flap-row height ─────────────────────────────────────────────────
+// Every "flap" band in the unfolded dieline renders at a single uniform visible
+// row height (FLAP_H = 65mm), so the layout looks even instead of having
+// inconsistent flap heights. This single constant now drives:
+//  - LID_H            → Back Side ("lid") / Side Wall Flap L/R ("lid-left"/"lid-right") row height
+//  - TOP_LOCK_R        → Dust Flap Super Top band height AND the Top Lock Flap diamond's
+//                        half-diagonal, so the diamond's lower half (the part that shares
+//                        the Dust Flap Super Top row) is exactly FLAP_H tall. The full
+//                        diamond bounding box is therefore 2×FLAP_H (130mm) — expected,
+//                        since a diamond is a rotated square spanning two stacked rows.
+//  - LOCK_FLAP_SIZE    → Front Bottom Flap height, Bottom Lock Flap diamond half-diagonal
+//                        (same "half the diamond sits in the row" logic as the top corner),
+//                        and Bottom Tuck Flap L/R size.
+//  - SIDE_WALL_H       → Left/Right Side Wall height (previously derived as BH - LOCK_FLAP_SIZE;
+//                        now independent so it can equal FLAP_H without blowing up the
+//                        bottom-corner diamond math).
+// Since the side wall sits directly above the bottom-corner diamond row and must tile
+// edge-to-edge with no gap, BH (the Base/front panel height, and therefore the side wall's
+// containing row) is recomputed as SIDE_WALL_H + LOCK_FLAP_SIZE = FLAP_H * 2, which keeps
+// the side wall's bottom edge flush with the top of the bottom-corner diamond — exactly the
+// same relationship the geometry relied on before (sideWallBottom === diamondTop).
+const FLAP_H = 65;          // uniform visible height for every flap row (default)
+const TOP_LOCK_FIXED_W = 65; // top lock flap diamond half-size (W and H equal for 45° angle)
 
 // ─── Faces ───────────────────────────────────────────────────────────────────
 type FaceId =
-  | "dust-flap-top"
+  | "dust-flap-top" | "top-side-flap-left" | "top-side-flap-right"
+  | "top-lock-flap-l" | "top-lock-flap-r"
   | "lid" | "lid-left" | "lid-right"
-  | "dust-flap-bottom"
-  | "side-left-flap" | "side-left" | "front" | "side-right" | "side-right-flap"
-  | "bottom" | "bot-left" | "bot-right"
-  | "back"
-  | "sq-dust-flap" | "sq-inner-flap" | "sq-outer-flap" | "sq-lock-flap"
-  | "sq-inner-base-flap" | "sq-outer-base-flap" | "sq-support-flap" | "sq-closure-flap"
-  | "sq-left-side-panel" | "sq-front-panel" | "sq-right-side-panel" | "sq-back-panel" | "sq-glue-flap";
+  | "side-left" | "front" | "side-right"
+  | "lock-flap-bl" | "left-bottom-tri"
+  | "lock-flap-br" | "right-bottom-tri"
+  | "bottom-tuck-flap-l" | "bottom-tuck-flap-r"
+  | "front-bottom-flap" | "front-top-flap"
+  | "bottom-lock-gusset-l" | "bottom-lock-gusset-r";
 
-type FaceDef = { id: FaceId; label: string; x: number; y: number; w: number; h: number; small?: boolean; dashedLines?: boolean; clipBottomLeft?: boolean; clipBottomRight?: boolean; clipTopRight?: boolean; clipTopLeft?: boolean; roundTL?: boolean; roundTR?: boolean; verticalLabel?: boolean };
+type FaceDef = { id: FaceId; label: string; x: number; y: number; w: number; h: number; small?: boolean; dashedLines?: boolean; clipBottomLeft?: boolean; clipBottomRight?: boolean; clipTopRight?: boolean; clipTopLeft?: boolean; roundTL?: boolean; roundTR?: boolean; verticalLabel?: boolean; chamferTR?: boolean; chamferTL?: boolean; chamferBL?: boolean; chamferBR?: boolean; chamferW?: number; diamond?: boolean; diamondOutsideTLCut?: boolean; diamondCutBL?: boolean; diamondCutBR?: boolean; diagCutDiamondBR?: boolean; diagCutDiamondBL?: boolean; triangleTL?: boolean; triangleTR?: boolean; triangleTop?: boolean; sideLabels?: boolean; diagCutTopRight?: boolean; diagCutRightSide?: boolean; diagCutBothSides?: boolean; diagCutTopSides?: boolean; topLockGapFillR?: boolean; topLockGapFillL?: boolean; roundDiamondTL?: boolean; roundDiamondTR?: boolean; roundTopCorners?: boolean; roundBottomCorners?: boolean; frameOnly?: boolean; gapLockTuckL?: boolean; gapLockTuckR?: boolean; tuckWithGapBL?: boolean; tuckWithGapBR?: boolean; leftBottomCorner?: boolean; rightBottomCorner?: boolean; triCutBR?: boolean; triCutBL?: boolean; cutW?: number; triExTR?: boolean; triExTL?: boolean; diamondMergedGusset?: boolean; diamondMergedGussetMirror?: boolean; kiteMidY?: number; gussetQuad?: boolean; gussetQuadMirror?: boolean };
 
-const FACES_OUTSIDE: FaceDef[] = [
-  { id: "dust-flap-top",        label: "Dust Flap (Top)",          x: NX1,          y: NY_DUST, w: BW,                                    h: DUST_H },
-  { id: "lid",           label: "Back Side",        x: NX1,      y: NY_LID,  w: BW,      h: LID_H },
-  { id: "lid-left",      label: "Side Wall Flap (Left)",  x: NX0 - 20, y: NY_LID, w: BD + 20, h: LID_H, small: true },
-  { id: "lid-right",     label: "Side Wall Flap (Right)", x: NX2,      y: NY_LID, w: BD + 20, h: LID_H, small: true },
-  { id: "side-left-flap", label: "Left Side Flap", x: NX0 - 60, y: NY_BASE, w: 60,      h: BH },
-  { id: "side-left",      label: "Left Side Wall", x: NX0,      y: NY_BASE, w: BD,      h: BH },
-  { id: "front",          label: "Base",              x: NX1,      y: NY_BASE, w: BW,      h: BH },
-  { id: "dust-flap-bottom", label: "Dust Flap Bottom",   x: NX1,    y: NY_DBOT, w: BW,      h: DUST_H },
-  { id: "side-right",      label: "Right Side Wall", x: NX2,      y: NY_BASE, w: BD, h: BH },
-  { id: "side-right-flap", label: "Right Side Flap", x: NX2 + BD, y: NY_BASE, w: 60, h: BH },
-  { id: "bottom",        label: "Front Side",       x: NX1,      y: NY_BOT,  w: BW,      h: BOT_H },
-  { id: "bot-left",      label: "Bot Flap L",       x: NX0 - 20, y: NY_BOT,  w: BD + 20, h: BOT_H, small: true },
-  { id: "bot-right",     label: "Bot Flap R",       x: NX2,      y: NY_BOT,  w: BD + 20, h: BOT_H, small: true },
-];
+// ─── Pure geometry builder ────────────────────────────────────────────────────
+// Re-derives every constant that used to be hardcoded at module scope, but
+// parameterized by `flapH` (the uniform visible height for every flap row,
+// driven by the Basics → Height input) instead of the literal 65. All formulas
+// below are unchanged copies of the original module-level computations.
+function buildGeometry(flapH: number, topLockFlapH: number = TOP_LOCK_FIXED_W, bw: number = BW, bh: number = 2 * flapH) {
+  const LOCK_FLAP_SIZE = flapH;                        // bottom-corner tuck/tri/flap unit — Front Bottom Flap height
+  const SIDE_WALL_H = Math.max(0, bh - LOCK_FLAP_SIZE); // fills Base row down to where lock flaps begin — no gap
+  const BOTTOM_LOCK_W = Math.round(2 * flapH / 3);  // bottom lock flap diamond half-diagonal — fits within BD=62 side wing
+  const TOP_LOCK_W = Math.round(2 * flapH / 3);  // scales with flapH so diamond height ≈ side flap height
+  const TOP_LOCK_R = Math.round(2 * flapH / 3);  // equal to W for 45° diamond angle
+  const BH   = SIDE_WALL_H + LOCK_FLAP_SIZE; // base / side wall row height — keeps side wall flush with bottom-corner diamond, no gap/overlap
 
-const TOTAL_DIELINE_W = NX3 + PAD;
-const TOTAL_DIELINE_H = NY5 + PAD;
+  // ─── Key X positions ───────────────────────────────────────────────────────
+  const NX0 = PAD;
+  const NX1 = PAD + BD;
+  const NX2 = PAD + BD + bw;
+  const NX3 = PAD + BD + bw + BD;
 
-// ─── Dieline SVG variable aliases ────────────────────────────────────────────
-const LX0 = NX0;    // left edge of left wing
-const LX1 = NX1;    // left edge of base / flap
-const LX2 = NX1;    // vertical fold line (left)
-const LX3 = NX2;    // vertical fold line (right)
-const LX4 = NX2;    // right edge of base / flap
-const LX5 = NX3;    // right edge of right wing
-const LY_TOP = NY0; // top of top flap
-const LY2 = NY2;    // top of base row
-const LY3 = NY3;    // bottom of base row
-const LY4 = NY5;    // bottom of bottom flap
-const COR = 8;      // corner rounding value
+  // ─── Key Y positions ───────────────────────────────────────────────────────
+  const NY0 = PAD;
+  const NY1 = PAD + DWST;
+  const NY2 = PAD + DWST + BD;
+  const NY3 = PAD + DWST + BD + BH;
+  const NY4 = PAD + DWST + BD + BH + BD;
+  const NY5 = PAD + DWST + BD + BH + BD + DWST;
+
+  // ─── Dust Flap geometry ─────────────────────────────────────────────────────
+  const DUST_H  = bh;                     // Dust Flap (Top) height — driven by WIDTH input, same as Base height
+  const LID_H   = flapH;                  // Back Side / Side Wall Flap L/R row height
+  const NY_DUST = NY0;                     // Dust Flap top y (at canvas top)
+  const NY_LID  = NY_DUST + DUST_H;       // Back Side top y
+  const NY_BASE = NY_LID + LID_H;         // Base row top y
+  const NY_BOT  = NY_BASE + bh;           // Bottom row top y
+  const DIELINE_H_FULL = NY_BOT + BOTTOM_LOCK_W * 2 + PAD; // Total canvas height (includes tuck flap below)
+
+  const FACES_OUTSIDE: FaceDef[] = [
+    { id: "dust-flap-top",          label: "Dust Flap Super Top",        x: NX1,                               y: NY0,                               w: bw,                 h: DUST_H, diagCutTopSides: true },
+    { id: "front-top-flap",         label: "Front Top Flap",             x: NX1 + BOTTOM_LOCK_W,              y: NY0 - topLockFlapH,                w: bw - 2 * BOTTOM_LOCK_W, h: topLockFlapH, roundTopCorners: true },
+    { id: "top-lock-flap-l",        label: "Top Lock Flap (Left)",       x: NX2 - TOP_LOCK_W,                 y: NY0 + TOP_LOCK_R - TOP_LOCK_W * 2,     w: TOP_LOCK_W * 2,     h: TOP_LOCK_W * 2,     small: true, diamond: true, roundDiamondTL: true },
+    { id: "top-lock-flap-r",        label: "Top Lock Flap (Right)",      x: NX1 - TOP_LOCK_W,                 y: NY0 + TOP_LOCK_R - TOP_LOCK_W * 2,     w: TOP_LOCK_W * 2,     h: TOP_LOCK_W * 2,     small: true, diamond: true, sideLabels: true, roundDiamondTR: true },
+    { id: "top-side-flap-left",  label: "Top Side Flap (Left)",     x: NX1 - LOCK_FLAP_SIZE, y: NY0 + TOP_LOCK_R, w: LOCK_FLAP_SIZE, h: DUST_H - TOP_LOCK_R, small: true, clipBottomLeft: true, clipTopRight: true },
+    { id: "top-side-flap-right", label: "Top Side Flap (Right)",    x: NX2,          y: NY0 + TOP_LOCK_R, w: LOCK_FLAP_SIZE,                          h: DUST_H - TOP_LOCK_R, small: true, clipBottomRight: true, clipTopLeft: true },
+    { id: "lid",           label: "Back Side",        x: NX1,      y: NY_LID,  w: bw,      h: LID_H },
+    { id: "lid-left",      label: "Side Wall Flap (Left)",  x: NX1 - LOCK_FLAP_SIZE, y: NY_LID, w: LOCK_FLAP_SIZE, h: LID_H, small: true },
+    { id: "lid-right",     label: "Side Wall Flap (Right)", x: NX2,      y: NY_LID, w: LOCK_FLAP_SIZE, h: LID_H, small: true },
+    { id: "side-left",      label: "Left Side Wall", x: NX1 - LOCK_FLAP_SIZE, y: NY_BASE, w: LOCK_FLAP_SIZE, h: BH + BOTTOM_LOCK_W },
+    { id: "front",      label: "Base",            x: NX1,      y: NY_BASE, w: bw,      h: bh, chamferBR: true, chamferBL: true, chamferW: BOTTOM_LOCK_W },
+    { id: "side-right",      label: "Right Side Wall", x: NX2,      y: NY_BASE, w: LOCK_FLAP_SIZE, h: BH + BOTTOM_LOCK_W },
+    { id: "front-bottom-flap",    label: "Front Bottom Flap",      x: NX1 + BOTTOM_LOCK_W,              y: NY_BOT,                            w: bw - 2 * BOTTOM_LOCK_W,  h: topLockFlapH },
+    { id: "left-bottom-tri",    label: "Left Bottom Triangle",   x: NX2,                       y: NY_BOT - BOTTOM_LOCK_W,   w: LOCK_FLAP_SIZE,     h: BOTTOM_LOCK_W * 2,     small: true, triCutBR: true, cutW: BOTTOM_LOCK_W },
+    { id: "bottom-tuck-flap-l", label: "Bottom Tuck Flap Left",  x: NX2,  y: NY_BOT,  w: BOTTOM_LOCK_W * 2 + Math.round(BOTTOM_LOCK_W * 0.8),  h: BOTTOM_LOCK_W * 2,  small: true, tuckWithGapBL: true },
+    { id: "lock-flap-bl",       label: "Bottom Lock Flap",       x: NX2 - BOTTOM_LOCK_W,      y: NY_BOT - BOTTOM_LOCK_W,    w: BOTTOM_LOCK_W * 2,  h: BOTTOM_LOCK_W * 2,  small: true, diamond: true },
+    { id: "right-bottom-tri",   label: "Right Bottom Triangle",  x: NX1 - LOCK_FLAP_SIZE,      y: NY_BOT - BOTTOM_LOCK_W,   w: LOCK_FLAP_SIZE,     h: BOTTOM_LOCK_W * 2,     small: true, triCutBL: true, cutW: BOTTOM_LOCK_W },
+    { id: "bottom-lock-gusset-l", label: "Bottom Lock Flap",     x: NX2 - BOTTOM_LOCK_W,       y: NY_BOT,                    w: BOTTOM_LOCK_W,      h: topLockFlapH,         small: true, gussetQuad: true, kiteMidY: BOTTOM_LOCK_W / topLockFlapH },
+    { id: "bottom-lock-gusset-r", label: "Bottom Lock Flap Right", x: NX1,                     y: NY_BOT,                    w: BOTTOM_LOCK_W,      h: topLockFlapH,         small: true, gussetQuadMirror: true, kiteMidY: BOTTOM_LOCK_W / topLockFlapH },
+    { id: "bottom-tuck-flap-r", label: "Bottom Tuck Flap Right", x: NX1 - BOTTOM_LOCK_W * 2 - Math.round(BOTTOM_LOCK_W * 0.8),  y: NY_BOT,  w: BOTTOM_LOCK_W * 2 + Math.round(BOTTOM_LOCK_W * 0.8),  h: BOTTOM_LOCK_W * 2,  small: true, tuckWithGapBR: true },
+    { id: "lock-flap-br",       label: "Bottom Lock Flap Right", x: NX1 - BOTTOM_LOCK_W,      y: NY_BOT - BOTTOM_LOCK_W,    w: BOTTOM_LOCK_W * 2,  h: BOTTOM_LOCK_W * 2,  small: true, diamond: true, sideLabels: true },
+  ];
+
+  const TOTAL_DIELINE_W = NX3 + PAD;
+  const TOTAL_DIELINE_H = NY5 + PAD;
+
+  // ─── Dieline SVG variable aliases ──────────────────────────────────────────
+  const LX0 = NX0;    // left edge of left wing
+  const LX1 = NX1;    // left edge of base / flap
+  const LX2 = NX1;    // vertical fold line (left)
+  const LX3 = NX2;    // vertical fold line (right)
+  const LX4 = NX2;    // right edge of base / flap
+  const LX5 = NX3;    // right edge of right wing
+  const LY_TOP = NY0; // top of top flap
+  const LY2 = NY2;    // top of base row
+  const LY3 = NY3;    // bottom of base row
+  const LY4 = NY5;    // bottom of bottom flap
+  const COR = 8;      // corner rounding value
+
+  return {
+    BW: bw, BD, DWST, PAD, FLAP_H: flapH,
+    SIDE_WALL_H, LOCK_FLAP_SIZE, BOTTOM_LOCK_W, TOP_LOCK_R, TOP_LOCK_W, BH: bh,
+    NX0, NX1, NX2, NX3,
+    NY0, NY1, NY2, NY3, NY4, NY5,
+    DUST_H, LID_H, NY_DUST, NY_LID, NY_BASE, NY_BOT, DIELINE_H_FULL,
+    FACES_OUTSIDE, TOTAL_DIELINE_W, TOTAL_DIELINE_H,
+    LX0, LX1, LX2, LX3, LX4, LX5, LY_TOP, LY2, LY3, LY4, COR,
+  };
+}
+
+// Default geometry (flapH = FLAP_H) — used by module-level helpers that only
+// need face ids (not affected by dimensions) before the component mounts.
+const DEFAULT_GEOMETRY = buildGeometry(FLAP_H);
+const FACES_OUTSIDE = DEFAULT_GEOMETRY.FACES_OUTSIDE;
 
 // ─── Item types ───────────────────────────────────────────────────────────────
 type TextItem  = { id: string; kind: "text"; text: string; x: number; y: number; w: number; font: string; size: number; bold: boolean; color: string; align: "left"|"center"|"right" };
 type ImageItem = { id: string; kind: "image"; src: string; x: number; y: number; w: number; h: number };
 type CanvasItem = TextItem | ImageItem;
 
-type ViewData   = { faceColors: Record<string, string>; items: Record<string, CanvasItem[]>; globalItems: CanvasItem[] };
+type ViewData   = { faceColors: Record<string, string>; items: Record<string, CanvasItem[]>; globalItems?: CanvasItem[] };
 type EditorState = { outside: ViewData; inside: ViewData; insideColor: string };
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -326,8 +387,7 @@ function svgUrl(svg: string) { return "data:image/svg+xml;charset=utf-8," + enco
 
 function defaultViewData(): ViewData {
   const fc: Record<string, string> = {};
-  FACES_OUTSIDE.forEach(f => { fc[f.id] = "#c8a97e"; });
-  fc["back"] = "#c8a97e";
+  FACES_OUTSIDE.forEach(f => { fc[f.id] = "#ffffff"; });
   return { faceColors: fc, items: {}, globalItems: [] };
 }
 function defaultState(): EditorState {
@@ -337,28 +397,10 @@ function defaultState(): EditorState {
 // Faces that fold 90° vertical in step 1 (0 → 14.28%)
 const FOLD_TOP_IDS = new Set([
   "lid-left", "lid", "lid-right",
-  "dust-flap-top",
+  "top-side-flap-left", "dust-flap-top", "top-side-flap-right",
 ]);
-const FOLD_BOT_IDS = new Set(["bot-left", "bottom", "bot-right", "dust-flap-bottom"]);
+const FOLD_BOT_IDS = new Set<string>([]);
 const FOLD_ALL_IDS = new Set([...FOLD_TOP_IDS, ...FOLD_BOT_IDS]);
-
-// Square-mode step-1: Right Side Panel + Back Panel column + all attached flaps rotate inward
-const SQ_FOLD1_IDS = new Set([
-  "sq-right-side-panel", "sq-outer-flap", "sq-support-flap",
-  "sq-back-panel", "sq-lock-flap", "sq-closure-flap",
-]);
-// Square-mode step-3: Back Panel + attached flaps get additional 90° sub-rotation inside step-1 group
-const SQ_FOLD3_IDS = new Set(["sq-back-panel", "sq-lock-flap", "sq-closure-flap"]);
-// Square-mode step-2: Left Side Panel + attached top/bottom flaps rotate 90° inward
-const SQ_FOLD2_IDS = new Set(["sq-left-side-panel", "sq-dust-flap", "sq-inner-base-flap"]);
-// Square-mode step-4: Outer Base Flap + Closure Flap fold 90° inward (rotateX around top edge)
-const SQ_FOLD4_IDS = new Set(["sq-outer-base-flap", "sq-closure-flap"]);
-// Square-mode step-5: Support Flap + Inner Base Flap fold 90° inward (rotateX around top edge)
-const SQ_FOLD5_IDS = new Set(["sq-support-flap", "sq-inner-base-flap"]);
-// Square-mode step-6: Dust Flap + Outer Flap fold 90° inward (rotateX around bottom edge)
-const SQ_FOLD6_IDS = new Set(["sq-dust-flap", "sq-outer-flap"]);
-// Square-mode step-7: Inner Flap + Lock Flap fold 90° inward (rotateX around bottom edge)
-const SQ_FOLD7_IDS = new Set(["sq-inner-flap", "sq-lock-flap"]);
 
 // ─── Clip path helper (shared by dieline + 3D preview) ───────────────────────
 function getFaceClipPath(face: FaceDef, s: number, mirror = false): string | undefined {
@@ -369,8 +411,8 @@ function getFaceClipPath(face: FaceDef, s: number, mirror = false): string | und
   if (!bl && !br && !tr && !tl) return undefined;
   const W = face.w * s, H = face.h * s;
   const cs = 8 * s;
-  const endY = H - Math.min(30 * s, H * 0.2);
-  const startY = Math.min(30 * s, H * 0.2);
+  const endY = H - Math.min(15 * s, H * 0.2);
+  const startY = Math.min(15 * s, H * 0.2);
   if (bl && tr) return `path('M 0 ${startY + cs} Q 0 ${startY} ${cs} ${startY - cs} L ${W + 2} -2 L ${W + 2} ${H - cs} Q ${W + 2} ${H + 2} ${W - cs} ${H + 2} L ${cs} ${endY + cs} Q 0 ${endY} 0 ${endY - cs} Z')`;
   if (br && tl) return `path('M ${W + 2} ${startY + cs} Q ${W + 2} ${startY} ${W - cs} ${startY - cs} L -2 -2 L -2 ${H - cs} Q -2 ${H + 2} ${cs} ${H + 2} L ${W - cs} ${endY + cs} Q ${W + 2} ${endY} ${W + 2} ${endY - cs} Z')`;
   if (bl)  return `path('M 0 0 L ${W + 2} 0 L ${W + 2} ${H - cs} Q ${W + 2} ${H + 2} ${W - cs} ${H + 2} L ${cs} ${endY + cs} Q 0 ${endY} 0 ${endY - cs} Z')`;
@@ -380,76 +422,53 @@ function getFaceClipPath(face: FaceDef, s: number, mirror = false): string | und
   return undefined;
 }
 
-// ─── Face canvas renderer (for admin preview snapshots) ──────────────────────
-async function renderFaceToCanvas(
-  color: string,
-  items: CanvasItem[],
-  wMM: number,
-  hMM: number,
-): Promise<string> {
+// ─── Face canvas renderer for order preview ───────────────────────────────────
+async function renderFaceToCanvas(color: string, items: CanvasItem[], wMM: number, hMM: number): Promise<string> {
   const sc = 1.8;
-  const W = Math.round(wMM * sc);
-  const H = Math.round(hMM * sc);
-  const c = document.createElement("canvas");
-  c.width = W; c.height = H;
+  const W = Math.round(wMM * sc); const H = Math.round(hMM * sc);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
   const ctx = c.getContext("2d")!;
-  // Handle url(...) pattern backgrounds (canvas fillStyle doesn't accept CSS url strings)
   const urlMatch = color.match(/^url\(["']?(.+?)["']?\)$/);
   if (urlMatch) {
     await new Promise<void>((res) => {
       const img = new Image();
       img.onload = () => {
-        try {
-          const pat = ctx.createPattern(img, "repeat");
-          ctx.fillStyle = pat ?? "#c8a97e";
-        } catch { ctx.fillStyle = "#c8a97e"; }
-        ctx.fillRect(0, 0, W, H);
-        res();
+        try { const pat = ctx.createPattern(img, "repeat"); ctx.fillStyle = pat ?? "#c8a97e"; } catch { ctx.fillStyle = "#c8a97e"; }
+        ctx.fillRect(0, 0, W, H); res();
       };
       img.onerror = () => { ctx.fillStyle = "#c8a97e"; ctx.fillRect(0, 0, W, H); res(); };
       img.src = urlMatch[1];
     });
   } else {
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = color; ctx.fillRect(0, 0, W, H);
   }
   for (const item of items) {
     if (item.kind === "image") {
       await new Promise<void>((res) => {
         const img = new Image();
-        img.onload = () => {
-          try { ctx.drawImage(img, item.x * sc, item.y * sc, item.w * sc, item.h * sc); } catch { /* skip */ }
-          res();
-        };
-        img.onerror = () => res();
-        img.src = item.src;
+        img.onload = () => { try { ctx.drawImage(img, item.x*sc, item.y*sc, item.w*sc, item.h*sc); } catch {} res(); };
+        img.onerror = () => res(); img.src = item.src;
       });
     } else if (item.kind === "text") {
       ctx.save();
-      ctx.font = `${item.bold ? "bold " : ""}${item.size * sc}px ${item.font.split(",")[0].trim()}`;
-      ctx.fillStyle = item.color;
-      ctx.textAlign = item.align as CanvasTextAlign;
-      const tx = item.align === "center" ? (item.x + item.w / 2) * sc
-               : item.align === "right"  ? (item.x + item.w)     * sc
-               :                            item.x                * sc;
-      ctx.fillText(item.text, tx, (item.y + item.size) * sc);
-      ctx.restore();
+      ctx.font = `${item.bold?"bold ":""}${item.size*sc}px ${item.font.split(",")[0].trim()}`;
+      ctx.fillStyle = item.color; ctx.textAlign = item.align as CanvasTextAlign;
+      const tx = item.align==="center"?(item.x+item.w/2)*sc:item.align==="right"?(item.x+item.w)*sc:item.x*sc;
+      ctx.fillText(item.text, tx, (item.y+item.size)*sc); ctx.restore();
     }
   }
   return c.toDataURL("image/jpeg", 0.88);
 }
 
-// ─── 3D CSS Box ───────────────────────────────────────────────────────────────
+// ─── Project global items to faces ───────────────────────────────────────────
 function projectGlobalItemsToFaces(globalItems: CanvasItem[], faces: FaceDef[]): Record<string, CanvasItem[]> {
   const result: Record<string, CanvasItem[]> = {};
   for (const item of globalItems) {
     const ih = item.kind === "image" ? item.h : (item as TextItem).size;
-    // Project item to every face it overlaps — face divs have overflow:hidden so CSS clips the rest
     const overlapping = faces.filter(f =>
       item.x < f.x + f.w && item.x + item.w > f.x &&
       item.y < f.y + f.h && item.y + ih > f.y
     );
-    // Fallback: closest face by center distance if item is outside all faces
     const targets = overlapping.length > 0 ? overlapping : (() => {
       if (faces.length === 0) return [];
       const cx = item.x + item.w / 2, cy = item.y + ih / 2;
@@ -466,6 +485,7 @@ function projectGlobalItemsToFaces(globalItems: CanvasItem[], faces: FaceDef[]):
   return result;
 }
 
+// ─── 3D CSS Box ───────────────────────────────────────────────────────────────
 function renderPreviewItem(item: CanvasItem, s: number) {
   if (item.kind === "text") return (
     <div key={item.id} style={{ position: "absolute", left: item.x * s, top: item.y * s, width: item.w * s, fontFamily: item.font, fontSize: `${item.size * s}px`, fontWeight: item.bold ? 700 : 400, color: item.color, textAlign: item.align, whiteSpace: "pre-wrap", wordBreak: "break-word", pointerEvents: "none", userSelect: "none" }}>{item.text}</div>
@@ -476,65 +496,36 @@ function renderPreviewItem(item: CanvasItem, s: number) {
   return null;
 }
 
-function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems: outsideItemsProp, insideItems: insideItemsProp, outsideGlobalItems, insideGlobalItems, openAmount, rotX, rotY, hideFlaps, squareFaces }: {
+function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems, insideItems, outsideGlobalItems, insideGlobalItems, openAmount, rotX, rotY, geo }: {
   faceColors: Record<string, string>; insideFaceColors: Record<string, string>; insideColor: string;
   outsideItems: Record<string, CanvasItem[]>; insideItems: Record<string, CanvasItem[]>;
   outsideGlobalItems?: CanvasItem[]; insideGlobalItems?: CanvasItem[];
-  openAmount: number; rotX: number; rotY: number; hideFlaps?: boolean; squareFaces?: FaceDef[];
+  openAmount: number; rotX: number; rotY: number;
+  geo?: ReturnType<typeof buildGeometry>;
 }) {
+  const g = geo ?? DEFAULT_GEOMETRY;
+  const { NX1, NX2, NX3, PAD, BW, BH, BD, NY_BASE, NY_DUST, NY_LID, DIELINE_H_FULL, FACES_OUTSIDE } = g;
   const ps = 0.56;
-  const sqMode = !!(hideFlaps && squareFaces);
-
-  // Project global items onto their overlapping faces, then merge with face-specific items
-  const allFaces = sqMode ? squareFaces! : FACES_OUTSIDE;
-  const outProjected = projectGlobalItemsToFaces(outsideGlobalItems ?? [], allFaces);
-  // Inside items are stored in mirrored dieline coords (inside view mirrors the layout).
-  // Project them against mirrored face coords so localX matches the inside dieline position.
-  // The inside face's rotateY(180deg) + canvas rotation cancel out, so CSS left = localX is correct.
-  const sqBackPanel = sqMode ? squareFaces!.find(f => f.id === "sq-back-panel") : undefined;
-  const sqMirrorTotal = sqBackPanel ? sqBackPanel.x + sqBackPanel.w + NX1 : 0;
-  // For regular box (non-sqMode): dieline is also mirrored, so inside items need mirrored-face projection too
-  const regInMirrorMin = !sqMode ? allFaces.reduce((m, f) => Math.min(m, f.x), Infinity) : 0;
-  const regInMirrorMax = !sqMode ? allFaces.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity) : 0;
-  const regInMirrorTotal = regInMirrorMin + regInMirrorMax;
-  const inFaces = sqMode && squareFaces && sqBackPanel
-    ? squareFaces.map(f => ({ ...f, x: sqMirrorTotal - f.x - f.w }))
-    : allFaces.map(f => ({ ...f, x: regInMirrorTotal - f.x - f.w }));
-  const inProjected  = projectGlobalItemsToFaces(insideGlobalItems ?? [], inFaces);
-  const outsideItems: Record<string, CanvasItem[]> = {};
-  const insideItems:  Record<string, CanvasItem[]> = {};
-  for (const face of allFaces) {
-    outsideItems[face.id] = [...(outsideItemsProp[face.id] ?? []), ...(outProjected[face.id] ?? [])];
-    insideItems[face.id]  = [...(insideItemsProp[face.id]  ?? []), ...(inProjected[face.id]  ?? [])];
-  }
-  const cW = (sqMode ? Math.max(...squareFaces!.map(f => f.x + f.w)) + PAD : NX3 + PAD) * ps;
-  const cH = (sqMode ? Math.max(...squareFaces!.map(f => f.y + f.h)) + PAD : DIELINE_H_FULL) * ps;
+  const cW = (NX3 + PAD) * ps;
+  const cH = DIELINE_H_FULL * ps;
 
   const t = openAmount / 100;
   // aT starts only after all fold steps end (57.12%), so faces stay opaque during folds
-  const FOLD_END = 6 / 7;
+  const FOLD_END = 5 / 6;
   const aT = 0;
   const sp = 1 - aT;
   const lT = Math.max(0, Math.min((t - 0.35) / 0.65, 1));
   const lidAngle = -110 * aT * (1 - lT);
-  const step1T    = Math.min(t * 7, 1);
+  const step1T    = Math.min(t * 6, 1);
   const foldAngle  = 90 * step1T;
-  const step2T    = Math.min(Math.max(0, (t - 1 / 7) * 7), 1);
+  const step2T    = Math.min(Math.max(0, (t - 1 / 6) * 6), 1);
   const foldAngle2 = 90 * step2T;
-  const step3T    = Math.min(Math.max(0, (t - 2 / 7) * 7), 1);
+  const step3T    = Math.min(Math.max(0, (t - 2 / 6) * 6), 1);
   const foldAngle3 = 90 * step3T;
-  const step4T       = Math.min(Math.max(0, (t - 3 / 7) * 7), 1);
-  const foldAngle4   = 180 * step4T;
-  const sqFoldAngle4 = 90 * step4T;
-  const step5T       = Math.min(Math.max(0, (t - 4 / 7) * 7), 1);
-  const foldAngle5   = 90 * step5T;
-  const sqFoldAngle5 = 90 * step5T;
-  const step6T       = Math.min(Math.max(0, (t - 5 / 7) * 7), 1);
-  const foldAngle6   = 90 * step6T;
-  const sqFoldAngle6 = 90 * step6T;
-  const step7T       = Math.min(Math.max(0, (t - 6 / 7) * 7), 1);
-  const foldAngle7   = 90 * step7T;
-  const sqFoldAngle7 = 90 * step7T;
+  const step5T    = Math.min(Math.max(0, (t - 4 / 6) * 6), 1);
+  const foldAngle5 = 90 * step5T;
+  const step7T    = Math.min(Math.max(0, (t - 5 / 6) * 6), 1);
+  const foldAngle7 = 90 * step7T;
 
   const bw = BW * ps, bh = BH * ps, bd = BD * ps;
   const bx = NX1 * ps;
@@ -542,15 +533,21 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
 
   const fc = faceColors;
   const ff: React.CSSProperties = { position: "absolute", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden" };
+  const pMirrorMin = FACES_OUTSIDE.reduce((m, f) => Math.min(m, f.x), Infinity);
+  const pMirrorMax = FACES_OUTSIDE.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity);
+  const pMirrorTotal = pMirrorMin + pMirrorMax;
+  const pInFaces = FACES_OUTSIDE.map(f => ({ ...f, x: pMirrorTotal - f.x - f.w }));
+  const outProjected = outsideGlobalItems && outsideGlobalItems.length > 0 ? projectGlobalItemsToFaces(outsideGlobalItems, FACES_OUTSIDE) : {};
+  const inProjected = insideGlobalItems && insideGlobalItems.length > 0 ? projectGlobalItemsToFaces(insideGlobalItems, pInFaces) : {};
+  const mOut = (id: string) => [...(outsideItems[id] ?? []), ...(outProjected[id] ?? [])];
+  const mIn  = (id: string) => [...(insideItems[id] ?? []),  ...(inProjected[id] ?? [])];
 
   return (
-    <div style={{ width: "100%", height: 620, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700, perspectiveOrigin: "50% 30%", overflow: "visible" }}>
+    <div style={{ width: "100%", height: 620, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700, perspectiveOrigin: "50% 30%", overflow: "hidden" }}>
       <div style={{ position: "relative", width: cW, height: cH, transformStyle: "preserve-3d", transform: `rotateX(${rotX}deg) rotateY(${rotY}deg)` }}>
 
         {/* ── Flat dieline: double-sided — outside on front, inside on back ── */}
-        {(sqMode
-          ? squareFaces!.filter(f => (step1T === 0 || !SQ_FOLD1_IDS.has(f.id)) && (step2T === 0 || !SQ_FOLD2_IDS.has(f.id)) && (step4T === 0 || !SQ_FOLD4_IDS.has(f.id)) && (step7T === 0 || !SQ_FOLD7_IDS.has(f.id)))
-          : FACES_OUTSIDE.filter(f => !FOLD_ALL_IDS.has(f.id) && f.id !== "side-left" && f.id !== "side-left-flap" && f.id !== "side-right" && f.id !== "side-right-flap" && !(hideFlaps && (f.id === "dust-flap-top" || f.id === "dust-flap-bottom" || f.id === "lid-left" || f.id === "lid-right" || f.id === "bot-left" || f.id === "bot-right")))).map(face => (
+        {FACES_OUTSIDE.filter(f => !FOLD_ALL_IDS.has(f.id) && f.id !== "side-left" && f.id !== "side-right").map(face => (
           <Fragment key={face.id + "-flat"}>
             <div style={{
               ...ff,
@@ -565,7 +562,7 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
             }}>
               {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
                 : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+              {mOut(face.id).map(item => renderPreviewItem(item, ps))}
             </div>
             <div style={{
               ...ff,
@@ -583,204 +580,25 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
               ) : (
                 <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
               )}
-              {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+              {mIn(face.id).map(item => renderPreviewItem(item, ps))}
             </div>
           </Fragment>
         ))}
 
-        {/* ── Square Step 1: Right Side Panel + attached flaps rotate 90° inward ── */}
-        {sqMode && squareFaces && (() => {
-          const fold1Faces = squareFaces.filter(f => SQ_FOLD1_IDS.has(f.id));
-          if (fold1Faces.length === 0) return null;
-          const pivotXmm = Math.min(...fold1Faces.map(f => f.x)); // left edge of rightmost group
-          const pivotX = pivotXmm * ps;
-          const directFaces = fold1Faces.filter(f => !SQ_FOLD3_IDS.has(f.id));
-          const step3Faces  = fold1Faces.filter(f => SQ_FOLD3_IDS.has(f.id));
-          // sub-pivot = left edge of Back Panel column relative to Step-1 pivot
-          const subPivotRelX = step3Faces.length > 0 ? (Math.min(...step3Faces.map(f => f.x)) - pivotXmm) * ps : 0;
-          const renderS1Face = (face: FaceDef, relLeft: number, relTop?: number) => (
-            <Fragment key={face.id + "-s1"}>
-              <div style={{ ...ff, left: relLeft, top: relTop ?? face.y * ps, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                {face.small
-                  ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                  : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-                {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
-              </div>
-              <div style={{ ...ff, left: relLeft, top: relTop ?? face.y * ps, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, overflow: "hidden", backfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(0.5px)" }}>
-                {face.small
-                  ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                  : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-                {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
-              </div>
-            </Fragment>
-          );
-          return (
-            <div style={{ position: "absolute", left: pivotX, top: 0, width: 0, height: cH, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${foldAngle}deg)` }}>
-              {directFaces.filter(f => f.id !== "sq-support-flap" && f.id !== "sq-outer-flap").map(face => renderS1Face(face, (face.x - pivotXmm) * ps))}
-              {/* Step-6 sub-fold: Outer Flap folds 90° inward around its bottom edge (pivot = bottom of face) */}
-              {(() => {
-                const of_ = directFaces.find(f => f.id === "sq-outer-flap");
-                if (!of_) return null;
-                const relLeft = (of_.x - pivotXmm) * ps;
-                const pivotTop = (of_.y + of_.h) * ps; // bottom edge of the flap
-                return (
-                  <div style={{ position: "absolute", left: relLeft, top: pivotTop, width: of_.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${sqFoldAngle6}deg)` }}>
-                    {renderS1Face(of_, 0, -of_.h * ps)}
-                  </div>
-                );
-              })()}
-              {/* Step-5 sub-fold: Support Flap folds 90° inward around its top edge */}
-              {(() => {
-                const sf = directFaces.find(f => f.id === "sq-support-flap");
-                if (!sf) return null;
-                return (
-                  <div style={{ position: "absolute", left: (sf.x - pivotXmm) * ps, top: sf.y * ps, width: sf.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${-sqFoldAngle5}deg)` }}>
-                    {renderS1Face(sf, 0, 0)}
-                  </div>
-                );
-              })()}
-              {/* Step-3 sub-fold: Back Panel group rotates additional 90° around column-2/3 joint */}
-              <div style={{ position: "absolute", left: subPivotRelX, top: 0, width: 0, height: cH, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${foldAngle3}deg)` }}>
-                {step3Faces.filter(f => f.id !== "sq-closure-flap" && f.id !== "sq-lock-flap").map(face => renderS1Face(face, 0))}
-                {/* Step-7 sub-sub-fold: Lock Flap folds 90° inward around its bottom edge */}
-                {(() => {
-                  const lf = step3Faces.find(f => f.id === "sq-lock-flap");
-                  if (!lf) return null;
-                  return (
-                    <div style={{ position: "absolute", left: 0, top: (lf.y + lf.h) * ps, width: lf.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${sqFoldAngle7}deg)` }}>
-                      {renderS1Face(lf, 0, -lf.h * ps)}
-                    </div>
-                  );
-                })()}
-                {/* Step-4 sub-sub-fold: Closure Flap folds 90° inward around its top edge */}
-                {(() => {
-                  const cf = step3Faces.find(f => f.id === "sq-closure-flap");
-                  if (!cf) return null;
-                  return (
-                    <div style={{ position: "absolute", left: 0, top: cf.y * ps, width: cf.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${-sqFoldAngle4}deg)` }}>
-                      {renderS1Face(cf, 0, 0)}
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── Square Step 2: Left Side Panel rotates 90° inward (pivot = right edge) ── */}
-        {sqMode && squareFaces && step2T > 0 && (() => {
-          const fold2Faces = squareFaces.filter(f => SQ_FOLD2_IDS.has(f.id));
-          if (fold2Faces.length === 0) return null;
-          const pivotXmm = fold2Faces[0].x + fold2Faces[0].w; // right edge (all share same x = NX1)
-          return (
-            <div style={{ position: "absolute", left: pivotXmm * ps, top: 0, width: 0, height: cH, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${-foldAngle2}deg)` }}>
-              {fold2Faces.filter(f => f.id !== "sq-inner-base-flap" && f.id !== "sq-dust-flap").map(face => (
-                <Fragment key={face.id + "-s2"}>
-                  <div style={{ ...ff, left: (face.x - pivotXmm) * ps, top: face.y * ps, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                    {face.small
-                      ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                      : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-                    {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
-                  </div>
-                  <div style={{ ...ff, left: (face.x - pivotXmm) * ps, top: face.y * ps, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, overflow: "hidden", backfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(0.5px)" }}>
-                    {face.small
-                      ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                      : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-                    {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
-                  </div>
-                </Fragment>
-              ))}
-              {/* Step-5 sub-fold: Inner Base Flap folds 90° inward around its top edge */}
-              {(() => {
-                const ibf = fold2Faces.find(f => f.id === "sq-inner-base-flap");
-                if (!ibf) return null;
-                return (
-                  <div style={{ position: "absolute", left: (ibf.x - pivotXmm) * ps, top: ibf.y * ps, width: ibf.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${-sqFoldAngle5}deg)` }}>
-                    <div style={{ ...ff, left: 0, top: 0, width: ibf.w * ps, height: ibf.h * ps, background: fc[ibf.id] || "#c8a97e", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{ibf.label}</span>
-                      {(outsideItems[ibf.id] ?? []).map(item => renderPreviewItem(item, ps))}
-                    </div>
-                    <div style={{ ...ff, left: 0, top: 0, width: ibf.w * ps, height: ibf.h * ps, background: insideFaceColors[ibf.id] || insideColor, overflow: "hidden", backfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(0.5px)" }}>
-                      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{ibf.label}</span>
-                      {(insideItems[ibf.id] ?? []).map(item => renderPreviewItem(item, ps))}
-                    </div>
-                  </div>
-                );
-              })()}
-              {/* Step-6 sub-fold: Dust Flap folds 90° inward around its bottom edge (pivot = bottom of face) */}
-              {(() => {
-                const df = fold2Faces.find(f => f.id === "sq-dust-flap");
-                if (!df) return null;
-                const relLeft  = (df.x - pivotXmm) * ps;
-                const pivotTop = (df.y + df.h) * ps; // bottom edge of the flap
-                return (
-                  <div style={{ position: "absolute", left: relLeft, top: pivotTop, width: df.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${sqFoldAngle6}deg)` }}>
-                    <div style={{ ...ff, left: 0, top: -df.h * ps, width: df.w * ps, height: df.h * ps, background: fc[df.id] || "#c8a97e", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{df.label}</span>
-                      {(outsideItems[df.id] ?? []).map(item => renderPreviewItem(item, ps))}
-                    </div>
-                    <div style={{ ...ff, left: 0, top: -df.h * ps, width: df.w * ps, height: df.h * ps, background: insideFaceColors[df.id] || insideColor, overflow: "hidden", backfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(0.5px)" }}>
-                      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{df.label}</span>
-                      {(insideItems[df.id] ?? []).map(item => renderPreviewItem(item, ps))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          );
-        })()}
-
-        {/* ── Square Step 4: Outer Base Flap folds 90° inward (rotateX around top edge) ── */}
-        {sqMode && squareFaces && step4T > 0 && (() => {
-          const obf = squareFaces.find(f => f.id === "sq-outer-base-flap");
-          if (!obf) return null;
-          return (
-            <div style={{ position: "absolute", left: obf.x * ps, top: obf.y * ps, width: obf.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${-sqFoldAngle4}deg)` }}>
-              <div style={{ ...ff, left: 0, top: 0, width: obf.w * ps, height: obf.h * ps, background: fc[obf.id] || "#c8a97e", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{obf.label}</span>
-                {(outsideItems[obf.id] ?? []).map(item => renderPreviewItem(item, ps))}
-              </div>
-              <div style={{ ...ff, left: 0, top: 0, width: obf.w * ps, height: obf.h * ps, background: insideFaceColors[obf.id] || insideColor, overflow: "hidden", backfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(0.5px)" }}>
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{obf.label}</span>
-                {(insideItems[obf.id] ?? []).map(item => renderPreviewItem(item, ps))}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── Square Step 7: Inner Flap folds 90° inward (rotateX around bottom edge) ── */}
-        {sqMode && squareFaces && step7T > 0 && (() => {
-          const inf = squareFaces.find(f => f.id === "sq-inner-flap");
-          if (!inf) return null;
-          const pivotTop = (inf.y + inf.h) * ps; // bottom edge of the flap
-          return (
-            <div style={{ position: "absolute", left: inf.x * ps, top: pivotTop, width: inf.w * ps, height: 0, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateX(${sqFoldAngle7}deg)` }}>
-              <div style={{ ...ff, left: 0, top: -inf.h * ps, width: inf.w * ps, height: inf.h * ps, background: fc[inf.id] || "#c8a97e", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{inf.label}</span>
-                {(outsideItems[inf.id] ?? []).map(item => renderPreviewItem(item, ps))}
-              </div>
-              <div style={{ ...ff, left: 0, top: -inf.h * ps, width: inf.w * ps, height: inf.h * ps, background: insideFaceColors[inf.id] || insideColor, overflow: "hidden", backfaceVisibility: "hidden", transform: "rotateY(180deg) translateZ(0.5px)" }}>
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{inf.label}</span>
-                {(insideItems[inf.id] ?? []).map(item => renderPreviewItem(item, ps))}
-              </div>
-            </div>
-          );
-        })()}
-
         {/* ── Top fold group: 9 faces, pivot at NY_BASE ── */}
-        {!sqMode && <div style={{ position: "absolute", left: 0, top: NY_BASE * ps, width: cW, height: 1, opacity: sp, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle}deg)` }}>
-          {FACES_OUTSIDE.filter(f => FOLD_TOP_IDS.has(f.id) && !(f.id === "dust-flap-top" && step7T > 0) && !(hideFlaps && (f.id === "lid-left" || f.id === "lid-right" || f.id === "dust-flap-top"))).map(face => {
+        <div style={{ position: "absolute", left: 0, top: NY_BASE * ps, width: cW, height: 1, opacity: sp, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle}deg)` }}>
+          {FACES_OUTSIDE.filter(f => FOLD_TOP_IDS.has(f.id) && !((f.id === "top-side-flap-right" || f.id === "top-side-flap-left") && step5T > 0) && !(f.id === "dust-flap-top" && step7T > 0)).map(face => {
             const isSF = face.id === "lid-left" || face.id === "lid-right";
             const isL  = face.id === "lid-left";
             const fL   = isSF ? (isL ? -face.w * ps : 0) : face.x * ps;
             const fT   = isSF ? 0 : (face.y - NY_BASE) * ps;
             const fOut = <div key="o" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: getFaceClipPath(face, ps) }}>
               {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+              {mOut(face.id).map(item => renderPreviewItem(item, ps))}
             </div>;
             const fIn = <div key="i" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: getFaceClipPath(face, ps, true) }}>
               {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+              {mIn(face.id).map(item => renderPreviewItem(item, ps))}
             </div>;
             if (isSF) return (
               <div key={face.id + "-ft"} style={{ position: "absolute", left: isL ? (face.x + face.w) * ps : face.x * ps, top: (face.y - NY_BASE) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${isL ? -foldAngle2 : foldAngle2}deg)` }}>
@@ -789,49 +607,45 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
             );
             return <Fragment key={face.id + "-ft"}>{fOut}{fIn}</Fragment>;
           })}
-        </div>}
+        </div>
 
-        {/* ── Bottom fold group: 3 faces, pivot at NY_BOT (top of bottom row) ── */}
-        {!sqMode && <div style={{ position: "absolute", left: 0, top: NY_BOT * ps, width: cW, height: 1, opacity: sp, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${-foldAngle}deg)` }}>
-          {FACES_OUTSIDE.filter(f => FOLD_BOT_IDS.has(f.id) && !(f.id === "dust-flap-bottom" && step7T > 0) && !(hideFlaps && (f.id === "bot-left" || f.id === "bot-right" || f.id === "dust-flap-bottom"))).map(face => {
-            const isSF = face.id === "bot-left" || face.id === "bot-right";
-            const isL  = face.id === "bot-left";
-            const fL   = isSF ? (isL ? -face.w * ps : 0) : face.x * ps;
-            const fT   = isSF ? 0 : (face.y - NY_BOT) * ps;
-            const fOut = <div key="o" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden" }}>
-              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
-            </div>;
-            const fIn = <div key="i" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
-              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
-            </div>;
-            if (isSF) return (
-              <div key={face.id + "-fb"} style={{ position: "absolute", left: isL ? (face.x + face.w) * ps : face.x * ps, top: (face.y - NY_BOT) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${isL ? -foldAngle2 : foldAngle2}deg)` }}>
-                {fOut}{fIn}
+
+        {/* ── Step 5: right + left top flaps fold inward ── */}
+        {step5T > 0 && (() => {
+          const s5R = (step7T === 0 ? ["top-side-flap-right"] : []).map(id => FACES_OUTSIDE.find(f => f.id === id)!);
+          const s5L = (step7T === 0 ? ["top-side-flap-left"] : []).map(id => FACES_OUTSIDE.find(f => f.id === id)!);
+          const renderS5Face = (face: typeof FACES_OUTSIDE[0], pivotX: number, angle: number) => (
+            <div key={face.id + "-s5"} style={{ position: "absolute", left: pivotX * ps, top: (face.y - NY_BASE) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${angle}deg)` }}>
+              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: getFaceClipPath(face, ps) }}>
+                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
+                {mOut(face.id).map(item => renderPreviewItem(item, ps))}
               </div>
-            );
-            return <Fragment key={face.id + "-fb"}>{fOut}{fIn}</Fragment>;
-          })}
-        </div>}
+              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: getFaceClipPath(face, ps, true) }}>
+                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
+                {mIn(face.id).map(item => renderPreviewItem(item, ps))}
+              </div>
+            </div>
+          );
+          return (
+            <div style={{ position: "absolute", left: 0, top: NY_BASE * ps, width: cW, height: 1, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle}deg)`, pointerEvents: "none" }}>
+              {s5R.map(face => renderS5Face(face, NX2, foldAngle5))}
+              {s5L.map(face => renderS5Face(face, NX1, -foldAngle5))}
+            </div>
+          );
+        })()}
 
         {/* ── Step 7: full dust-flap group folds down around NY_LID ── */}
-        {!hideFlaps && step7T > 0 && (() => {
+        {step7T > 0 && (() => {
           const renderFace = (face: typeof FACES_OUTSIDE[0], lft: number, tp: number, extraTransform = "") => (<>
             <div key={face.id+"-7o"} style={{ position:"absolute", left:lft, top:tp, width:face.w*ps, height:face.h*ps, background:fc[face.id]||"#c8a97e", border:"1px solid rgba(0,0,0,0.18)", boxSizing:"border-box", overflow:"hidden", backfaceVisibility:"hidden", transform:`translateZ(0.5px) ${extraTransform}`.trim(), borderRadius:face.roundTL?`${50*ps}px 0 0 ${15*ps}px`:face.roundTR?`0 ${50*ps}px ${15*ps}px 0`:undefined, clipPath:getFaceClipPath(face,ps) }}>
               <span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"5px",fontWeight:700,color:"rgba(0,0,0,0.45)",pointerEvents:"none",textTransform:"uppercase",userSelect:"none",textAlign:"center",lineHeight:1.2}}>{face.label}</span>
-              {(outsideItems[face.id]??[]).map(item=>renderPreviewItem(item,ps))}
+              {mOut(face.id).map(item=>renderPreviewItem(item,ps))}
             </div>
             <div key={face.id+"-7i"} style={{ position:"absolute", left:lft, top:tp, width:face.w*ps, height:face.h*ps, background:insideFaceColors[face.id]||insideColor, border:"1px solid rgba(0,0,0,0.18)", boxSizing:"border-box", overflow:"hidden", backfaceVisibility:"hidden", transform:`rotateY(180deg) translateZ(0.5px) ${extraTransform}`.trim(), borderRadius:face.roundTL?`0 ${50*ps}px ${15*ps}px 0`:face.roundTR?`${50*ps}px 0 0 ${15*ps}px`:undefined, clipPath:getFaceClipPath(face,ps,true) }}>
               <span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"5px",fontWeight:700,color:"rgba(0,0,0,0.45)",pointerEvents:"none",textTransform:"uppercase",userSelect:"none",textAlign:"center",lineHeight:1.2}}>{face.label}</span>
-              {(insideItems[face.id]??[]).map(item=>renderPreviewItem(item,ps))}
+              {mIn(face.id).map(item=>renderPreviewItem(item,ps))}
             </div>
           </>);
-          const renderSideY = (face: typeof FACES_OUTSIDE[0], pivotX: number, yAngle: number, relTop: number) => (
-            <div key={face.id+"-s7y"} style={{ position:"absolute", left:pivotX*ps, top:relTop, width:0, height:face.h*ps, transformStyle:"preserve-3d", transformOrigin:"0 0", transform:`rotateY(${yAngle}deg)` }}>
-              {renderFace(face, (face.x-pivotX)*ps, 0)}
-            </div>
-          );
           const faceDFT  = FACES_OUTSIDE.find(f=>f.id==="dust-flap-top")!;
           const dFromLid = (NY_DUST - NY_LID) * ps;
           return (
@@ -844,125 +658,49 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
           );
         })()}
 
-        {/* ── Step 7 Bottom: dust-flap-bottom folds inward around NY_DBOT ── */}
-        {!hideFlaps && step7T > 0 && (() => {
-          const faceDFB = FACES_OUTSIDE.find(f=>f.id==="dust-flap-bottom")!;
-          return (
-            <div style={{ position:"absolute", left:0, top:NY_BOT*ps, width:cW, height:1, transformStyle:"preserve-3d", transformOrigin:"top center", transform:`rotateX(${-foldAngle}deg)`, pointerEvents:"none" }}>
-              <div style={{ position:"absolute", left:0, top:(NY_DBOT-NY_BOT)*ps, width:cW, height:1, transformStyle:"preserve-3d", transformOrigin:"top center", transform:`rotateX(${-foldAngle7}deg)` }}>
-                <div style={{ position:"absolute", left:faceDFB.x*ps, top:0, width:faceDFB.w*ps, height:faceDFB.h*ps, background:fc[faceDFB.id]||"#c8a97e", border:"1px solid rgba(0,0,0,0.18)", boxSizing:"border-box", overflow:"hidden", backfaceVisibility:"hidden", transform:"translateZ(0.5px)" }}>
-                  <span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"5px",fontWeight:700,color:"rgba(0,0,0,0.45)",pointerEvents:"none",textTransform:"uppercase",userSelect:"none",textAlign:"center",lineHeight:1.2}}>{faceDFB.label}</span>
-                  {(outsideItems[faceDFB.id]??[]).map(item=>renderPreviewItem(item,ps))}
-                </div>
-                <div style={{ position:"absolute", left:faceDFB.x*ps, top:0, width:faceDFB.w*ps, height:faceDFB.h*ps, background:insideFaceColors[faceDFB.id]||insideColor, border:"1px solid rgba(0,0,0,0.18)", boxSizing:"border-box", overflow:"hidden", backfaceVisibility:"hidden", transform:"rotateY(180deg) translateZ(0.5px)" }}>
-                  <span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"5px",fontWeight:700,color:"rgba(0,0,0,0.45)",pointerEvents:"none",textTransform:"uppercase",userSelect:"none",textAlign:"center",lineHeight:1.2}}>{faceDFB.label}</span>
-                  {(insideItems[faceDFB.id]??[]).map(item=>renderPreviewItem(item,ps))}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── Step 3: Right side assembly (side-right + side-right-flap) rotate right ── */}
-        {!hideFlaps && (() => {
-          const faces3R = ["side-right", "side-right-flap"].filter(id => id !== "side-right-flap" || step4T === 0).map(id => FACES_OUTSIDE.find(f => f.id === id)).filter(Boolean) as typeof FACES_OUTSIDE;
+        {/* ── Step 3: Right side assembly (side-right) rotate right ── */}
+        {(() => {
+          const faces3R = ["side-right"].map(id => FACES_OUTSIDE.find(f => f.id === id)).filter(Boolean) as typeof FACES_OUTSIDE;
           return (
             <div style={{ position: "absolute", left: NX2 * ps, top: NY_BASE * ps, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${foldAngle3}deg)`, opacity: sp }}>
               {faces3R.map(face => (
                 <Fragment key={face.id + "-s3"}>
                   <div style={{ position: "absolute", left: (face.x - NX2) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
                     <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+                    {mOut(face.id).map(item => renderPreviewItem(item, ps))}
                   </div>
                   <div style={{ position: "absolute", left: (face.x - NX2) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
                     <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+                    {mIn(face.id).map(item => renderPreviewItem(item, ps))}
                   </div>
                 </Fragment>
               ))}
-              {/* side-right-flap tabs (outer right edge) */}
-              {step4T === 0 && [BH * 0.30 - 19, BH * 0.65 - 19].flatMap((dy, i) => [
-                <div key={"rft-o-"+i} style={{ position:"absolute", left:(BD+60)*ps, top:dy*ps, width:10*ps, height:38*ps, background:faceColors["side-right-flap"]??"#c8a97e", border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"translateZ(1px)", pointerEvents:"none" }} />,
-                <div key={"rft-i-"+i} style={{ position:"absolute", left:(BD+60)*ps, top:dy*ps, width:10*ps, height:38*ps, background:insideFaceColors["side-right-flap"]??insideColor, border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"rotateY(180deg) translateZ(1px)", pointerEvents:"none" }} />,
-              ])}
             </div>
           );
         })()}
 
-        {/* ── Step 3: Left side assembly (side-left-flap + side-left) rotate left ── */}
-        {!hideFlaps && (() => {
-          const faces3L = ["side-left-flap", "side-left"].filter(id => id !== "side-left-flap" || step4T === 0).map(id => FACES_OUTSIDE.find(f => f.id === id)).filter(Boolean) as typeof FACES_OUTSIDE;
+        {/* ── Step 3: Left side assembly (side-left) rotate left ── */}
+        {(() => {
+          const faces3L = ["side-left"].map(id => FACES_OUTSIDE.find(f => f.id === id)).filter(Boolean) as typeof FACES_OUTSIDE;
           return (
             <div style={{ position: "absolute", left: NX1 * ps, top: NY_BASE * ps, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${-foldAngle3}deg)`, opacity: sp }}>
               {faces3L.map(face => (
                 <Fragment key={face.id + "-s3"}>
                   <div style={{ position: "absolute", left: (face.x - NX1) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
                     <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {(outsideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+                    {mOut(face.id).map(item => renderPreviewItem(item, ps))}
                   </div>
                   <div style={{ position: "absolute", left: (face.x - NX1) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
                     <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {(insideItems[face.id] ?? []).map(item => renderPreviewItem(item, ps))}
+                    {mIn(face.id).map(item => renderPreviewItem(item, ps))}
                   </div>
                 </Fragment>
               ))}
-              {step4T === 0 && [BH * 0.30 - 19, BH * 0.65 - 19].flatMap((dy, i) => [
-                <div key={"lft-o-"+i} style={{ position:"absolute", left:-(BD+60)*ps-10*ps, top:dy*ps, width:10*ps, height:38*ps, background:faceColors["side-left-flap"]??"#c8a97e", border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"translateZ(1px)", pointerEvents:"none" }} />,
-                <div key={"lft-i-"+i} style={{ position:"absolute", left:-(BD+60)*ps-10*ps, top:dy*ps, width:10*ps, height:38*ps, background:insideFaceColors["side-left-flap"]??insideColor, border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"rotateY(180deg) translateZ(1px)", pointerEvents:"none" }} />,
-              ])}
             </div>
           );
         })()}
 
-        {/* Locking tabs/slots are now inside the step-3 pivot groups */}
 
-        {/* ── Step 4: side-left-flap folds inward — completely independent ── */}
-        {!hideFlaps && (() => {
-          const faceL  = FACES_OUTSIDE.find(f => f.id === "side-left")!;
-          const faceLF = FACES_OUTSIDE.find(f => f.id === "side-left-flap")!;
-          return (
-            <div style={{ position: "absolute", left: NX1 * ps, top: NY_BASE * ps, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${-foldAngle3}deg)`, opacity: sp, pointerEvents: "none" }}>
-              <div style={{ position: "absolute", left: (faceL.x - NX1) * ps, top: 0, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${-foldAngle4}deg)` }}>
-                <div style={{ position: "absolute", left: -faceLF.w * ps, top: 0, width: faceLF.w * ps, height: faceLF.h * ps, background: fc["side-left-flap"] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(2px)" }}>
-                  <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{faceLF.label}</span>
-                  {(outsideItems["side-left-flap"] ?? []).map(item => renderPreviewItem(item, ps))}
-                </div>
-                <div style={{ position: "absolute", left: -faceLF.w * ps, top: 0, width: faceLF.w * ps, height: faceLF.h * ps, background: insideFaceColors["side-left-flap"] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(2px)", backfaceVisibility: "hidden", opacity: foldAngle4 > 90 ? 0 : 1 }}>
-                  <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{faceLF.label}</span>
-                  {(insideItems["side-left-flap"] ?? []).map(item => renderPreviewItem(item, ps))}
-                </div>
-                {[BH * 0.30 - 19, BH * 0.65 - 19].flatMap((dy, i) => [
-                  <div key={"s4lft-o-"+i} style={{ position:"absolute", left:-faceLF.w*ps-10*ps, top:dy*ps, width:10*ps, height:38*ps, background:faceColors["side-left-flap"]??"#c8a97e", border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"translateZ(2px)", pointerEvents:"none" }} />,
-                  <div key={"s4lft-i-"+i} style={{ position:"absolute", left:-faceLF.w*ps-10*ps, top:dy*ps, width:10*ps, height:38*ps, background:insideFaceColors["side-left-flap"]??insideColor, border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"rotateY(180deg) translateZ(2px)", pointerEvents:"none", opacity: foldAngle4 > 90 ? 0 : 1 }} />,
-                ])}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── Step 4: side-right-flap folds inward — completely independent ── */}
-        {!hideFlaps && (() => {
-          const faceR  = FACES_OUTSIDE.find(f => f.id === "side-right")!;
-          const faceRF = FACES_OUTSIDE.find(f => f.id === "side-right-flap")!;
-          return (
-            <div style={{ position: "absolute", left: NX2 * ps, top: NY_BASE * ps, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${foldAngle3}deg)`, opacity: sp, pointerEvents: "none" }}>
-              <div style={{ position: "absolute", left: (faceR.x - NX2 + faceR.w) * ps, top: 0, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${foldAngle4}deg)` }}>
-                <div style={{ position: "absolute", left: 0, top: 0, width: faceRF.w * ps, height: faceRF.h * ps, background: fc["side-right-flap"] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(2px)" }}>
-                  <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{faceRF.label}</span>
-                  {(outsideItems["side-right-flap"] ?? []).map(item => renderPreviewItem(item, ps))}
-                </div>
-                <div style={{ position: "absolute", left: 0, top: 0, width: faceRF.w * ps, height: faceRF.h * ps, background: insideFaceColors["side-right-flap"] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(2px)", backfaceVisibility: "hidden", opacity: foldAngle4 > 90 ? 0 : 1 }}>
-                  <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{faceRF.label}</span>
-                  {(insideItems["side-right-flap"] ?? []).map(item => renderPreviewItem(item, ps))}
-                </div>
-                {[BH * 0.30 - 19, BH * 0.65 - 19].flatMap((dy, i) => [
-                  <div key={"s4rft-o-"+i} style={{ position:"absolute", left:faceRF.w*ps, top:dy*ps, width:10*ps, height:38*ps, background:faceColors["side-right-flap"]??"#c8a97e", border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"translateZ(2px)", pointerEvents:"none" }} />,
-                  <div key={"s4rft-i-"+i} style={{ position:"absolute", left:faceRF.w*ps, top:dy*ps, width:10*ps, height:38*ps, background:insideFaceColors["side-right-flap"]??insideColor, border:"1px solid rgba(0,0,0,0.25)", boxSizing:"border-box", backfaceVisibility:"hidden", transform:"rotateY(180deg) translateZ(2px)", pointerEvents:"none", opacity: foldAngle4 > 90 ? 0 : 1 }} />,
-                ])}
-              </div>
-            </div>
-          );
-        })()}
 
         {/* ── Assembled box faces ── */}
 
@@ -1002,7 +740,7 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
 
         {/* Bottom (Front Side) */}
         <div style={{ ...ff, left: bx, top: by + bh, width: bw, height: bd,
-          background: fc["bottom"] || "#a07040",
+          background: fc["bot-inner-base-flap"] || "#a07040",
           transformOrigin: "top center",
           opacity: aT, transform: `rotateX(90deg)` }} />
 
@@ -1020,25 +758,116 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
 }
 
 // ─── Dieline face ─────────────────────────────────────────────────────────────
-function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeave, items, zoom, dividerColor }: {
+function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeave, items, zoom, lockFlapSize, topLockR, topLockW, silhouetteOnly }: {
   face: FaceDef; color: string; selected: boolean; hovered: boolean;
   onSelect: () => void; onHover: () => void; onLeave: () => void;
-  items: CanvasItem[]; zoom: number; dividerColor?: string;
+  items: CanvasItem[]; zoom: number;
+  lockFlapSize: number; topLockR: number; topLockW: number;
+  silhouetteOnly?: boolean;
 }) {
   const lineX1 = face.w * 0.47;
   const lineX2 = face.w * 0.53;
   const W = face.w * zoom, H = face.h * zoom;
-  const cs = 8 * zoom, endY = H - Math.min(30 * zoom, H * 0.2);
-  const startY = Math.min(30 * zoom, H * 0.2);
+  const cs = 8 * zoom, endY = H - Math.min(15 * zoom, H * 0.2);
+  const startY = Math.min(15 * zoom, H * 0.2);
   const clipBL = face.clipBottomLeft  ? `path('M 0 0 L ${W + 2} 0 L ${W + 2} ${H - cs} Q ${W + 2} ${H + 2} ${W - cs} ${H + 2} L ${cs} ${endY + cs} Q 0 ${endY} 0 ${endY - cs} Z')` : undefined;
   const clipBR = face.clipBottomRight ? `path('M 0 0 L ${W} 0 L ${W} ${H} L ${W - cs} ${H} Q 0 ${H} 0 ${H - cs} L 0 ${endY - cs} Q 0 ${endY} ${cs} ${endY + cs} Z')` : undefined;
   const clipTR = face.clipTopRight    ? `path('M -2 ${H + 2} L ${W + 2} ${H + 2} L ${W + 2} ${cs} Q ${W + 2} -2 ${W - cs} -2 L ${cs} ${startY + cs} Q 0 ${startY} 0 ${startY - cs} Z')` : undefined;
   const clipTL = face.clipTopLeft     ? `path('M 0 0 L ${W - cs} 0 Q ${W} 0 ${W} ${cs} L ${W} ${H} L 0 ${H} Z')` : undefined;
+  const chs = lockFlapSize * zoom;
+  const bchs = (face.chamferW ?? lockFlapSize) * zoom;
+  const chamferTRPath = face.chamferTR ? `path('M 0 0 L ${W - chs} 0 L ${W} ${chs} L ${W} ${H} L 0 ${H} Z')` : undefined;
+  const chamferTLPath = face.chamferTL ? `path('M ${chs} 0 L ${W} 0 L ${W} ${H} L 0 ${H} L 0 ${chs} Z')` : undefined;
+  const chamferBLPath = face.chamferBL ? `path('M 0 0 L ${W} 0 L ${W} ${H} L ${bchs} ${H} L 0 ${H - bchs} Z')` : undefined;
+  const chamferBRPath = face.chamferBR ? `path('M 0 0 L ${W} 0 L ${W} ${H - bchs} L ${W - bchs} ${H} L 0 ${H} Z')` : undefined;
+  const roundDiamondTLPath = (() => {
+    if (!face.roundDiamondTL) return undefined;
+    const cr = 6 * zoom, off = cr / Math.SQRT2;
+    return `path('M ${W/2+off} ${off} L ${W} ${H/2} L ${W/2} ${H} L ${off} ${H/2+off} A ${cr} ${cr} 0 0 1 ${off} ${H/2-off} L ${W/2-off} ${off} A ${cr} ${cr} 0 0 1 ${W/2+off} ${off} Z')`;
+  })();
+  const roundDiamondTRPath = (() => {
+    if (!face.roundDiamondTR) return undefined;
+    const cr = 6 * zoom, off = cr / Math.SQRT2;
+    return `path('M 0 ${H/2} L ${W/2-off} ${off} A ${cr} ${cr} 0 0 1 ${W/2+off} ${off} L ${W-off} ${H/2-off} A ${cr} ${cr} 0 0 1 ${W-off} ${H/2+off} L ${W/2} ${H} Z')`;
+  })();
+  const diamondPath      = face.diamond      ? `polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)` : undefined;
+  // Diamond clipped to outside of the top-left diagonal cut (screen x+y ≤ 177)
+  // ry = y on right edge where cut intersects; bx = x on bottom edge
+  const diamondOutsideTLCutPath = face.diamondOutsideTLCut ? (() => {
+    const cutLocal = (177 - face.x - face.y) * zoom;
+    const ry = cutLocal - W;
+    const bx = cutLocal - H;
+    if (ry <= 0 || bx <= 0) return `polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)`;
+    return `polygon(${W / 2}px 0px, ${W}px ${ry}px, ${bx}px ${H}px, 0px ${H / 2}px)`;
+  })() : undefined;
+  const sh = topLockR * zoom;  // diagCutTopSides depth = TOP_LOCK_R (matches diamond side angle)
+  const slw = topLockW * zoom; // horizontal cut offset for diagCutTopSides (= flapH, matches diamond edge)
+  const tlGapRPath = face.topLockGapFillR ? `polygon(0px 0px, ${W}px 0px, ${W}px ${H}px)` : undefined;
+  const tlGapLPath = face.topLockGapFillL ? `polygon(0px 0px, ${W}px 0px, 0px ${H}px)` : undefined;
+  const gapLockTuckLPath  = face.gapLockTuckL  ? `polygon(44% 0%, 100% 56%, 56% 100%, 0% 44%)` : undefined;
+  const gapLockTuckRPath  = face.gapLockTuckR  ? `polygon(56% 0%, 0% 56%, 44% 100%, 100% 44%)` : undefined;
+  // tuck + gap combined: diamond-cut tuck extended to cover gap parallelogram above it
+  const tuckWithGapBLPath    = face.tuckWithGapBL    ? `polygon(64% 0%, 100% 50%, 71% 90%, 64% 100%, 43% 100%, 29% 80%, 29% 50%, 36% 40%)` : undefined;
+  const tuckWithGapBRPath    = face.tuckWithGapBR    ? `polygon(36% 0%, 0% 50%, 29% 90%, 36% 100%, 57% 100%, 71% 80%, 71% 50%, 64% 40%)` : undefined;
+  const leftBottomCornerPath = face.leftBottomCorner ? `polygon(0px 0px, ${W}px 0px, ${W}px ${H - sh}px, ${W - sh}px ${H}px, 0px ${H}px)` : undefined;
+  const rightBottomCornerPath= face.rightBottomCorner? `polygon(0px 0px, ${W}px 0px, ${W}px ${H}px, ${sh}px ${H}px, 0px ${H - sh}px)` : undefined;
+  const diagCutTRPath    = face.diagCutTopRight  ? `polygon(0px 0px, ${W - sh}px 0px, ${W}px ${sh}px, ${W}px ${H}px, 0px ${H}px)` : undefined;
+  const diagCutRSPath    = face.diagCutRightSide ? `polygon(0px 0px, ${W - sh}px 0px, ${W}px ${sh}px, ${W}px ${H - sh}px, ${W - sh}px ${H}px, 0px ${H}px)` : undefined;
+  const diagCutBSPath    = face.diagCutBothSides ? `polygon(${sh}px 0px, ${W - sh}px 0px, ${W}px ${sh}px, ${W}px ${H - sh}px, ${W - sh}px ${H}px, ${sh}px ${H}px, 0px ${H - sh}px, 0px ${sh}px)` : undefined;
+  const diagCutTSPath    = face.diagCutTopSides  ? `polygon(${slw}px 0px, ${W - slw}px 0px, ${W}px ${sh}px, ${W}px ${H}px, 0px ${H}px, 0px ${sh}px)` : undefined;
+  const diamondCutBLPath = face.diamondCutBL ? `polygon(50% 0%, 100% 50%, 90% 60%, 60% 60%, 40% 40%, 40% 10%)` : undefined;
+  const diamondCutBRPath = face.diamondCutBR ? `polygon(50% 0%, 0% 50%, 10% 60%, 40% 60%, 60% 40%, 60% 10%)` : undefined;
+  const triTRPath     = face.triangleTR   ? `polygon(0% 0%, 100% 0%, 0% 100%)` : undefined;
+  const triTLPath     = face.triangleTL   ? `polygon(0% 0%, 100% 0%, 100% 100%)` : undefined;
+  const triTopPath    = face.triangleTop  ? `polygon(50% 0%, 100% 100%, 0% 100%)` : undefined;
+  // Cuts the corner touching the adjacent bottom-corner diamond along the diamond's own
+  // edge (45°, rise = cutW), while the far corner (away from the diamond) keeps full face
+  // height — so the wedge hugs the diamond exactly with no overlap and no gap beside it.
+  const cw = (face.cutW ?? 0) * zoom;
+  const triCutBRPath  = face.triCutBR ? `polygon(0px 0px, ${W}px 0px, ${W - cw}px ${cw}px, ${W - cw}px ${H}px, 0px ${H}px)` : undefined;
+  const triCutBLPath  = face.triCutBL ? `polygon(0px 0px, ${W}px 0px, ${W}px ${H}px, ${cw}px ${H}px, ${cw}px ${cw}px)` : undefined;
+  // Gusset triangle filling the pocket between a bottom-corner diamond's edge and Front
+  // Bottom Flap — excludes the corner touching neither (Left: top-right, Right: top-left).
+  const triExTRPath   = face.triExTR ? `polygon(0% 0%, 100% 100%, 0% 100%)` : undefined;
+  const triExTLPath   = face.triExTL ? `polygon(100% 0%, 100% 100%, 0% 100%)` : undefined;
+  // Single-piece Bottom Lock Flap: diamond top (N-E-S) plus a rectangular gusset tab
+  // hugging the diamond's near-side edge, extended straight down to the face's full
+  // height (Front Bottom Flap's baseline). One outline, one selectable/colorable face.
+  const kiteMidYPct = (face.kiteMidY ?? 0.5) * 100;
+  const kiteSMidYPct = 2 * kiteMidYPct;
+  const diamondMergedGussetPath = face.diamondMergedGusset
+    ? `polygon(50% 0%, 100% ${kiteMidYPct}%, 50% ${kiteSMidYPct}%, 50% 100%, 0% 100%, 0% ${kiteMidYPct}%)` : undefined;
+  const diamondMergedGussetMirrorPath = face.diamondMergedGussetMirror
+    ? `polygon(50% 0%, 0% ${kiteMidYPct}%, 50% ${kiteSMidYPct}%, 50% 100%, 100% 100%, 100% ${kiteMidYPct}%)` : undefined;
+  // Combined gusset (triangle hugging the diamond's edge + rectangular tab below it) as
+  // one quadrilateral: full-height on the near side, tapering to a point partway down on
+  // the far side (matching the diamond's edge) — same outline as the two-piece version.
+  const gussetQuadPath       = face.gussetQuad       ? `polygon(100% 0%, 100% 100%, 0% 100%, 0% ${kiteMidYPct}%)` : undefined;
+  const gussetQuadMirrorPath = face.gussetQuadMirror ? `polygon(0% 0%, 0% 100%, 100% 100%, 100% ${kiteMidYPct}%)` : undefined;
   const clipPath = (face.clipBottomLeft && face.clipTopRight)
     ? `path('M 0 ${startY + cs} Q 0 ${startY} ${cs} ${startY - cs} L ${W + 2} -2 L ${W + 2} ${H - cs} Q ${W + 2} ${H + 2} ${W - cs} ${H + 2} L ${cs} ${endY + cs} Q 0 ${endY} 0 ${endY - cs} Z')`
     : (face.clipBottomRight && face.clipTopLeft)
     ? `path('M ${W + 2} ${startY + cs} Q ${W + 2} ${startY} ${W - cs} ${startY - cs} L -2 -2 L -2 ${H - cs} Q -2 ${H + 2} ${cs} ${H + 2} L ${W - cs} ${endY + cs} Q ${W + 2} ${endY} ${W + 2} ${endY - cs} Z')`
-    : clipBL ?? clipBR ?? clipTR ?? clipTL;
+    : (face.chamferBL && face.chamferBR)
+    ? `path('M 0 0 L ${W} 0 L ${W} ${H - bchs} L ${W - bchs} ${H} L ${bchs} ${H} L 0 ${H - bchs} Z')`
+    : triCutBRPath ?? triCutBLPath ?? triExTRPath ?? triExTLPath ?? diamondMergedGussetPath ?? diamondMergedGussetMirrorPath ?? gussetQuadPath ?? gussetQuadMirrorPath ?? triTopPath ?? triTRPath ?? triTLPath ?? tlGapRPath ?? tlGapLPath ?? leftBottomCornerPath ?? rightBottomCornerPath ?? tuckWithGapBLPath ?? tuckWithGapBRPath ?? gapLockTuckLPath ?? gapLockTuckRPath ?? diagCutTSPath ?? diagCutBSPath ?? diagCutRSPath ?? diagCutTRPath ?? diamondCutBLPath ?? diamondCutBRPath ?? diamondOutsideTLCutPath ?? roundDiamondTLPath ?? roundDiamondTRPath ?? diamondPath ?? chamferTRPath ?? chamferTLPath ?? chamferBLPath ?? chamferBRPath ?? clipBL ?? clipBR ?? clipTR ?? clipTL;
+
+  if (silhouetteOnly) {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: face.x * zoom, top: face.y * zoom,
+          width: face.w * zoom, height: face.h * zoom,
+          background: "#000",
+          boxSizing: "border-box", overflow: "hidden",
+          clipPath,
+          borderRadius: face.roundTL ? `${65 * zoom}px 0 0 ${20 * zoom}px` : face.roundTR ? `0 ${65 * zoom}px ${20 * zoom}px 0` : face.roundTopCorners ? `${6 * zoom}px ${6 * zoom}px 0 0` : face.roundBottomCorners ? `0 0 ${6 * zoom}px ${6 * zoom}px` : undefined,
+        }}
+      />
+    );
+  }
+
   return (
     <div
       onClick={e => { e.stopPropagation(); onSelect(); }}
@@ -1050,10 +879,15 @@ function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeav
         left: face.x * zoom, top: face.y * zoom,
         width: face.w * zoom, height: face.h * zoom,
         background: color,
-        border: selected ? "2px solid #3b82f6" : hovered ? "2px solid #93c5fd" : `1.5px dashed ${dividerColor ?? "rgba(0,0,0,0.25)"}`,
+        border: selected ? "2px solid #3b82f6" : hovered ? "2px solid #93c5fd" : "1.5px dashed rgba(0,0,0,0.25)",
+        ...(face.id === "front-top-flap" && !selected && !hovered ? {
+          borderTop: "2.5px solid #1e3a8a",
+          borderLeft: "2.5px solid #1e3a8a",
+          borderRight: "2.5px solid #1e3a8a",
+        } : {}),
         boxSizing: "border-box", cursor: "pointer", overflow: "hidden",
         clipPath,
-        borderRadius: face.roundTL ? `${65 * zoom}px 0 0 ${20 * zoom}px` : face.roundTR ? `0 ${65 * zoom}px ${20 * zoom}px 0` : undefined,
+        borderRadius: face.roundTL ? `${65 * zoom}px 0 0 ${20 * zoom}px` : face.roundTR ? `0 ${65 * zoom}px ${20 * zoom}px 0` : face.roundTopCorners ? `${6 * zoom}px ${6 * zoom}px 0 0` : face.roundBottomCorners ? `0 0 ${6 * zoom}px ${6 * zoom}px` : undefined,
         transition: "border-color 0.15s",
         boxShadow: selected ? "0 0 0 3px rgba(59,130,246,0.2)" : "none",
       }}
@@ -1066,6 +900,20 @@ function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeav
         <span style={{ position: "absolute", top: 6, left: 8, fontSize: "0.62rem", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.05em", userSelect: "none" }}>
           {face.label}
         </span>
+      )}
+      {face.sideLabels && (
+        <>
+          {[
+            { label: "T", style: { top: "6%", left: "50%", transform: "translateX(-50%)" } },
+            { label: "B", style: { bottom: "6%", left: "50%", transform: "translateX(-50%)" } },
+            { label: "L", style: { top: "50%", left: "6%", transform: "translateY(-50%)" } },
+            { label: "R", style: { top: "50%", right: "6%", transform: "translateY(-50%)" } },
+          ].map(({ label, style }) => (
+            <span key={label} style={{ position: "absolute", fontSize: `${0.55 * zoom}rem`, fontWeight: 800, color: "rgba(0,0,0,0.5)", pointerEvents: "none", userSelect: "none", lineHeight: 1, ...style }}>
+              {label}
+            </span>
+          ))}
+        </>
       )}
       {face.dashedLines && (
         <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
@@ -1085,152 +933,151 @@ function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeav
 }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
-type Props = { product: Product; onClose: () => void; hideFlaps?: boolean };
+type Props = { product: Product; onClose: () => void };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function ShippingBoxEditor({ product, onClose, hideFlaps = false }: Props) {
+export default function PizzaBoxEditor({ product, onClose }: Props) {
   const [view, setView] = useState<"outside" | "inside">("inside");
   const [selectedFace, setSelectedFace] = useState<FaceId | null>(null);
   const [hoveredFace, setHoveredFace] = useState<FaceId | null>(null);
   const [openAmount, setOpenAmount] = useState(0);
   const [zoom, setZoom] = useState(1);
+  const [canvasRotation, setCanvasRotation] = useState(0);
   const [rotX, setRotX] = useState(-20);
   const [rotY, setRotY] = useState(210);
   const [preview3dZoom, setPreview3dZoom] = useState(1.3);
   const [toolMode, setToolMode] = useState<"select" | "pan">("select");
+
+  // ── Finalize / Checkout flow ──────────────────────────────────────────────
+  const [finalStepsOpen, setFinalStepsOpen] = useState(false);
+  const [selectedQty, setSelectedQty] = useState(0);
+  const [designApproved, setDesignApproved] = useState(false);
+  const [finalRotX, setFinalRotX] = useState(-20);
+  const [finalRotY, setFinalRotY] = useState(210);
+  const finalRotRef = useRef({ rx: -20, ry: 210 });
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [pendingCartId, setPendingCartId] = useState<string | null>(null);
+  const [thumbDataUrl, setThumbDataUrl] = useState<string | undefined>(undefined);
+  const [boxFaceImagesState, setBoxFaceImagesState] = useState<{ front?: string; right?: string; top?: string }>({});
+  const [boxPreviewOpen, setBoxPreviewOpen] = useState(false);
+  const [boxPreviewRotX, setBoxPreviewRotX] = useState(-20);
+  const [boxPreviewRotY, setBoxPreviewRotY] = useState(210);
+  const boxPreviewRotRef = useRef({ rx: -20, ry: 210 });
   const [showFaceColorPopup, setShowFaceColorPopup] = useState(false);
 
   const [history, setHistory] = useState<EditorState[]>([defaultState()]);
   const [histIdx, setHistIdx] = useState(0);
   const state = history[histIdx];
 
-  const [activeTab, setActiveTab] = useState<"uploads" | "elements" | "package-color" | "basics">(hideFlaps ? "basics" : "uploads");
-  const [sqLengthMM, setSqLengthMM] = useState(305);
-  const [sqWidthMM, setSqWidthMM] = useState(305);
-  const [sqHeightMM, setSqHeightMM] = useState(305);
-  const [sqLengthDraft, setSqLengthDraft] = useState(String(305));
-  const [sqWidthDraft, setSqWidthDraft] = useState(String(305));
-  const [sqHeightDraft, setSqHeightDraft] = useState(String(305));
-  const [isApplyingSqDims, setIsApplyingSqDims] = useState(false);
+  const [activeTab, setActiveTab] = useState<"basics" | "uploads" | "elements" | "package-color">("basics");
+  const [boxHeightMM, setBoxHeightMM] = useState<number>(FLAP_H);
+  const [heightDraft, setHeightDraft] = useState<string>(String(FLAP_H));
+  const [isApplyingHeight, setIsApplyingHeight] = useState(false);
+  const [topLockFlapH, setTopLockFlapH] = useState<number>(TOP_LOCK_FIXED_W);
+  const [topLockFlapHDraft, setTopLockFlapHDraft] = useState<string>(String(TOP_LOCK_FIXED_W));
+  const [boxLengthMM, setBoxLengthMM] = useState<number>(260);
+  const [boxWidthMM,  setBoxWidthMM]  = useState<number>(2 * FLAP_H);
+  const [lengthDraft, setLengthDraft] = useState<string>("260");
+  const [widthDraft,  setWidthDraft]  = useState<string>(String(2 * FLAP_H));
 
-  const applySqLengthDraft = useCallback(() => {
-    const v = parseFloat(sqLengthDraft);
-    if (!isFinite(v) || v <= 0) { setSqLengthDraft(String(sqLengthMM)); return; }
-    setIsApplyingSqDims(true);
-    setTimeout(() => { setSqLengthMM(v); setIsApplyingSqDims(false); }, 700);
-  }, [sqLengthDraft, sqLengthMM]);
-
-  const applySqWidthDraft = useCallback(() => {
-    const v = parseFloat(sqWidthDraft);
-    if (!isFinite(v) || v <= 0) { setSqWidthDraft(String(sqWidthMM)); return; }
-    setIsApplyingSqDims(true);
-    setTimeout(() => { setSqWidthMM(v); setIsApplyingSqDims(false); }, 700);
-  }, [sqWidthDraft, sqWidthMM]);
-
-  const applySqHeightDraft = useCallback(() => {
-    const v = parseFloat(sqHeightDraft);
-    if (!isFinite(v) || v <= 0) { setSqHeightDraft(String(sqHeightMM)); return; }
-    setIsApplyingSqDims(true);
-    setTimeout(() => { setSqHeightMM(v); setIsApplyingSqDims(false); }, 700);
-  }, [sqHeightDraft, sqHeightMM]);
-
-  // ── Square mode — Choose material dropdown (same data/behavior as pizza-box-editor) ──
-  const [sqMaterialMenuOpen, setSqMaterialMenuOpen] = useState(false);
-  const [sqActiveMaterialCat, setSqActiveMaterialCat] = useState<number | null>(null);
-  const [sqSelectedMaterialId, setSqSelectedMaterialId] = useState<string>(WHITE_PAPERBOARD_OPTIONS[0].id);
-  const [sqCustomThicknessById, setSqCustomThicknessById] = useState<Record<string, number>>(() => {
+  // ── Choose material dropdown (Basics panel) ──
+  const [materialMenuOpen, setMaterialMenuOpen] = useState(false);
+  const [activeMaterialCat, setActiveMaterialCat] = useState<number | null>(null);
+  const [selectedMaterialId, setSelectedMaterialId] = useState<string>(WHITE_PAPERBOARD_OPTIONS[0].id);
+  const [customThicknessById, setCustomThicknessById] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {};
     for (const id in CUSTOM_MATERIAL_RANGES) init[id] = CUSTOM_MATERIAL_RANGES[id].min;
     return init;
   });
-  const sqMaterialMenuRef = useRef<HTMLDivElement>(null);
-  const sqMaterialBtnRef = useRef<HTMLButtonElement>(null);
-  const sqMaterialDropRef = useRef<HTMLDivElement>(null);
-  const [sqMaterialMenuPos, setSqMaterialMenuPos] = useState({ top: 0, left: 0 });
+  const materialMenuRef = useRef<HTMLDivElement>(null);
+  const materialBtnRef = useRef<HTMLButtonElement>(null);
+  const materialDropRef = useRef<HTMLDivElement>(null);
+  const [materialMenuPos, setMaterialMenuPos] = useState({ top: 0, left: 0 });
 
-  const toggleSqMaterialMenu = useCallback(() => {
-    if (!sqMaterialMenuOpen && sqMaterialBtnRef.current) {
-      const r = sqMaterialBtnRef.current.getBoundingClientRect();
-      setSqMaterialMenuPos({ top: r.bottom + 4, left: r.left });
+  const toggleMaterialMenu = useCallback(() => {
+    if (!materialMenuOpen && materialBtnRef.current) {
+      const r = materialBtnRef.current.getBoundingClientRect();
+      setMaterialMenuPos({ top: r.bottom + 4, left: r.left });
     }
-    setSqMaterialMenuOpen(o => !o);
-  }, [sqMaterialMenuOpen]);
+    setMaterialMenuOpen(o => !o);
+  }, [materialMenuOpen]);
 
   useEffect(() => {
-    if (!sqMaterialMenuOpen) return;
+    if (!materialMenuOpen) return;
     const handler = (e: MouseEvent) => {
-      if (!sqMaterialBtnRef.current?.contains(e.target as Node) && !sqMaterialDropRef.current?.contains(e.target as Node)) {
-        setSqMaterialMenuOpen(false); setSqActiveMaterialCat(null);
+      if (!materialBtnRef.current?.contains(e.target as Node) && !materialDropRef.current?.contains(e.target as Node)) {
+        setMaterialMenuOpen(false); setActiveMaterialCat(null);
       }
     };
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
-  }, [sqMaterialMenuOpen]);
+  }, [materialMenuOpen]);
 
-  const sqCustomRange = CUSTOM_MATERIAL_RANGES[sqSelectedMaterialId];
-  const sqIsCustomSelected = !!sqCustomRange;
-  const sqCustomThickness = sqCustomRange ? (sqCustomThicknessById[sqSelectedMaterialId] ?? sqCustomRange.min) : 0;
+  const customRange = CUSTOM_MATERIAL_RANGES[selectedMaterialId];
+  const isCustomSelected = !!customRange;
+  const customThickness = customRange ? (customThicknessById[selectedMaterialId] ?? customRange.min) : 0;
 
-  const sqSelectedMaterial = useMemo(() => {
+  const selectedMaterial = useMemo(() => {
     const allOptions = [...WHITE_PAPERBOARD_OPTIONS, ...KRAFT_PAPERBOARD_OPTIONS, ...ART_PAPER_OPTIONS, ...CORRUGATED_OPTIONS];
-    const base = allOptions.find(m => m.id === sqSelectedMaterialId) ?? WHITE_PAPERBOARD_OPTIONS[0];
-    const range = CUSTOM_MATERIAL_RANGES[sqSelectedMaterialId];
+    const base = allOptions.find(m => m.id === selectedMaterialId) ?? WHITE_PAPERBOARD_OPTIONS[0];
+    const range = CUSTOM_MATERIAL_RANGES[selectedMaterialId];
     if (range) {
-      const t = sqCustomThicknessById[sqSelectedMaterialId] ?? range.min;
+      const t = customThicknessById[selectedMaterialId] ?? range.min;
       const key = t.toFixed(1);
-      const table = CUSTOM_DELTA_TABLES[sqSelectedMaterialId];
+      const table = CUSTOM_DELTA_TABLES[selectedMaterialId];
       const deltas = table?.[key] ?? table?.[range.min.toFixed(1)];
       if (deltas) return { ...base, thickness: t, innerDelta: deltas.innerDelta, outerDelta: deltas.outerDelta };
     }
     return base;
-  }, [sqSelectedMaterialId, sqCustomThicknessById]);
+  }, [selectedMaterialId, customThicknessById]);
 
-  const selectSqMaterial = useCallback((opt: MaterialOption) => {
-    setSqMaterialMenuOpen(false);
-    setSqActiveMaterialCat(null);
-    setIsApplyingSqDims(true);
-    setTimeout(() => { setSqSelectedMaterialId(opt.id); setIsApplyingSqDims(false); }, 700);
+  const selectMaterial = useCallback((opt: MaterialOption) => {
+    setMaterialMenuOpen(false);
+    setActiveMaterialCat(null);
+    setIsApplyingHeight(true);
+    setTimeout(() => { setSelectedMaterialId(opt.id); setIsApplyingHeight(false); }, 700);
   }, []);
 
-  const stepSqCustomThickness = useCallback((dir: 1 | -1) => {
-    setIsApplyingSqDims(true);
+  const stepCustomThickness = useCallback((dir: 1 | -1) => {
+    setIsApplyingHeight(true);
     setTimeout(() => {
-      setSqCustomThicknessById(prev => {
-        const range = CUSTOM_MATERIAL_RANGES[sqSelectedMaterialId];
+      setCustomThicknessById(prev => {
+        const range = CUSTOM_MATERIAL_RANGES[selectedMaterialId];
         if (!range) return prev;
-        const cur = prev[sqSelectedMaterialId] ?? range.min;
+        const cur = prev[selectedMaterialId] ?? range.min;
         const next = Math.round((cur + dir * 0.1) * 10) / 10;
-        return { ...prev, [sqSelectedMaterialId]: Math.min(range.max, Math.max(range.min, next)) };
+        return { ...prev, [selectedMaterialId]: Math.min(range.max, Math.max(range.min, next)) };
       });
-      setIsApplyingSqDims(false);
+      setIsApplyingHeight(false);
     }, 700);
-  }, [sqSelectedMaterialId]);
+  }, [selectedMaterialId]);
 
-  const [sqSizeMode, setSqSizeMode] = useState<"manufacture" | "inner" | "outer">("manufacture");
+  const [sizeMode, setSizeMode] = useState<"manufacture" | "inner" | "outer">("manufacture");
 
-  const selectSqSizeMode = useCallback((mode: "manufacture" | "inner" | "outer") => {
-    setIsApplyingSqDims(true);
-    setTimeout(() => { setSqSizeMode(mode); setIsApplyingSqDims(false); }, 700);
+  const selectSizeMode = useCallback((mode: "manufacture" | "inner" | "outer") => {
+    setIsApplyingHeight(true);
+    setTimeout(() => { setSizeMode(mode); setIsApplyingHeight(false); }, 700);
   }, []);
 
-  const sqBoxDims = useMemo(() => {
-    const L = sqLengthMM > 0 ? sqLengthMM : 305;
-    const W = sqWidthMM > 0 ? sqWidthMM : 305;
-    const H = sqHeightMM > 0 ? sqHeightMM : 305;
-    const m = sqSelectedMaterial;
+  const boxDims = useMemo(() => {
+    const L = boxLengthMM > 0 ? boxLengthMM : 260;
+    const W = boxWidthMM > 0 ? boxWidthMM : 2 * FLAP_H;
+    const H = boxHeightMM > 0 ? boxHeightMM : FLAP_H;
+    const m = selectedMaterial;
 
+    // Org* — the original (Manufacture-mode) dimensions, unchanged formulas.
     const orgMfg = { l: L, w: W, h: H };
     const orgInner = { l: L - m.innerDelta.l, w: W - m.innerDelta.w, h: H - m.innerDelta.h };
     const orgOuter = { l: L + m.outerDelta.l, w: W + m.outerDelta.w, h: H + m.outerDelta.h };
 
     const axis = (k: "l" | "w" | "h") => {
-      if (sqSizeMode === "inner") {
+      if (sizeMode === "inner") {
         const mfg = orgMfg[k] + (orgMfg[k] - orgInner[k]);
         const inner = orgMfg[k];
         const outer = mfg + (orgOuter[k] - orgMfg[k]);
         return { mfg, inner, outer };
       }
-      if (sqSizeMode === "outer") {
+      if (sizeMode === "outer") {
         const mfg = orgMfg[k] - (orgOuter[k] - orgMfg[k]);
         const inner = orgMfg[k] - (orgOuter[k] - orgInner[k]);
         const outer = orgMfg[k];
@@ -1245,32 +1092,56 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
       innerL: aL.inner, innerW: aW.inner, innerH: aH.inner,
       outerL: aL.outer, outerW: aW.outer, outerH: aH.outer,
     };
-  }, [sqLengthMM, sqWidthMM, sqHeightMM, sqSelectedMaterial, sqSizeMode]);
+  }, [boxLengthMM, boxWidthMM, boxHeightMM, selectedMaterial, sizeMode]);
+  const geo = useMemo(() => buildGeometry(
+    boxHeightMM  > 0 ? boxHeightMM  : FLAP_H,
+    topLockFlapH > 0 ? topLockFlapH : TOP_LOCK_FIXED_W,
+    boxLengthMM  > 0 ? boxLengthMM  : 260,
+    boxWidthMM   > 0 ? boxWidthMM   : 2 * FLAP_H,
+  ), [boxHeightMM, topLockFlapH, boxLengthMM, boxWidthMM]);
 
+  const applyHeightDraft = useCallback(() => {
+    const v = parseFloat(heightDraft);
+    if (isNaN(v) || v <= 0) { setHeightDraft(String(boxHeightMM)); return; }
+    setIsApplyingHeight(true);
+    setTimeout(() => { setBoxHeightMM(v); setIsApplyingHeight(false); }, 700);
+  }, [heightDraft, boxHeightMM]);
+
+  const applyTopLockFlapHDraft = useCallback(() => {
+    const v = parseFloat(topLockFlapHDraft);
+    if (isNaN(v) || v <= 0) { setTopLockFlapHDraft(String(topLockFlapH)); return; }
+    setIsApplyingHeight(true);
+    setTimeout(() => { setTopLockFlapH(v); setIsApplyingHeight(false); }, 700);
+  }, [topLockFlapHDraft, topLockFlapH]);
+
+  const applyLengthDraft = useCallback(() => {
+    const v = parseFloat(lengthDraft);
+    if (isNaN(v) || v <= 0) { setLengthDraft(String(boxLengthMM)); return; }
+    setIsApplyingHeight(true);
+    setTimeout(() => { setBoxLengthMM(v); setIsApplyingHeight(false); }, 700);
+  }, [lengthDraft, boxLengthMM]);
+
+  const applyWidthDraft = useCallback(() => {
+    const v = parseFloat(widthDraft);
+    if (isNaN(v) || v <= 0) { setWidthDraft(String(boxWidthMM)); return; }
+    setIsApplyingHeight(true);
+    setTimeout(() => { setBoxWidthMM(v); setIsApplyingHeight(false); }, 700);
+  }, [widthDraft, boxWidthMM]);
+  const {
+    BW, BD, DWST, PAD, FLAP_H: GEO_FLAP_H,
+    SIDE_WALL_H, LOCK_FLAP_SIZE, BOTTOM_LOCK_W, TOP_LOCK_R, TOP_LOCK_W, BH,
+    NX0, NX1, NX2, NX3,
+    NY0, NY1, NY2, NY3, NY4, NY5,
+    DUST_H, LID_H, NY_DUST, NY_LID, NY_BASE, NY_BOT, DIELINE_H_FULL,
+    FACES_OUTSIDE, TOTAL_DIELINE_W, TOTAL_DIELINE_H,
+    LX0, LX1, LX2, LX3, LX4, LX5, LY_TOP, LY2, LY3, LY4, COR,
+  } = geo;
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-
-  const [finalStepsOpen, setFinalStepsOpen] = useState(false);
-  const [selectedQty, setSelectedQty] = useState(0);
-  const [designApproved, setDesignApproved] = useState(false);
-  const [finalRotY, setFinalRotY] = useState(210);
-  const [finalRotX, setFinalRotX] = useState(-20);
-  const finalRotRef = useRef({ rx: -20, ry: 210 });
-
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [pendingCartId, setPendingCartId] = useState<string | null>(null);
-  const [thumbDataUrl, setThumbDataUrl] = useState<string | undefined>(undefined);
-  const [boxFaceImagesState, setBoxFaceImagesState] = useState<{ front?: string; right?: string; top?: string } | undefined>(undefined);
-  const [boxPreviewOpen, setBoxPreviewOpen] = useState(false);
-  const [boxPreviewRotY, setBoxPreviewRotY] = useState(210);
-  const [boxPreviewRotX, setBoxPreviewRotX] = useState(-20);
-  const boxPreviewRotRef = useRef({ rx: -20, ry: 210 });
-
   const [selectedItemIsGlobal, setSelectedItemIsGlobal] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
 
   const uploadRef = useRef<HTMLInputElement>(null);
   const rotDragRef = useRef<{ sx: number; sy: number; rx: number; ry: number } | null>(null);
-  const globalDragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   const commit = useCallback((next: EditorState) => {
     setHistory(prev => { const t = prev.slice(0, histIdx + 1); return [...t, next]; });
@@ -1288,10 +1159,9 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
         const tag = (e.target as HTMLElement).tagName.toLowerCase();
         if (["input", "textarea", "select"].includes(tag)) return;
         e.preventDefault();
-        if (selectedItemIsGlobal) removeGlobalItem(selectedItemId);
+        if (selectedItemIsGlobal) { removeGlobalItem(selectedItemId); }
         else if (selectedFace) removeItem(selectedFace, selectedItemId);
         setSelectedItemId(null);
-        setSelectedItemIsGlobal(false);
       }
     };
     document.addEventListener("keydown", handler);
@@ -1299,116 +1169,29 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [histIdx, history.length, selectedItemId, selectedFace, selectedItemIsGlobal]);
 
-  const SQUARE_HIDDEN = new Set([
-    "dust-flap-top", "dust-flap-bottom",
-    "lid", "lid-left", "lid-right",
-    "side-left-flap", "side-left",
-    "side-right", "side-right-flap",
-    "bot-left", "bot-right",
-  ]);
-  const SQ_EXTRA_W = 320;
-  const SQ_DEFAULT_MM = 305;
-  const sqPanelWDefault = (BW + SQ_EXTRA_W) / 4;
-  const PX_PER_MM_XY = sqPanelWDefault / SQ_DEFAULT_MM;
-  const frontFace = FACES_OUTSIDE.find(f => f.id === "front")!;
-  const PX_PER_MM_H = frontFace.h / SQ_DEFAULT_MM;
-  // Back & Front panels share the box "length"; Left & Right side panels share the "width"
-  const sqBackWidthPx = sqLengthMM * PX_PER_MM_XY;
-  const sqSideWidthPx = sqWidthMM * PX_PER_MM_XY;
-  const sqBaseHeightPx = sqHeightMM * PX_PER_MM_H;
-  const sqGlueFlapW = 35 * PX_PER_MM_XY;
-  const sqTotalW = sqSideWidthPx * 2 + sqBackWidthPx * 2 + sqGlueFlapW;
-  const sqLidH   = (sqSideWidthPx + sqBackWidthPx) / 2 / 2;  // flap row height, based on avg panel width
-  const lidFace  = FACES_OUTSIDE.find(f => f.id === "lid")!;
-  const sqBaseY  = lidFace.y + sqLidH;     // base row starts after the taller lid row
-  const sqBotY   = sqBaseY + sqBaseHeightPx;  // bottom row starts after base row
-  const botFace  = FACES_OUTSIDE.find(f => f.id === "bottom")!;
-  const sqColX0 = NX1;
-  const sqColX1 = sqColX0 + sqSideWidthPx;
-  const sqColX2 = sqColX1 + sqBackWidthPx;
-  const sqColX3 = sqColX2 + sqSideWidthPx;
-  const squareLidFaces: FaceDef[] = [
-    { id: "sq-dust-flap",  label: "Dust Flap",  x: sqColX0, y: lidFace.y, w: sqSideWidthPx, h: sqLidH },
-    { id: "sq-inner-flap", label: "Inner Flap", x: sqColX1, y: lidFace.y, w: sqBackWidthPx, h: sqLidH },
-    { id: "sq-outer-flap", label: "Outer Flap", x: sqColX2, y: lidFace.y, w: sqSideWidthPx, h: sqLidH },
-    { id: "sq-lock-flap",  label: "Lock Flap",  x: sqColX3, y: lidFace.y, w: sqBackWidthPx, h: sqLidH },
-  ];
-  const squareBaseFaces: FaceDef[] = [
-    { id: "sq-left-side-panel",  label: "Left Side Panel",  x: sqColX0, y: sqBaseY, w: sqSideWidthPx, h: sqBaseHeightPx },
-    { id: "sq-front-panel",      label: "Front Panel",      x: sqColX1, y: sqBaseY, w: sqBackWidthPx, h: sqBaseHeightPx },
-    { id: "sq-right-side-panel", label: "Right Side Panel", x: sqColX2, y: sqBaseY, w: sqSideWidthPx, h: sqBaseHeightPx },
-    { id: "sq-back-panel",       label: "Back Panel",       x: sqColX3, y: sqBaseY, w: sqBackWidthPx, h: sqBaseHeightPx },
-    { id: "sq-glue-flap",        label: "Glue Flap",        x: sqColX3 + sqBackWidthPx, y: sqBaseY, w: sqGlueFlapW, h: sqBaseHeightPx, small: true },
-  ];
-  const squareBottomFaces: FaceDef[] = [
-    { id: "sq-inner-base-flap", label: "Inner Base Flap", x: sqColX0, y: sqBotY, w: sqSideWidthPx, h: sqLidH, small: true },
-    { id: "sq-outer-base-flap", label: "Outer Base Flap", x: sqColX1, y: sqBotY, w: sqBackWidthPx, h: sqLidH, small: true },
-    { id: "sq-support-flap",    label: "Support Flap",    x: sqColX2, y: sqBotY, w: sqSideWidthPx, h: sqLidH, small: true },
-    { id: "sq-closure-flap",    label: "Closure Flap",    x: sqColX3, y: sqBotY, w: sqBackWidthPx, h: sqLidH, small: true },
-  ];
-  const faces = hideFlaps
-    ? [
-        ...FACES_OUTSIDE
-          .filter(f => !SQUARE_HIDDEN.has(f.id) && f.id !== "bottom" && f.id !== "front"),
-        ...squareLidFaces,
-        ...squareBottomFaces,
-        ...squareBaseFaces,
-      ].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
-    : FACES_OUTSIDE;
-
-  // Mirror total for regular box (non-sqMode): min(face.x) + max(face.x+face.w) over all faces
-  const regMirrorMin = !hideFlaps ? faces.reduce((m, f) => Math.min(m, f.x), Infinity) : 0;
-  const regMirrorMax = !hideFlaps ? faces.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity) : 0;
+  const faces = FACES_OUTSIDE;
+  const regMirrorMin = faces.reduce((m, f) => Math.min(m, f.x), Infinity);
+  const regMirrorMax = faces.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity);
   const regMirrorTotal = regMirrorMin + regMirrorMax;
-
-  // Mirror the dieline so panel names match the 3D view (3D uses rotY≈210 which flips LEFT↔RIGHT)
-  const dielineFacesRaw = (hideFlaps && view === "inside")
-    ? faces.map(f => ({ ...f, x: 2 * NX1 + sqTotalW - f.x - f.w }))
-             .sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
-    : !hideFlaps
-      ? faces.map(f => ({ ...f, x: regMirrorTotal - f.x - f.w }))
-               .sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
-      : faces;
-
-  // Small visual gaps between touching lid flaps (2D dieline only — 3D fold uses `faces`, unaffected)
-  // Each face is trimmed by GAP/2 on its shared edge(s), so the gap stays centered on the
-  // original (unmoved) boundary line — keeping it aligned with the panel divider below.
-  // Adjacency is derived from each face's actual on-screen x-order (not a hardcoded side),
-  // so it stays correct regardless of the inside/outside mirroring.
-  const dielineFaces = (() => {
-    const GAP = 6;
-    const half = GAP / 2;
-    const insetLeft: Record<string, number> = {};
-    const insetRight: Record<string, number> = {};
-    const addGapGroup = (ids: string[]) => {
-      const idSet = new Set(ids);
-      const sorted = dielineFacesRaw.filter(f => idSet.has(f.id)).sort((a, b) => a.x - b.x);
-      for (let i = 0; i < sorted.length - 1; i++) {
-        insetRight[sorted[i].id] = half;
-        insetLeft[sorted[i + 1].id] = half;
-      }
-    };
-    addGapGroup(["sq-dust-flap", "sq-inner-flap", "sq-outer-flap", "sq-lock-flap"]);
-    addGapGroup(["sq-closure-flap", "sq-support-flap"]);
-    addGapGroup(["sq-support-flap", "sq-outer-base-flap"]);
-    addGapGroup(["sq-outer-base-flap", "sq-inner-base-flap"]);
-    return dielineFacesRaw.map(f => {
-      const il = insetLeft[f.id] ?? 0, ir = insetRight[f.id] ?? 0;
-      if (!il && !ir) return f;
-      return { ...f, x: f.x + il, w: f.w - il - ir };
-    });
-  })();
-
-  // Inside global items are stored in mirrored dieline coords; pass as-is (mirrored projection handled in Box3DPreview)
-  const insideGlobalItemsForPreview = state.inside.globalItems ?? [];
-
-  // Outside global items for regular box are stored in mirrored dieline coords; un-mirror for 3D projection
-  const outsideGlobalItemsForPreview = !hideFlaps
-    ? (state.outside.globalItems ?? []).map(item => ({ ...item, x: regMirrorTotal - item.x - item.w }))
-    : (state.outside.globalItems ?? []);
-
-  const dilineCanvasW = hideFlaps ? TOTAL_DIELINE_W - BW + sqTotalW : TOTAL_DIELINE_W;
-  const dilineCanvasH = hideFlaps ? Math.max(DIELINE_H_FULL, sqBotY + sqLidH + PAD) : DIELINE_H_FULL;
+  const dielineW = regMirrorMax + PAD;
+  const _dfSwaps: Partial<Record<FaceId, FaceId>> = {
+    "top-side-flap-left": "top-side-flap-right",   "top-side-flap-right": "top-side-flap-left",
+  };
+  const dielineFaces = faces.map(f => {
+    const swapId = _dfSwaps[f.id];
+    const def = swapId ? faces.find(tf => tf.id === swapId)! : f;
+    return { ...def, x: regMirrorTotal - f.x - f.w, y: f.y, chamferTR: def.chamferTL, chamferTL: def.chamferTR, chamferBL: def.chamferBR, chamferBR: def.chamferBL, triangleTL: def.triangleTR, triangleTR: def.triangleTL };
+  }).sort((a, b) => {
+    if (a.id === "dust-flap-top" && (b.id === "top-lock-flap-l" || b.id === "top-lock-flap-r")) return -1;
+    if ((a.id === "top-lock-flap-l" || a.id === "top-lock-flap-r") && b.id === "dust-flap-top") return 1;
+    if (a.id === "bottom-tuck-flap-l" && b.id === "lock-flap-bl") return -1;
+    if (a.id === "lock-flap-bl" && b.id === "bottom-tuck-flap-l") return 1;
+    if (a.id === "bottom-tuck-flap-r" && b.id === "lock-flap-br") return -1;
+    if (a.id === "lock-flap-br" && b.id === "bottom-tuck-flap-r") return 1;
+    return a.y !== b.y ? a.y - b.y : a.x - b.x;
+  });
+  const outGlobalForPreview = (state.outside.globalItems ?? []).map(item => ({ ...item, x: regMirrorTotal - item.x - item.w }));
+  const inGlobalForPreview = state.inside.globalItems ?? [];
 
   const vd = state[view];
 
@@ -1420,12 +1203,6 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     const fc = { ...vd.faceColors };
     FACES_OUTSIDE.forEach(f => { fc[f.id] = color; });
     fc["back"] = color;
-    // Also update square-mode virtual faces (sq-* IDs used when hideFlaps=true)
-    [
-      "sq-dust-flap", "sq-inner-flap", "sq-outer-flap", "sq-lock-flap",
-      "sq-left-side-panel", "sq-front-panel", "sq-right-side-panel", "sq-back-panel", "sq-glue-flap",
-      "sq-inner-base-flap", "sq-outer-base-flap", "sq-support-flap", "sq-closure-flap",
-    ].forEach(id => { fc[id] = color; });
     commit({ ...state, [view]: { ...vd, faceColors: fc } });
   }
 
@@ -1440,7 +1217,6 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   function addItem(faceId: string, item: CanvasItem) {
     commit({ ...state, [view]: { ...vd, items: { ...vd.items, [faceId]: [...(vd.items[faceId] ?? []), item] } } });
     setSelectedItemId(item.id);
-    setSelectedItemIsGlobal(false);
   }
 
   function updateItem(faceId: string, id: string, updates: Partial<CanvasItem>) {
@@ -1456,27 +1232,20 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     setSelectedItemId(item.id);
     setSelectedItemIsGlobal(true);
   }
-
   function updateGlobalItem(id: string, updates: Partial<CanvasItem>) {
-    commit({ ...state, [view]: { ...vd, globalItems: (vd.globalItems ?? []).map((it: CanvasItem) => it.id === id ? { ...it, ...updates } as CanvasItem : it) } });
+    commit({ ...state, [view]: { ...vd, globalItems: (vd.globalItems ?? []).map(it => it.id === id ? { ...it, ...updates } as CanvasItem : it) } });
   }
-
   function removeGlobalItem(id: string) {
-    commit({ ...state, [view]: { ...vd, globalItems: (vd.globalItems ?? []).filter((it: CanvasItem) => it.id !== id) } });
-  }
-
-  function updateSelectedItem(id: string, updates: Partial<CanvasItem>) {
-    if (selectedItemIsGlobal) updateGlobalItem(id, updates);
-    else if (selectedFace) updateItem(selectedFace, id, updates);
+    commit({ ...state, [view]: { ...vd, globalItems: (vd.globalItems ?? []).filter(it => it.id !== id) } });
   }
 
   function addText() {
-    const item: TextItem = { id: uid(), kind: "text", text: "Add text", x: dilineCanvasW / 2 - 70, y: DIELINE_H_FULL / 2 - 12, w: 140, font: "Arial, sans-serif", size: 16, bold: false, color: "#000000", align: "center" };
+    const item: TextItem = { id: uid(), kind: "text", text: "Add text", x: NX1 + BW / 2 - 60, y: NY_BASE + BH / 2 - 12, w: 140, font: "Arial, sans-serif", size: 16, bold: false, color: "#000000", align: "center" };
     addGlobalItem(item);
   }
 
   function addSvgItem(shape: { svg: string; w: number; h: number }) {
-    const item: ImageItem = { id: uid(), kind: "image", src: svgUrl(shape.svg), x: Math.max(0, dilineCanvasW / 2 - shape.w / 2), y: Math.max(0, DIELINE_H_FULL / 2 - shape.h / 2), w: shape.w, h: shape.h };
+    const item: ImageItem = { id: uid(), kind: "image", src: svgUrl(shape.svg), x: Math.max(0, NX1 + BW / 2 - shape.w / 2), y: Math.max(0, NY_BASE + BH / 2 - shape.h / 2), w: shape.w, h: shape.h };
     addGlobalItem(item);
   }
 
@@ -1488,10 +1257,9 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
       const src = ev.target?.result as string;
       const img = new window.Image();
       img.onload = () => {
-        const maxW = dilineCanvasW - 20, maxH = DIELINE_H_FULL - 20;
+        const maxW = BW - 20, maxH = BH - 20;
         const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
-        const w = Math.round(img.naturalWidth * ratio), h = Math.round(img.naturalHeight * ratio);
-        const item: ImageItem = { id: uid(), kind: "image", src, x: Math.max(0, dilineCanvasW / 2 - w / 2), y: Math.max(0, DIELINE_H_FULL / 2 - h / 2), w, h };
+        const item: ImageItem = { id: uid(), kind: "image", src, x: NX1 + 10, y: NY_BASE + 10, w: Math.round(img.naturalWidth * ratio), h: Math.round(img.naturalHeight * ratio) };
         addGlobalItem(item);
       };
       img.src = src;
@@ -1500,13 +1268,13 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     e.target.value = "";
   }
 
-  const currentItems = selectedFace ? getFaceItems(selectedFace) : [];
-  const selectedFaceItem = selectedItemId && !selectedItemIsGlobal ? currentItems.find(i => i.id === selectedItemId) ?? null : null;
-  const selectedGlobalItem = selectedItemId && selectedItemIsGlobal ? (vd.globalItems ?? []).find(i => i.id === selectedItemId) ?? null : null;
-  const selectedItem = selectedFaceItem ?? selectedGlobalItem;
-  const selectedText = selectedItem?.kind === "text" ? selectedItem as TextItem : null;
+  const globalItems = vd.globalItems ?? [];
+  const currentItems = selectedItemIsGlobal ? globalItems : (selectedFace ? getFaceItems(selectedFace) : []);
+  const selectedItem = selectedItemId ? currentItems.find(i => i.id === selectedItemId) ?? null : null;
+  const selectedText = selectedItem?.kind === "text" ? selectedItem : null;
 
   const dragRef = useRef<{ id: string; faceId: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const globalDragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = canvasScrollRef.current;
@@ -1560,18 +1328,11 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   function startDragGlobalItem(e: React.PointerEvent, item: CanvasItem) {
     e.preventDefault(); e.stopPropagation();
     globalDragRef.current = { id: item.id, sx: e.clientX, sy: e.clientY, ox: item.x, oy: item.y };
-    setSelectedItemId(item.id);
-    setSelectedItemIsGlobal(true);
+    setSelectedItemId(item.id); setSelectedItemIsGlobal(true);
     const onMove = (ev: PointerEvent) => {
-      const d = globalDragRef.current;
-      if (!d) return;
+      const d = globalDragRef.current; if (!d) return;
       const dx = (ev.clientX - d.sx) / zoom, dy = (ev.clientY - d.sy) / zoom;
-      setHistory(prev => {
-        const cur = prev[histIdx];
-        const curVd = cur[view];
-        const updated = { ...cur, [view]: { ...curVd, globalItems: (curVd.globalItems ?? []).map((it: CanvasItem) => it.id !== d.id ? it : { ...it, x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) } as CanvasItem) } };
-        const copy = [...prev]; copy[histIdx] = updated; return copy;
-      });
+      setHistory(prev => { const cur = prev[histIdx]; const curVd = cur[view]; const updated = { ...cur, [view]: { ...curVd, globalItems: (curVd.globalItems ?? []).map((it) => it.id !== d.id ? it : { ...it, x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) } as CanvasItem) } }; const copy = [...prev]; copy[histIdx] = updated; return copy; });
     };
     const onUp = () => { globalDragRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
@@ -1595,7 +1356,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
       else if (corner === "bl") { nw = Math.max(MIN, ow - dx); nx = ox + ow - nw; if (item.kind === "image") nh = Math.max(MIN, oh + dy); }
       const updates: Partial<CanvasItem> = { x: nx, w: nw } as Partial<CanvasItem>;
       if (item.kind === "image") { (updates as Partial<ImageItem>).h = nh; (updates as Partial<ImageItem>).y = ny; }
-      setHistory(prev => { const cur = prev[histIdx]; const curVd = cur[view]; const copy = [...prev]; copy[histIdx] = { ...cur, [view]: { ...curVd, globalItems: (curVd.globalItems ?? []).map((it: CanvasItem) => it.id !== item.id ? it : { ...it, ...updates } as CanvasItem) } }; return copy; });
+      setHistory(prev => { const cur = prev[histIdx]; const curVd = cur[view]; const copy = [...prev]; copy[histIdx] = { ...cur, [view]: { ...curVd, globalItems: (curVd.globalItems ?? []).map(it => it.id !== item.id ? it : { ...it, ...updates } as CanvasItem) } }; return copy; });
     };
     const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
     window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
@@ -1632,13 +1393,21 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     );
   }
 
+  // Bleed outline — dilates the face-panel silhouette outward by bleedR using a
+  // rectangular (feMorphology) kernel rather than a circular one, so corners stay
+  // sharp/mitered like the cut line itself instead of rounding off, and it stays
+  // evenly (parallel) spaced from the boundary around every notch/flap. One filter
+  // operation, so it's cheap regardless of how complex the outline is.
+  const bleedR = Math.round(8 * zoom);
+  const bleedLineW = Math.max(1, Math.round(3 * zoom));
+  const bleedFillColor = state[view].faceColors["front"] ?? "#c8a97e";
+
   // ─── JSX ─────────────────────────────────────────────────────────────────
-  return (
-    <Fragment>
-    {isApplyingSqDims && (
+  return (<Fragment>
+    {isApplyingHeight && (
       <div style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(255,255,255,0.55)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <style>{`@keyframes sb-spin { to { transform: rotate(360deg); } }`}</style>
-        <div style={{ width: 42, height: 42, borderRadius: "50%", border: "4px solid #e5e7eb", borderTopColor: "#7c3aed", animation: "sb-spin 0.7s linear infinite" }} />
+        <style>{`@keyframes pb-spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ width: 42, height: 42, borderRadius: "50%", border: "4px solid #e5e7eb", borderTopColor: "#7c3aed", animation: "pb-spin 0.7s linear infinite" }} />
       </div>
     )}
     <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "#fff", display: "flex", flexDirection: "column" }}>
@@ -1651,17 +1420,17 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
         </button>
         {selectedText ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "6px", overflowX: "auto", minWidth: 0 }}>
-            <FontPicker value={selectedText.font} onChange={v => updateSelectedItem(selectedText.id, { font: v })} />
+            <FontPicker value={selectedText.font} onChange={v => selectedItemIsGlobal ? updateGlobalItem(selectedText.id, { font: v }) : selectedFace && updateItem(selectedFace, selectedText.id, { font: v })} />
             <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
-            <select value={selectedText.size} onChange={e => updateSelectedItem(selectedText.id, { size: Number(e.target.value) })} style={{ padding: "0.4rem 0.5rem", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "0.82rem", color: "#374151", width: "72px", flexShrink: 0, background: "#fafafa", fontWeight: 600, cursor: "pointer" }}>
+            <select value={selectedText.size} onChange={e => selectedItemIsGlobal ? updateGlobalItem(selectedText.id, { size: Number(e.target.value) }) : selectedFace && updateItem(selectedFace, selectedText.id, { size: Number(e.target.value) })} style={{ padding: "0.4rem 0.5rem", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "0.82rem", color: "#374151", width: "72px", flexShrink: 0, background: "#fafafa", fontWeight: 600, cursor: "pointer" }}>
               {[10,12,14,16,18,20,24,28,32,36,42,48,56,64].map(s => <option key={s} value={s}>{s}px</option>)}
             </select>
             <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
-            <button onClick={() => updateSelectedItem(selectedText.id, { bold: !selectedText.bold })} style={{ width: "36px", height: "36px", border: "1.5px solid #e5e7eb", borderRadius: "8px", background: selectedText.bold ? "linear-gradient(135deg,#7c3aed,#db2777)" : "#fff", color: selectedText.bold ? "#fff" : "#374151", fontWeight: 800, fontSize: "0.95rem", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: selectedText.bold ? "0 2px 8px rgba(124,58,237,0.35)" : "none" }}>B</button>
+            <button onClick={() => selectedItemIsGlobal ? updateGlobalItem(selectedText.id, { bold: !selectedText.bold }) : selectedFace && updateItem(selectedFace, selectedText.id, { bold: !selectedText.bold })} style={{ width: "36px", height: "36px", border: "1.5px solid #e5e7eb", borderRadius: "8px", background: selectedText.bold ? "linear-gradient(135deg,#7c3aed,#db2777)" : "#fff", color: selectedText.bold ? "#fff" : "#374151", fontWeight: 800, fontSize: "0.95rem", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: selectedText.bold ? "0 2px 8px rgba(124,58,237,0.35)" : "none" }}>B</button>
             <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
             <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
               {(["left","center","right"] as const).map(a => (
-                <button key={a} onClick={() => updateSelectedItem(selectedText.id, { align: a })} title={a} style={{ width: "34px", height: "34px", border: "1.5px solid #e5e7eb", borderRadius: "8px", background: selectedText.align === a ? "#f3f0ff" : "#fff", color: selectedText.align === a ? "#7c3aed" : "#6b7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <button key={a} onClick={() => selectedItemIsGlobal ? updateGlobalItem(selectedText.id, { align: a }) : selectedFace && updateItem(selectedFace, selectedText.id, { align: a })} title={a} style={{ width: "34px", height: "34px", border: "1.5px solid #e5e7eb", borderRadius: "8px", background: selectedText.align === a ? "#f3f0ff" : "#fff", color: selectedText.align === a ? "#7c3aed" : "#6b7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   {a === "left"   && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>}
                   {a === "center" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>}
                   {a === "right"  && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>}
@@ -1671,11 +1440,11 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
             <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
             <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
               {TEXT_COLORS.map(c => (
-                <button key={c} onClick={() => updateSelectedItem(selectedText.id, { color: c })} title={c} style={{ width: "24px", height: "24px", borderRadius: "50%", background: c, border: `2.5px solid ${selectedText.color === c ? "#7c3aed" : "#e5e7eb"}`, cursor: "pointer", padding: 0, flexShrink: 0, boxShadow: c === "#ffffff" ? "inset 0 0 0 1px #d1d5db" : "0 1px 4px rgba(0,0,0,0.15)", outline: selectedText.color === c ? "2px solid rgba(124,58,237,0.25)" : "none", outlineOffset: "2px", transform: selectedText.color === c ? "scale(1.15)" : "scale(1)", transition: "transform 0.1s" }} />
+                <button key={c} onClick={() => selectedItemIsGlobal ? updateGlobalItem(selectedText.id, { color: c }) : selectedFace && updateItem(selectedFace, selectedText.id, { color: c })} title={c} style={{ width: "24px", height: "24px", borderRadius: "50%", background: c, border: `2.5px solid ${selectedText.color === c ? "#7c3aed" : "#e5e7eb"}`, cursor: "pointer", padding: 0, flexShrink: 0, boxShadow: c === "#ffffff" ? "inset 0 0 0 1px #d1d5db" : "0 1px 4px rgba(0,0,0,0.15)", outline: selectedText.color === c ? "2px solid rgba(124,58,237,0.25)" : "none", outlineOffset: "2px", transform: selectedText.color === c ? "scale(1.15)" : "scale(1)", transition: "transform 0.1s" }} />
               ))}
             </div>
             <div style={{ width: "1px", height: "28px", background: "#e5e7eb", flexShrink: 0 }} />
-            <button onClick={() => { if (selectedItemIsGlobal) removeGlobalItem(selectedText.id); else if (selectedFace) removeItem(selectedFace, selectedText.id); setSelectedItemId(null); setSelectedItemIsGlobal(false); }} style={{ padding: "0.4rem 1rem", border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, flexShrink: 0 }}>Delete</button>
+            <button onClick={() => { selectedItemIsGlobal ? removeGlobalItem(selectedText.id) : selectedFace && removeItem(selectedFace, selectedText.id); setSelectedItemId(null); }} style={{ padding: "0.4rem 1rem", border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, flexShrink: 0 }}>Delete</button>
           </div>
         ) : (
           <div style={{ flex: 1, textAlign: "center" }}>
@@ -1690,8 +1459,13 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
         {/* ── Left icon rail ── */}
         <div style={{ width: 72, borderRight: "1px solid #e5e7eb", background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 0", flexShrink: 0 }}>
-          {/* Uploads/Elements/Package Color icons hidden in Square mode for now — may bring back later. */}
-          {!hideFlaps && (["uploads", "elements"] as const).map(tab => (
+          {/* Basics icon */}
+          <button onClick={() => setActiveTab("basics")} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === "basics" ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === "basics" ? "#2563eb" : "#6b7280", width: "88%" }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></svg>
+            <span style={{ fontSize: "0.6rem", fontWeight: 700, textAlign: "center" }}>Basics</span>
+          </button>
+          {/* Uploads / Elements / Package Color icons hidden — pizza box editor only exposes Basics for now. Code kept intact below. */}
+          {false && (["uploads", "elements"] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === tab ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === tab ? "#2563eb" : "#6b7280", width: "88%" }}>
               {tab === "uploads" ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/></svg>
@@ -1701,29 +1475,184 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               <span style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "capitalize", textAlign: "center" }}>{tab === "uploads" ? "Uploads" : "Elements"}</span>
             </button>
           ))}
-          {/* Package Color icon */}
-          {!hideFlaps && (
+          {false && (
             <button onClick={() => setActiveTab(activeTab === "package-color" ? "uploads" : "package-color")} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === "package-color" ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === "package-color" ? "#2563eb" : "#6b7280", width: "88%" }}>
               <div style={{ width: 22, height: 22, borderRadius: "50%", background: vd.faceColors["front"] ?? "#c8a97e", border: "2px solid currentColor", flexShrink: 0 }} />
               <span style={{ fontSize: "0.6rem", fontWeight: 700, textAlign: "center", lineHeight: 1.2 }}>Package{"\n"}Color</span>
             </button>
           )}
-          {/* Basics icon (square box dimensions) */}
-          {hideFlaps && (
-            <button onClick={() => setActiveTab("basics")} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === "basics" ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === "basics" ? "#2563eb" : "#6b7280", width: "88%" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-              <span style={{ fontSize: "0.6rem", fontWeight: 700, textAlign: "center" }}>Basics</span>
-            </button>
-          )}
         </div>
 
         {/* ── Left expanded panel ── */}
-        <div style={{ width: 220, borderRight: "1px solid #e5e7eb", background: "#fff", overflowY: "auto", flexShrink: 0 }}>
+        <div style={{ width: 290, borderRight: "1px solid #e5e7eb", background: "#fff", overflowY: "auto", flexShrink: 0 }}>
           <div style={{ padding: "0.65rem 1rem 0.4rem", borderBottom: "1px solid #f3f4f6" }}>
             <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#111827", textTransform: "capitalize" }}>
-              {activeTab === "uploads" ? "Uploads" : activeTab === "elements" ? "Elements" : activeTab === "basics" ? "Basics" : "Package Color"}
+              {activeTab === "basics" ? "Basics" : activeTab === "uploads" ? "Uploads" : activeTab === "elements" ? "Elements" : "Package Color"}
             </span>
           </div>
+
+          {/* ── Basics panel ── */}
+          {activeTab === "basics" && (
+            <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {/* Length */}
+              <div>
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Length</label>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={lengthDraft}
+                    onChange={e => setLengthDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); applyLengthDraft(); } }}
+                    onBlur={applyLengthDraft}
+                    style={{ width: "100%", padding: "0.6rem 2.2rem 0.6rem 0.75rem", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.9rem", fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
+                  />
+                  <span style={{ position: "absolute", right: "0.75rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.82rem", fontWeight: 700, color: "#6b7280", pointerEvents: "none" }}>mm</span>
+                </div>
+              </div>
+
+              {/* Width */}
+              <div>
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Width</label>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={widthDraft}
+                    onChange={e => setWidthDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); applyWidthDraft(); } }}
+                    onBlur={applyWidthDraft}
+                    style={{ width: "100%", padding: "0.6rem 2.2rem 0.6rem 0.75rem", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.9rem", fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
+                  />
+                  <span style={{ position: "absolute", right: "0.75rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.82rem", fontWeight: 700, color: "#6b7280", pointerEvents: "none" }}>mm</span>
+                </div>
+              </div>
+
+              {/* Overall Height */}
+              <div>
+                <label htmlFor="pb-height-input" style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Height
+                </label>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <input
+                    id="pb-height-input"
+                    type="number"
+                    min={0}
+                    value={heightDraft}
+                    onChange={e => setHeightDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); applyHeightDraft(); } }}
+                    onBlur={applyHeightDraft}
+                    style={{ width: "100%", padding: "0.6rem 2.2rem 0.6rem 0.75rem", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.9rem", fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
+                  />
+                  <span style={{ position: "absolute", right: "0.75rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.82rem", fontWeight: 700, color: "#6b7280", pointerEvents: "none" }}>mm</span>
+                </div>
+              </div>
+
+              {/* Choose material */}
+              <div>
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Choose material</label>
+                <div ref={materialMenuRef} style={{ position: "relative", width: "100%" }}>
+                  <button
+                    ref={materialBtnRef}
+                    onClick={toggleMaterialMenu}
+                    style={{ width: "100%", padding: "0.6rem 0.75rem", border: `1.5px solid ${materialMenuOpen ? "#7c3aed" : "#e5e7eb"}`, borderRadius: 10, fontSize: "0.85rem", fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}
+                  >
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedMaterial.label}</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ transform: materialMenuOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+
+                  {materialMenuOpen && (
+                    <div ref={materialDropRef} style={{ position: "fixed", top: materialMenuPos.top, left: materialMenuPos.left, width: "max-content", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.15)", zIndex: 9999, display: "flex", overflow: "hidden" }}>
+                      <div style={{ width: 168, flexShrink: 0, borderRight: "1px solid #f0f0f0" }}>
+                        {MATERIAL_CATEGORIES.map((cat, i) => (
+                          <div
+                            key={cat.label}
+                            onMouseEnter={() => setActiveMaterialCat(i)}
+                            style={{ padding: "10px 12px", fontSize: "0.8rem", fontWeight: 600, color: "#111827", background: activeMaterialCat === i ? "#f9fafb" : "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, whiteSpace: "nowrap" }}
+                          >
+                            {cat.label}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5" style={{ flexShrink: 0 }}><path d="M9 6l6 6-6 6"/></svg>
+                          </div>
+                        ))}
+                      </div>
+                      {activeMaterialCat !== null && (
+                        <div style={{ width: 270, flexShrink: 0 }}>
+                          {MATERIAL_CATEGORIES[activeMaterialCat].options.map(opt => (
+                            <div
+                              key={opt.id}
+                              onClick={() => selectMaterial(opt)}
+                              style={{ padding: "10px 12px", fontSize: "0.75rem", color: "#111827", background: opt.id === selectedMaterialId ? "#f5f3ff" : "#fff", cursor: "pointer", fontWeight: opt.id === selectedMaterialId ? 700 : 500, whiteSpace: "nowrap" }}
+                            >
+                              {opt.label}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Thickness (derived from selected material; "Custom …" options get a +/- stepper) */}
+              <div>
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
+                  {isCustomSelected ? "Custom thickness" : "Thickness"}
+                </label>
+                {isCustomSelected && customRange && (
+                  <div style={{ fontSize: "0.72rem", color: "#9ca3af", marginBottom: 6 }}>({customRange.min}~{customRange.max}mm)</div>
+                )}
+                {isCustomSelected && customRange ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, border: "1.5px solid #e5e7eb", borderRadius: 10, padding: "0.35rem 0.5rem", background: "#fff" }}>
+                    <button
+                      onClick={() => stepCustomThickness(-1)}
+                      disabled={customThickness <= customRange.min}
+                      style={{ width: 28, height: 28, border: "none", borderRadius: 8, background: "#f3f4f6", cursor: customThickness <= customRange.min ? "not-allowed" : "pointer", fontSize: 16, lineHeight: 1, color: customThickness <= customRange.min ? "#d1d5db" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >−</button>
+                    <span style={{ flex: 1, textAlign: "center", fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{customThickness.toFixed(1)}</span>
+                    <button
+                      onClick={() => stepCustomThickness(1)}
+                      disabled={customThickness >= customRange.max}
+                      style={{ width: 28, height: 28, border: "none", borderRadius: 8, background: "#f3f4f6", cursor: customThickness >= customRange.max ? "not-allowed" : "pointer", fontSize: 16, lineHeight: 1, color: customThickness >= customRange.max ? "#d1d5db" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >+</button>
+                  </div>
+                ) : (
+                  <div style={{ position: "relative", width: "100%" }}>
+                    <input
+                      type="text"
+                      readOnly
+                      value={selectedMaterial.thickness.toFixed(2)}
+                      style={{ width: "100%", padding: "0.6rem 2.2rem 0.6rem 0.75rem", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.9rem", fontWeight: 700, color: "#111827", background: "#f9fafb", outline: "none", boxSizing: "border-box" }}
+                    />
+                    <span style={{ position: "absolute", right: "0.75rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.82rem", fontWeight: 700, color: "#6b7280", pointerEvents: "none" }}>mm</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Size mode */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                  <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase" }}>Size mode</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#9ca3af"><circle cx="12" cy="12" r="10"/><rect x="11" y="10" width="2" height="7" fill="#fff"/><rect x="11" y="6.5" width="2" height="2" fill="#fff"/></svg>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {([
+                    { id: "manufacture", label: "Manufacture\ndimensions" },
+                    { id: "inner", label: "Inner\ndimensions" },
+                    { id: "outer", label: "Outer\ndimensions" },
+                  ] as { id: "manufacture" | "inner" | "outer"; label: string }[]).map(opt => (
+                    <button
+                      key={opt.id}
+                      onClick={() => selectSizeMode(opt.id)}
+                      style={{ padding: "0.75rem 0.5rem", border: `1.5px solid ${sizeMode === opt.id ? "#2563eb" : "#e5e7eb"}`, borderRadius: 12, background: "#fff", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "#111827", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.3 }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          )}
 
           {/* ── Uploads panel ── */}
           {activeTab === "uploads" && (
@@ -1749,12 +1678,13 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           {/* ── Elements panel ── */}
           {activeTab === "elements" && (
             <div style={{ padding: "1rem" }}>
+
               {/* Text */}
               <div style={{ marginBottom: "1.25rem" }}>
                 <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#111827", display: "block", marginBottom: "0.6rem" }}>Text</span>
                 <button
                   onClick={addText}
-                  style={{ width: 80, height: 80, border: "1.5px solid #e5e7eb", borderRadius: 12, background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}
+                  style={{ width: 80, height: 80, border: "1.5px solid #e5e7eb", borderRadius: 12, background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, opacity: 1 }}
                 >
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="1.5"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
                   <span style={{ fontSize: "0.68rem", fontWeight: 600, color: "#374151" }}>Add text</span>
@@ -1764,7 +1694,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Shape */}
               <HScrollSection title="Shape">
                 {SHAPES.map(s => (
-                  <button key={s.label} onClick={() => addSvgItem(s)} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <button key={s.label} onClick={() => addSvgItem(s)} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: 1 }}>
                     <img src={svgUrl(s.svg)} alt={s.label} style={{ width: 44, height: 44, objectFit: "contain" }} />
                   </button>
                 ))}
@@ -1773,7 +1703,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Packaging Symbols */}
               <HScrollSection title="Packaging Symbols">
                 {PACKAGING_SYMBOLS.map(s => (
-                  <button key={s.label} onClick={() => addSvgItem({ svg: s.svg, w: 56, h: 56 })} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <button key={s.label} onClick={() => addSvgItem({ svg: s.svg, w: 56, h: 56 })} title={s.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: 1 }}>
                     <img src={svgUrl(s.svg)} alt={s.label} style={{ width: 44, height: 44, objectFit: "contain" }} />
                   </button>
                 ))}
@@ -1782,7 +1712,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Text Combinations */}
               <HScrollSection title="Text Combinations">
                 {TEXT_COMBOS.map(tc => (
-                  <button key={tc.label} onClick={() => addSvgItem({ svg: tc.svg, w: tc.w, h: tc.h })} title={tc.label} style={{ flexShrink: 0, width: 100, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#f9fafb", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                  <button key={tc.label} onClick={() => addSvgItem({ svg: tc.svg, w: tc.w, h: tc.h })} title={tc.label} style={{ flexShrink: 0, width: 100, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, background: "#f9fafb", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", opacity: 1 }}>
                     <img src={svgUrl(tc.svg)} alt={tc.label} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                   </button>
                 ))}
@@ -1791,7 +1721,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               {/* Patterns */}
               <HScrollSection title="Patterns">
                 {PATTERNS.map(p => (
-                  <button key={p.label} onClick={() => setBoxColor("url(" + svgUrl(p.svg) + ")")} title={p.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden", cursor: "pointer", padding: 0 }}>
+                  <button key={p.label} onClick={() => setBoxColor("url(" + svgUrl(p.svg) + ")")} title={p.label} style={{ flexShrink: 0, width: 72, height: 72, border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden", cursor: "pointer", opacity: 1, padding: 0 }}>
                     <img src={svgUrl(p.svg)} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   </button>
                 ))}
@@ -1812,177 +1742,73 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               </div>
             </div>
           )}
-
-          {/* Basics panel — Length / Width / Height */}
-          {activeTab === "basics" && hideFlaps && (
-            <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: 14 }}>
-              {([
-                { label: "Length", hint: "Back Panel", draft: sqLengthDraft, setDraft: setSqLengthDraft, apply: applySqLengthDraft },
-                { label: "Width",  hint: "Right Side Panel", draft: sqWidthDraft, setDraft: setSqWidthDraft, apply: applySqWidthDraft },
-                { label: "Height", hint: "Front Panel", draft: sqHeightDraft, setDraft: setSqHeightDraft, apply: applySqHeightDraft },
-              ] as const).map(f => (
-                <div key={f.label}>
-                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "#111827", marginBottom: 4 }}>
-                    {f.label}
-                  </label>
-                  <div style={{ display: "flex", alignItems: "center", border: "1.5px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
-                    <input
-                      type="number"
-                      min={1}
-                      value={f.draft}
-                      onChange={e => f.setDraft(e.target.value)}
-                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); f.apply(); } }}
-                      onBlur={f.apply}
-                      style={{ flex: 1, border: "none", outline: "none", padding: "0.5rem 0.65rem", fontSize: "0.85rem", color: "#111827" }}
-                    />
-                    <span style={{ padding: "0 0.65rem", fontSize: "0.78rem", color: "#9ca3af", fontWeight: 600 }}>mm</span>
-                  </div>
-                </div>
-              ))}
-
-              {/* Choose material */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Choose material</label>
-                <div ref={sqMaterialMenuRef} style={{ position: "relative", width: "100%" }}>
-                  <button
-                    ref={sqMaterialBtnRef}
-                    onClick={toggleSqMaterialMenu}
-                    style={{ width: "100%", padding: "0.6rem 0.75rem", border: `1.5px solid ${sqMaterialMenuOpen ? "#7c3aed" : "#e5e7eb"}`, borderRadius: 10, fontSize: "0.85rem", fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}
-                  >
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sqSelectedMaterial.label}</span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ transform: sqMaterialMenuOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}><path d="M6 9l6 6 6-6"/></svg>
-                  </button>
-
-                  {sqMaterialMenuOpen && (
-                    <div ref={sqMaterialDropRef} style={{ position: "fixed", top: sqMaterialMenuPos.top, left: sqMaterialMenuPos.left, width: "max-content", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.15)", zIndex: 9999, display: "flex", overflow: "hidden" }}>
-                      <div style={{ width: 168, flexShrink: 0, borderRight: "1px solid #f0f0f0" }}>
-                        {MATERIAL_CATEGORIES.map((cat, i) => (
-                          <div
-                            key={cat.label}
-                            onMouseEnter={() => setSqActiveMaterialCat(i)}
-                            style={{ padding: "10px 12px", fontSize: "0.8rem", fontWeight: 600, color: "#111827", background: sqActiveMaterialCat === i ? "#f9fafb" : "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, whiteSpace: "nowrap" }}
-                          >
-                            {cat.label}
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5" style={{ flexShrink: 0 }}><path d="M9 6l6 6-6 6"/></svg>
-                          </div>
-                        ))}
-                      </div>
-                      {sqActiveMaterialCat !== null && (
-                        <div style={{ width: 270, flexShrink: 0 }}>
-                          {MATERIAL_CATEGORIES[sqActiveMaterialCat].options.map(opt => (
-                            <div
-                              key={opt.id}
-                              onClick={() => selectSqMaterial(opt)}
-                              style={{ padding: "10px 12px", fontSize: "0.75rem", color: "#111827", background: opt.id === sqSelectedMaterialId ? "#f5f3ff" : "#fff", cursor: "pointer", fontWeight: opt.id === sqSelectedMaterialId ? 700 : 500, whiteSpace: "nowrap" }}
-                            >
-                              {opt.label}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Thickness (derived from selected material; "Custom …" options get a +/- stepper) */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
-                  {sqIsCustomSelected ? "Custom thickness" : "Thickness"}
-                </label>
-                {sqIsCustomSelected && sqCustomRange && (
-                  <div style={{ fontSize: "0.72rem", color: "#9ca3af", marginBottom: 6 }}>({sqCustomRange.min}~{sqCustomRange.max}mm)</div>
-                )}
-                {sqIsCustomSelected && sqCustomRange ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, border: "1.5px solid #e5e7eb", borderRadius: 10, padding: "0.35rem 0.5rem", background: "#fff" }}>
-                    <button
-                      onClick={() => stepSqCustomThickness(-1)}
-                      disabled={sqCustomThickness <= sqCustomRange.min}
-                      style={{ width: 28, height: 28, border: "none", borderRadius: 8, background: "#f3f4f6", cursor: sqCustomThickness <= sqCustomRange.min ? "not-allowed" : "pointer", fontSize: 16, lineHeight: 1, color: sqCustomThickness <= sqCustomRange.min ? "#d1d5db" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}
-                    >−</button>
-                    <span style={{ flex: 1, textAlign: "center", fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{sqCustomThickness.toFixed(1)}</span>
-                    <button
-                      onClick={() => stepSqCustomThickness(1)}
-                      disabled={sqCustomThickness >= sqCustomRange.max}
-                      style={{ width: 28, height: 28, border: "none", borderRadius: 8, background: "#f3f4f6", cursor: sqCustomThickness >= sqCustomRange.max ? "not-allowed" : "pointer", fontSize: 16, lineHeight: 1, color: sqCustomThickness >= sqCustomRange.max ? "#d1d5db" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}
-                    >+</button>
-                  </div>
-                ) : (
-                  <div style={{ position: "relative", width: "100%" }}>
-                    <input
-                      type="text"
-                      readOnly
-                      value={sqSelectedMaterial.thickness.toFixed(2)}
-                      style={{ width: "100%", padding: "0.6rem 2.2rem 0.6rem 0.75rem", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.9rem", fontWeight: 700, color: "#111827", background: "#f9fafb", outline: "none", boxSizing: "border-box" }}
-                    />
-                    <span style={{ position: "absolute", right: "0.75rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.82rem", fontWeight: 700, color: "#6b7280", pointerEvents: "none" }}>mm</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Size mode */}
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                  <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.05em", textTransform: "uppercase" }}>Size mode</span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#9ca3af"><circle cx="12" cy="12" r="10"/><rect x="11" y="10" width="2" height="7" fill="#fff"/><rect x="11" y="6.5" width="2" height="2" fill="#fff"/></svg>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {([
-                    { id: "manufacture", label: "Manufacture\ndimensions" },
-                    // Inner/Outer size-mode options hidden for now — may bring back later.
-                  ] as { id: "manufacture" | "inner" | "outer"; label: string }[]).map(opt => (
-                    <button
-                      key={opt.id}
-                      onClick={() => selectSqSizeMode(opt.id)}
-                      style={{ padding: "0.75rem 0.5rem", border: `1.5px solid ${sqSizeMode === opt.id ? "#2563eb" : "#e5e7eb"}`, borderRadius: 12, background: "#fff", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "#111827", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.3 }}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* ── Center: Dieline canvas ── */}
         <div style={{ flex: 1, background: "#f1f5f9", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
-          {/* Square mode — line-color legend + Manufacture/Inner/Outer dimensions (same as pizza-box-editor) */}
-          {hideFlaps && (
-            <>
-              <div style={{ position: "absolute", top: 16, left: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 20, background: "#eef1f5", padding: "8px 16px", borderRadius: 8, pointerEvents: "none" }}>
-                {[
-                  { label: "Bleed", color: "#22c55e" },
-                  { label: "Trim", color: "#3b3bfa" },
-                  { label: "Crease", color: "#ef4444" },
-                ].map(({ label, color }) => (
-                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 32, height: 3, background: color, borderRadius: 2 }} />
-                    <span style={{ fontSize: "0.85rem", color: "#4b5563" }}>{label}</span>
-                  </div>
-                ))}
+          {/* Line-color legend — Bleed / Trim / Crease */}
+          <div style={{ position: "absolute", top: 16, left: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 20, background: "#eef1f5", padding: "8px 16px", borderRadius: 8, pointerEvents: "none" }}>
+            {[
+              { label: "Bleed", color: "#22c55e" },
+              { label: "Trim", color: "#3b3bfa" },
+              { label: "Crease", color: "#ef4444" },
+            ].map(({ label, color }) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 32, height: 3, background: color, borderRadius: 2 }} />
+                <span style={{ fontSize: "0.85rem", color: "#4b5563" }}>{label}</span>
               </div>
+            ))}
+          </div>
 
-              <div style={{ position: "absolute", top: 60, left: 16, zIndex: 30, background: "#eef1f5", padding: "12px 16px", borderRadius: 8, minWidth: 210, pointerEvents: "none" }}>
-                <div>
+          {/* Manufacture / Inner / Outer dimensions — updates with L/W/H and material */}
+          <div style={{ position: "absolute", top: 60, left: 16, zIndex: 30, background: "#eef1f5", padding: "12px 16px", borderRadius: 8, minWidth: 210, pointerEvents: "none" }}>
+            <>
+                <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: "0.72rem", color: "#6b7280" }}>Manufacture dimensions</div>
-                  <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{sqBoxDims.mfgL.toFixed(2)} × {sqBoxDims.mfgW.toFixed(2)} × {sqBoxDims.mfgH.toFixed(2)} mm</div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{boxDims.mfgL.toFixed(2)} × {boxDims.mfgW.toFixed(2)} × {boxDims.mfgH.toFixed(2)} mm</div>
                 </div>
-                {/* Inner/Outer dimensions hidden for now — may bring back later. */}
-              </div>
-            </>
-          )}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: "0.72rem", color: "#6b7280" }}>Inner dimensions</div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{boxDims.innerL.toFixed(2)} × {boxDims.innerW.toFixed(2)} × {boxDims.innerH.toFixed(2)} mm</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "0.72rem", color: "#6b7280" }}>Outer dimensions</div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{boxDims.outerL.toFixed(2)} × {boxDims.outerW.toFixed(2)} × {boxDims.outerH.toFixed(2)} mm</div>
+                </div>
+              </>
+          </div>
 
           <div
             ref={canvasScrollRef}
             style={{ flex: 1, height: 0, overflowY: "auto", overflowX: "auto", cursor: toolMode === "pan" ? "grab" : "default" }}
-            onClick={() => { setSelectedFace(null); setSelectedItemId(null); setSelectedItemIsGlobal(false); setEditingItemId(null); setShowFaceColorPopup(false); }}
+            onClick={() => { setSelectedFace(null); setSelectedItemId(null); setEditingItemId(null); setShowFaceColorPopup(false); setSelectedItemIsGlobal(false); }}
           >
-            <div style={{ minHeight: "150vh", minWidth: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem", boxSizing: "border-box" }}>
-            <div style={{ position: "relative", width: dilineCanvasW * zoom, height: dilineCanvasH * zoom, flexShrink: 0 }}>
+            <div style={{ minHeight: "150vh", minWidth: "100%", display: "flex", alignItems: "center", justifyContent: "center", paddingTop: `${Math.max(48, Math.max(topLockFlapH, TOP_LOCK_R) * zoom + 8)}px`, paddingRight: "3rem", paddingBottom: "3rem", paddingLeft: "3rem", boxSizing: "border-box" }}>
+            <div style={{ position: "relative", width: dielineW * zoom, height: (DIELINE_H_FULL + Math.max(0, Math.max(topLockFlapH, TOP_LOCK_R) - PAD)) * zoom, flexShrink: 0, transform: `rotate(${canvasRotation}deg)`, transformOrigin: "center center", transition: "transform 0.3s ease" }}>
 
-              {/* Dieline background */}
-              <div style={{ position: "absolute", inset: 0, background: "#f5f5f0", borderRadius: 4 }} />
+              {/* Dieline background — extends up to cover top flap and dust flap which sit above y=0 */}
+              <div style={{ position: "absolute", top: -(Math.max(topLockFlapH, TOP_LOCK_R) - PAD) * zoom, bottom: 0, left: 0, right: 0, background: "#f5f5f0", borderRadius: 4 }} />
+
+              {/* Bleed outline filter def — dilates with a rectangular kernel (sharp
+                  corners), fills the margin with the box's own material color, and
+                  draws a thin dark-green line only at the outer edge of that margin. */}
+              <svg width="0" height="0" style={{ position: "absolute" }}>
+                <defs>
+                  <filter id="bleedDilateFilter" x="-20%" y="-20%" width="140%" height="140%">
+                    <feMorphology in="SourceAlpha" operator="dilate" radius={bleedR} result="dilatedOuter" />
+                    <feMorphology in="SourceAlpha" operator="dilate" radius={Math.max(0, bleedR - bleedLineW)} result="dilatedInner" />
+                    <feComposite in="dilatedOuter" in2="dilatedInner" operator="out" result="ring" />
+                    <feFlood floodColor={bleedFillColor} result="tanFlood" />
+                    <feComposite in="tanFlood" in2="dilatedOuter" operator="in" result="tanFill" />
+                    <feFlood floodColor="#166534" result="greenFlood" />
+                    <feComposite in="greenFlood" in2="ring" operator="in" result="greenRing" />
+                    <feMerge>
+                      <feMergeNode in="tanFill" />
+                      <feMergeNode in="greenRing" />
+                    </feMerge>
+                  </filter>
+                </defs>
+              </svg>
 
               {/* ── Mailer Box Dieline SVG ── */}
               {(() => {
@@ -1991,7 +1817,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 const x0=LX0*z, x1=LX1*z, x2=LX2*z, x3=LX3*z, x4=LX4*z, x5=LX5*z;
                 const yt=LY_TOP*z, y2=LY2*z, y3=LY3*z, y4=LY4*z;
                 const cr = s(COR);
-                const W = TOTAL_DIELINE_W * z, H = DIELINE_H_FULL * z;
+                const W = dielineW * z, H = TOTAL_DIELINE_H * z;
 
                 // Wing geometry
                 const ch    = s(16);   // chamfer size at wing outer corners
@@ -2025,8 +1851,9 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                   `A ${br} ${br} 0 0 1 ${x4 - br},${y4}`,
                   `L ${x1 + br},${y4}`,
                   `A ${br} ${br} 0 0 1 ${x1},${y4 - br}`,
-                  // Bottom flap left side back up to left wing bottom
-                  `L ${x1},${y3}`,
+                  // Bottom flap left side back up, with chamfer at top-left corner
+                  `L ${x1},${y3 + ch}`,
+                  `L ${x1 - ch},${y3}`,
                   // Left wing — bottom chamfered corner (mirror)
                   `L ${x0 + ch},${y3}`,
                   `L ${x0},${y3 - ch}`,
@@ -2046,10 +1873,13 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 const folds = [
                   // Top flap fold at LY2 (full width x1 to x4)
                   `M ${x1},${y2} L ${x4},${y2}`,
+                  // Top flap outer side folds
+                  `M ${x1},${yt + br} L ${x1},${y2}`,
+                  `M ${x4},${yt + br} L ${x4},${y2}`,
                   // Full-height vertical fold at LX2 — top of Back Side to bottom of Front Side
-                  `M ${x2},${y2} L ${x2},${y4}`,
+                  `M ${x2},${yt} L ${x2},${y4}`,
                   // Full-height vertical fold at LX3
-                  `M ${x3},${y2} L ${x3},${y4}`,
+                  `M ${x3},${yt} L ${x3},${y4}`,
                   // Front face bottom fold at LY3
                   `M ${x2},${y3} L ${x3},${y3}`,
                   // Left wing fold at LX1
@@ -2061,25 +1891,64 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                   // Bottom flap outer side folds
                   `M ${x1},${y3} L ${x1},${y4 - br}`,
                   `M ${x4},${y3} L ${x4},${y4 - br}`,
-                  // Right Side Wall bottom separator — connects to Bottom Lock Flap Right edges
-                  `M ${x3},${NY_BOT * z} L ${x5 + s(20)},${NY_BOT * z}`,
+                  // Bottom flap inner dividers (4 equal sections)
+                  `M ${x1 + (x4 - x1) / 4},${y3} L ${x1 + (x4 - x1) / 4},${y4}`,
+                  `M ${x1 + (x4 - x1) / 2},${y3} L ${x1 + (x4 - x1) / 2},${y4}`,
+                  `M ${x1 + (x4 - x1) * 3 / 4},${y3} L ${x1 + (x4 - x1) * 3 / 4},${y4}`,
+                  // Right Side Wall bottom separator — connects to Left Bottom Triangle (wedge), touching Bottom Lock Flap corner
+                  `M ${x3},${s(NY_BOT - BOTTOM_LOCK_W)} L ${x3 + s(LOCK_FLAP_SIZE)},${s(NY_BOT - BOTTOM_LOCK_W)}`,
                 ].join(" ");
 
                 // ── DIMENSIONS ───────────────────────────────────────────────
                 const dz = s(10);
                 const tk = s(4);
 
-                return hideFlaps ? null : (
+                return (
                   <svg style={{ position: "absolute", inset: 0, pointerEvents: "none" }} width={W} height={H}>
                     {/* Fold lines */}
                     <path d={folds} fill="none" stroke="#3b82f6" strokeWidth={s(0.9)} strokeDasharray={`${s(4)} ${s(2.5)}`} />
+
+
+
+                    {/* Dimensions */}
+                    <g fill="none" stroke="#3b82f6" strokeWidth={s(0.8)}>
+                      {/* Width (BW mm) */}
+                      <line x1={x2} y1={s(NY_BOT)+s(16)} x2={x3} y2={s(NY_BOT)+s(16)} />
+                      <line x1={x2} y1={s(NY_BOT)+s(16)-tk} x2={x2} y2={s(NY_BOT)+s(16)+tk} />
+                      <line x1={x3} y1={s(NY_BOT)+s(16)-tk} x2={x3} y2={s(NY_BOT)+s(16)+tk} />
+                      <text x={(x2+x3)/2} y={s(NY_BOT)+s(12)} textAnchor="middle" fill="#3b82f6" stroke="none" fontSize={dz} fontWeight="700">{BW} mm</text>
+                      {/* Height (BH mm) — right of Base face */}
+                      <line x1={x3+s(16)} y1={s(NY_BASE)} x2={x3+s(16)} y2={s(NY_BOT)} />
+                      <line x1={x3+s(16)-tk} y1={s(NY_BASE)} x2={x3+s(16)+tk} y2={s(NY_BASE)} />
+                      <line x1={x3+s(16)-tk} y1={s(NY_BOT)} x2={x3+s(16)+tk} y2={s(NY_BOT)} />
+                      <text x={x3+s(22)} y={(s(NY_BASE)+s(NY_BOT))/2+dz/3} fill="#3b82f6" stroke="none" fontSize={dz} fontWeight="700">{BH} mm</text>
+                    </g>
                   </svg>
                 );
               })()}
 
+              {/* Bleed outline — dark-green margin, evenly (parallel) offset outward
+                  from the whole outer silhouette with sharp/mitered corners. A hidden
+                  plain-silhouette copy of the panels feeds the dilate filter (so labels/
+                  borders don't leak into the alpha mask); it renders behind the real,
+                  unfiltered panels below. */}
+              <div style={{ position: "relative", filter: "url(#bleedDilateFilter)" }}>
+                {dielineFaces.map(face => (
+                  <DielineFace
+                    key={face.id + "-silhouette"}
+                    face={face} color="#000"
+                    selected={false} hovered={false}
+                    onSelect={() => {}} onHover={() => {}} onLeave={() => {}}
+                    items={[]} zoom={zoom} lockFlapSize={LOCK_FLAP_SIZE}
+                    topLockR={TOP_LOCK_R} topLockW={TOP_LOCK_W}
+                    silhouetteOnly
+                  />
+                ))}
+              </div>
+
               {/* Face panels */}
               {dielineFaces.map(face => {
-                const faceColor = state[view].faceColors[face.id] ?? (hideFlaps ? "#ffffff" : "#c8a97e");
+                const faceColor = state[view].faceColors[face.id] ?? "#c8a97e";
                 return (
                   <DielineFace
                     key={face.id + "-" + view}
@@ -2091,227 +1960,139 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                     onLeave={() => setHoveredFace(null)}
                     items={getFaceItems(face.id)}
                     zoom={zoom}
-                    dividerColor={hideFlaps ? "#dc2626" : undefined}
+                    lockFlapSize={LOCK_FLAP_SIZE}
+
+                    topLockR={TOP_LOCK_R}
+                    topLockW={TOP_LOCK_W}
                   />
                 );
               })}
 
-              {/* Locking tabs on side-left-flap (protrude left from left edge) */}
-              {(() => {
-                const face = dielineFaces.find(f => f.id === "side-left-flap");
-                if (!face) return null;
-                const faceColor = state[view].faceColors["side-left-flap"] ?? "#c8a97e";
-                const nW = 10 * zoom;
-                const nH = 38 * zoom;
-                const nX = face.x * zoom - nW;
-                const style: React.CSSProperties = { position: "absolute", width: nW, height: nH, background: faceColor, border: "1.5px dashed rgba(0,0,0,0.25)", boxSizing: "border-box", zIndex: 5, pointerEvents: "none" };
-                return (
-                  <>
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.30 - 11) * zoom }} />
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.65 - 11) * zoom }} />
-                  </>
-                );
-              })()}
 
-              {/* Locking slots on side-left right edge (white cutouts, same Y as tabs) */}
-              {(() => {
-                const face = dielineFaces.find(f => f.id === "side-left");
-                if (!face) return null;
-                const nW = 10 * zoom;
-                const nH = 38 * zoom;
-                const nX = (face.x + face.w) * zoom;
-                const style: React.CSSProperties = { position: "absolute", width: nW, height: nH, background: "#ffffff", border: "1.5px dashed rgba(0,0,0,0.25)", boxSizing: "border-box", zIndex: 5, pointerEvents: "none" };
-                return (
-                  <>
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.30 - 19) * zoom }} />
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.65 - 19) * zoom }} />
-                  </>
-                );
-              })()}
 
-              {/* Locking tabs on side-right-flap (protrude right from right edge) */}
-              {(() => {
-                const face = dielineFaces.find(f => f.id === "side-right-flap");
-                if (!face) return null;
-                const faceColor = state[view].faceColors["side-right-flap"] ?? "#c8a97e";
-                const nW = 10 * zoom;
-                const nH = 38 * zoom;
-                const nX = (face.x + face.w) * zoom;
-                const style: React.CSSProperties = { position: "absolute", width: nW, height: nH, background: faceColor, border: "1.5px dashed rgba(0,0,0,0.25)", boxSizing: "border-box", zIndex: 5, pointerEvents: "none" };
-                return (
-                  <>
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.30 - 19) * zoom }} />
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.65 - 19) * zoom }} />
-                  </>
-                );
-              })()}
 
-              {/* Locking slots on side-right left edge (white cutouts into Base) */}
-              {(() => {
-                const face = dielineFaces.find(f => f.id === "side-right");
-                if (!face) return null;
-                const nW = 10 * zoom;
-                const nH = 38 * zoom;
-                const nX = face.x * zoom - nW;
-                const style: React.CSSProperties = { position: "absolute", width: nW, height: nH, background: "#ffffff", border: "1.5px dashed rgba(0,0,0,0.25)", boxSizing: "border-box", zIndex: 5, pointerEvents: "none" };
-                return (
-                  <>
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.30 - 19) * zoom }} />
-                    <div style={{ ...style, left: nX, top: (face.y + face.h * 0.65 - 19) * zoom }} />
-                  </>
-                );
-              })()}
 
-              {/* Square mode — outer cut outline (traces the true stepped silhouette,
-                  including the Glue Flap tab on the middle/base row) */}
-              {hideFlaps && (() => {
+
+              {/* Bottom Tuck Flap Left — T/L/B/R edge labels */}
+              {(() => {
                 const z = zoom;
-                const mirror = (p: number) => (view === "inside" ? 2 * NX1 + sqTotalW - p : p);
-                const leftX = sqColX0;
-                const rightTop = sqColX3 + sqBackWidthPx;
-                const rightBase = rightTop + sqGlueFlapW;
-                const topY = lidFace.y;
-                const bottomY = sqBotY + sqLidH;
-                const half = 3;
-                const gapXs = [sqColX1, sqColX2, sqColX3];
-                // Rest of the perimeter (top-right corner around to top-left corner), as one
-                // continuous path — only the top edge itself is split (below) to leave breaks
-                // at each gap notch.
-                const restPts: [number, number][] = [
-                  [rightTop, topY],
-                  [rightTop, sqBaseY],
-                  [rightBase, sqBaseY],
-                  [rightBase, sqBaseY + sqBaseHeightPx],
-                  [rightTop, sqBaseY + sqBaseHeightPx],
-                  [rightTop, bottomY],
-                ];
-                const restPath = restPts.map((p, i) => `${i === 0 ? "M" : "L"} ${mirror(p[0]) * z} ${p[1] * z}`).join(" ");
-                const leftEdgePath = `M ${mirror(leftX) * z} ${bottomY * z} L ${mirror(leftX) * z} ${topY * z}`;
-                // Top/bottom edges, each broken at every gap notch's width
-                const rowCuts = [leftX, ...gapXs.flatMap(gx => [gx - half, gx + half]), rightTop];
-                const edgeSegments = (y: number) => {
-                  const segs: string[] = [];
-                  for (let i = 0; i < rowCuts.length; i += 2) {
-                    const a = mirror(rowCuts[i]) * z, b = mirror(rowCuts[i + 1]) * z;
-                    segs.push(`M ${a} ${y * z} L ${b} ${y * z}`);
-                  }
-                  return segs.join(" ");
+                const faceX = regMirrorTotal - NX2 - BOTTOM_LOCK_W * 2;
+                const cx = (faceX + BOTTOM_LOCK_W) * z;
+                const cy = (NY_BOT + BOTTOM_LOCK_W) * z;
+                const r  = BOTTOM_LOCK_W * z;
+                const off = 10 * z;
+                const style: React.CSSProperties = {
+                  position: "absolute", pointerEvents: "none",
+                  fontSize: 9 * z, fontWeight: 700, color: "rgba(0,0,0,0.55)",
+                  letterSpacing: "0.04em", transform: "translate(-50%,-50%)",
+                  userSelect: "none", lineHeight: 1,
                 };
-                const outline = [restPath, leftEdgePath, edgeSegments(topY), edgeSegments(bottomY)].join(" ");
-                // Panel-gap notches (lid row + bottom row) — each gap is a real physical cut
-                // between adjacent flaps, so frame it on both sides + the bottom (top stays
-                // open into the outer edge above), same color/width as the outer outline.
-                const gapRows = [
-                  { y1: topY, y2: sqBaseY, closeTop: false, closeBottom: true },
-                  { y1: sqBotY, y2: bottomY, closeTop: true, closeBottom: false },
-                ];
-                const notches = gapRows.flatMap(row => gapXs.map(gx => {
-                  const lx = mirror(gx - half) * z;
-                  const rx = mirror(gx + half) * z;
-                  const y1 = row.y1 * z, y2 = row.y2 * z;
-                  const left = `M ${lx} ${y1} L ${lx} ${y2}`;
-                  const right = `M ${rx} ${y1} L ${rx} ${y2}`;
-                  const top = row.closeTop ? ` M ${lx} ${y1} L ${rx} ${y1}` : "";
-                  const bottom = row.closeBottom ? ` M ${lx} ${y2} L ${rx} ${y2}` : "";
-                  return left + " " + right + top + bottom;
-                }));
-
-                // Bleed margin — a green line offset outward from the true outer silhouette
-                // (mirrors the pizza-box-editor bleed outline), with the ring between it and
-                // the blue outline filled in the box's own panel color.
-                const bleedR = 10;
-                // Straight rectangle (ignores the glue-flap bump) — the green bleed line and
-                // margin band run straight past it, with a break over the glue-flap's own
-                // height so the line doesn't cut across that panel (it just meets the row
-                // boundaries above and below it).
-                const pt = (x: number, y: number) => `${mirror(x) * z} ${y * z}`;
-                const straightEdgePath = (r: number) => [
-                  `M ${pt(leftX - r, topY - r)}`,
-                  `L ${pt(rightTop + r, topY - r)}`,
-                  `L ${pt(rightTop + r, sqBaseY)}`,
-                  `M ${pt(rightTop + r, sqBaseY + sqBaseHeightPx)}`,
-                  `L ${pt(rightTop + r, bottomY + r)}`,
-                  `L ${pt(leftX - r, bottomY + r)}`,
-                  `L ${pt(leftX - r, topY - r)}`,
-                ].join(" ");
-                const outerEdgePath = straightEdgePath(bleedR);
-                const midEdgePath = straightEdgePath(bleedR / 2);
-                const bleedFillColor = state[view].faceColors["sq-front-panel"] ?? "#ffffff";
                 return (
-                  <svg style={{ position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none", zIndex: 6 }} width={dilineCanvasW * z} height={dilineCanvasH * z}>
-                    {/* Margin band as a thick stroke (not a fill-based ring) so SVG's own
-                        join rendering handles the concave glue-flap corners cleanly. */}
-                    <path d={midEdgePath} fill="none" stroke={bleedFillColor} strokeWidth={bleedR * z} strokeLinejoin="round" />
-                    <path d={outerEdgePath} fill="none" stroke="#166534" strokeWidth={2} strokeLinejoin="round" />
-                    <path d={outline} fill="none" stroke="#1e3a8a" strokeWidth={2} strokeLinejoin="round" />
-                    <path d={notches.join(" ")} fill="none" stroke="#1e3a8a" strokeWidth={2} strokeLinejoin="round" />
-                  </svg>
+                  <>
+                    <span style={{ ...style, left: cx,           top: cy - r - off }}>T</span>
+                    <span style={{ ...style, left: cx + r + off, top: cy           }}>R</span>
+                    <span style={{ ...style, left: cx,           top: cy + r + off }}>B</span>
+                    <span style={{ ...style, left: cx - r - off, top: cy           }}>L</span>
+                  </>
                 );
               })()}
 
-              {/* Square mode — Right Side Panel 305 mm dimension indicator */}
-              {hideFlaps && (() => {
+              {/* Bottom Tuck Flap Right — T/L/B/R edge labels */}
+              {(() => {
                 const z = zoom;
-                const s = (n: number) => n * z;
-                const tk = s(5);
-                const rsp = dielineFaces.find(f => f.id === "sq-right-side-panel");
-                const fp  = dielineFaces.find(f => f.id === "sq-front-panel");
-                if (!rsp || !fp) return null;
-                const panelX1 = s(rsp.x) + s(10);
-                const panelX2 = s(rsp.x + rsp.w) - s(10);
-                const panelCX = (panelX1 + panelX2) / 2;
-                const hy = s(sqBaseY + sqBaseHeightPx) - s(20);
-                const vy1 = s(sqBaseY) + s(10);
-                const vy2 = s(sqBaseY + sqBaseHeightPx) - s(10);
-                const vx  = s(fp.x + fp.w / 2);
+                // face rendered x = regMirrorTotal - NX1; center = +BOTTOM_LOCK_W
+                const cx = (regMirrorTotal - NX1 + BOTTOM_LOCK_W) * z;
+                const cy = (NY_BOT + BOTTOM_LOCK_W) * z;
+                const r  = BOTTOM_LOCK_W * z;
+                const off = 10 * z;
+                const style: React.CSSProperties = {
+                  position: "absolute", pointerEvents: "none",
+                  fontSize: 9 * z, fontWeight: 700, color: "rgba(0,0,0,0.55)",
+                  letterSpacing: "0.04em", transform: "translate(-50%,-50%)",
+                  userSelect: "none", lineHeight: 1,
+                };
                 return (
-                  <svg style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 10 }} width={(TOTAL_DIELINE_W - BW + sqTotalW) * z} height={dilineCanvasH * z}>
-                    <g fill="none" stroke="#3b82f6" strokeWidth={s(1.5)}>
-                      {/* Width — Right Side Panel horizontal */}
-                      <line x1={panelX1} y1={hy} x2={panelX2} y2={hy} />
-                      <line x1={panelX1} y1={hy - tk} x2={panelX1} y2={hy + tk} />
-                      <line x1={panelX2} y1={hy - tk} x2={panelX2} y2={hy + tk} />
-                      <text x={panelCX} y={hy - s(6)} textAnchor="middle" fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{sqWidthMM} mm</text>
-                      {/* Height — Front Panel vertical */}
-                      <line x1={vx} y1={vy1} x2={vx} y2={vy2} />
-                      <line x1={vx - tk} y1={vy1} x2={vx + tk} y2={vy1} />
-                      <line x1={vx - tk} y1={vy2} x2={vx + tk} y2={vy2} />
-                      <text x={vx + s(6)} y={(vy1 + vy2) / 2 + s(6)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{sqHeightMM} mm</text>
-                    </g>
-                  </svg>
+                  <>
+                    <span style={{ ...style, left: cx,           top: cy - r - off }}>T</span>
+                    <span style={{ ...style, left: cx + r + off, top: cy           }}>R</span>
+                    <span style={{ ...style, left: cx,           top: cy + r + off }}>B</span>
+                    <span style={{ ...style, left: cx - r - off, top: cy           }}>L</span>
+                  </>
                 );
               })()}
 
-              {/* Square mode — Back Panel horizontal dimension indicator */}
-              {hideFlaps && (() => {
+              {/* Dust Flap Top — TL / TR corner labels */}
+              {(() => {
                 const z = zoom;
-                const s = (n: number) => n * z;
-                const tk = s(5);
-                const bp = dielineFaces.find(f => f.id === "sq-back-panel");
-                if (!bp) return null;
-                const panelX1 = s(bp.x) + s(10);
-                const panelX2 = s(bp.x + bp.w) - s(10);
-                const panelCX = (panelX1 + panelX2) / 2;
-                const hy = s(sqBaseY + sqBaseHeightPx) - s(20);
+                // mirrored: x = regMirrorTotal - NX1 - BW, w = BW
+                const faceLeft  = (regMirrorTotal - NX1 - BW) * z;
+                const faceRight = (regMirrorTotal - NX1) * z;
+                const faceTop   = NY0 * z;
+                const off = 10 * z;
+                const style: React.CSSProperties = {
+                  position: "absolute", pointerEvents: "none",
+                  fontSize: 8 * z, fontWeight: 700, color: "rgba(0,0,0,0.5)",
+                  letterSpacing: "0.03em", transform: "translate(-50%,-50%)",
+                  userSelect: "none", lineHeight: 1, textAlign: "center",
+                };
                 return (
-                  <svg style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 10 }} width={(TOTAL_DIELINE_W - BW + sqTotalW) * z} height={dilineCanvasH * z}>
-                    <g fill="none" stroke="#3b82f6" strokeWidth={s(1.5)}>
-                      {/* Length — Back Panel horizontal width */}
-                      <line x1={panelX1} y1={hy} x2={panelX2} y2={hy} />
-                      <line x1={panelX1} y1={hy - tk} x2={panelX1} y2={hy + tk} />
-                      <line x1={panelX2} y1={hy - tk} x2={panelX2} y2={hy + tk} />
-                      <text x={panelCX} y={hy - s(6)} textAnchor="middle" fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{sqLengthMM} mm</text>
-                    </g>
-                  </svg>
+                  <>
+                    <span style={{ ...style, left: faceLeft  + off * 1.5, top: faceTop + off * 1.5 }}>TL</span>
+                    <span style={{ ...style, left: faceRight - off * 1.5, top: faceTop + off * 1.5 }}>TR</span>
+                  </>
+                );
+              })()}
+
+              {/* Top Side Flap Left — top-left / top-right corner labels */}
+              {(() => {
+                const z = zoom;
+                // mirrored face: x = regMirrorTotal - NX1, w = (BD + 60) / 2
+                const faceLeft  = (regMirrorTotal - NX1) * z;
+                const faceRight = (regMirrorTotal - NX1 + (BD + 60) / 2) * z;
+                const faceTop   = NY_DUST * z;
+                const off = 10 * z;
+                const style: React.CSSProperties = {
+                  position: "absolute", pointerEvents: "none",
+                  fontSize: 8 * z, fontWeight: 700, color: "rgba(0,0,0,0.5)",
+                  letterSpacing: "0.03em", transform: "translate(-50%,-50%)",
+                  userSelect: "none", lineHeight: 1, textAlign: "center",
+                };
+                return (
+                  <>
+                    <span style={{ ...style, left: faceLeft  + off * 1.5, top: faceTop + off * 1.5 }}>TL</span>
+                    <span style={{ ...style, left: faceRight - off * 1.5, top: faceTop + off * 1.5 }}>TR</span>
+                  </>
+                );
+              })()}
+
+              {/* Top Side Flap Left (left-side appearance) — TL / TR labels */}
+              {(() => {
+                const z = zoom;
+                // This face renders from top-side-flap-right's mirrored position
+                const faceLeft  = (regMirrorTotal - NX2 - (BD + 60) / 2) * z;
+                const faceRight = (regMirrorTotal - NX2) * z;
+                const faceTop   = NY_DUST * z;
+                const off = 10 * z;
+                const style: React.CSSProperties = {
+                  position: "absolute", pointerEvents: "none",
+                  fontSize: 8 * z, fontWeight: 700, color: "rgba(0,0,0,0.5)",
+                  letterSpacing: "0.03em", transform: "translate(-50%,-50%)",
+                  userSelect: "none", lineHeight: 1, textAlign: "center",
+                };
+                return (
+                  <>
+                    <span style={{ ...style, left: faceLeft  + off * 1.5, top: faceTop + off * 1.5 }}>TL</span>
+                    <span style={{ ...style, left: faceRight - off * 1.5, top: faceTop + off * 1.5 }}>TR</span>
+                  </>
                 );
               })()}
 
               {/* Dimension overlays — on top of face panels */}
-              {!hideFlaps && (() => {
+              {(() => {
                 const z = zoom;
                 const s = (n: number) => n * z;
                 const tk = s(5);
-                const lx = s(NX1 + BW / 2);
+                const lx = s(regMirrorTotal - NX1 - BW / 2);
                 // 62mm — Back Side face (vertical)
                 const by1 = s(NY_LID) + s(10);
                 const by2 = s(NY_LID + BD) - s(10);
@@ -2321,29 +2102,445 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 // 315mm — Base face bottom (horizontal)
                 const hx1 = s(NX1) + s(10);
                 const hx2 = s(NX2) - s(10);
-                const hy  = s(NY_BASE + BH) - s(20);
+                const hy  = s(NY_BASE + BH) - s(160);
                 return (
-                  <svg style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 10 }} width={TOTAL_DIELINE_W * z} height={DIELINE_H_FULL * z}>
+                  <svg style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 10, overflow: "visible" }} width={dielineW * z} height={DIELINE_H_FULL * z} overflow="visible">
                     <g fill="none" stroke="#3b82f6" strokeWidth={s(1.5)}>
                       {/* 62 mm depth */}
                       <line x1={lx} y1={by1} x2={lx} y2={by2} />
                       <line x1={lx - tk} y1={by1} x2={lx + tk} y2={by1} />
                       <line x1={lx - tk} y1={by2} x2={lx + tk} y2={by2} />
                       <text x={lx + s(20)} y={(by1 + by2) / 2 + s(6)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{BD} mm</text>
-                      {/* 202 mm height */}
+                      {/* Base/side-wall row height (BH) */}
                       <line x1={lx} y1={fy1} x2={lx} y2={fy2} />
                       <line x1={lx - tk} y1={fy1} x2={lx + tk} y2={fy1} />
                       <line x1={lx - tk} y1={fy2} x2={lx + tk} y2={fy2} />
                       <text x={lx + s(6)} y={(fy1 + fy2) / 2 + s(6)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{BH} mm</text>
-                      {/* 315 mm width — horizontal at bottom of Base face */}
+                      {/* 315 mm width */}
                       <line x1={hx1} y1={hy} x2={hx2} y2={hy} />
                       <line x1={hx1} y1={hy - tk} x2={hx1} y2={hy + tk} />
                       <line x1={hx2} y1={hy - tk} x2={hx2} y2={hy + tk} />
-                      <text x={hx2 - s(4)} y={hy - s(6)} textAnchor="end" fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{BW} mm</text>
+                      <text x={(hx1 + hx2) / 2} y={hy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800" textAnchor="middle">{BW} mm</text>
+                      {/* Base horizontal dimension (BH*2) — center of base panel */}
+                      {(() => { const bhy = s(NY_BASE + BH / 2); return (<>
+                        <line x1={hx1} y1={bhy} x2={hx2} y2={bhy} />
+                        <line x1={hx1} y1={bhy - tk} x2={hx1} y2={bhy + tk} />
+                        <line x1={hx2} y1={bhy - tk} x2={hx2} y2={bhy + tk} />
+                        <text x={(hx1 + hx2) / 2} y={bhy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800" textAnchor="middle">{BH} mm</text>
+                      </>); })()}
+                      {/* Dust Flap Super Top — vertical annotation (BH*2) */}
+                      {(() => { const dy1 = s(NY0) + s(10); const dy2 = s(NY0 + DUST_H) - s(10); return (<>
+                        <line x1={lx} y1={dy1} x2={lx} y2={dy2} />
+                        <line x1={lx - tk} y1={dy1} x2={lx + tk} y2={dy1} />
+                        <line x1={lx - tk} y1={dy2} x2={lx + tk} y2={dy2} />
+                        <text x={lx + s(6)} y={(dy1 + dy2) / 2 + s(6)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800">{BH} mm</text>
+                      </>); })()}
+                      {/* Dust Flap Super Top — horizontal annotation (BH*2) — center of dust panel */}
+                      {(() => { const dhy = s(NY0 + DUST_H / 2); return (<>
+                        <line x1={hx1} y1={dhy} x2={hx2} y2={dhy} />
+                        <line x1={hx1} y1={dhy - tk} x2={hx1} y2={dhy + tk} />
+                        <line x1={hx2} y1={dhy - tk} x2={hx2} y2={dhy + tk} />
+                        <text x={(hx1 + hx2) / 2} y={dhy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(13)} fontWeight="800" textAnchor="middle">{BH} mm</text>
+                      </>); })()}
+                      {/* Side Wall Flap (Right) height — vertical, left band (NX0→NX1) */}
+                      {(() => { const lbx = s(NX0 + (NX1 - NX0) / 2); const ly1 = s(NY_LID) + s(5); const ly2 = s(NY_LID + LID_H) - s(5); return (<>
+                        <line x1={lbx} y1={ly1} x2={lbx} y2={ly2} />
+                        <line x1={lbx - tk} y1={ly1} x2={lbx + tk} y2={ly1} />
+                        <line x1={lbx - tk} y1={ly2} x2={lbx + tk} y2={ly2} />
+                        <text x={lbx} y={(ly1 + ly2) / 2} fill="#3b82f6" stroke="none" fontSize={s(11)} fontWeight="800" textAnchor="middle" transform={`rotate(-90 ${lbx} ${(ly1 + ly2) / 2})`}>{LID_H} mm</text>
+                      </>); })()}
+                      {/* Side Wall Flap (Left) height — vertical, right band (NX2→NX3) */}
+                      {(() => { const rbx = s(NX2 + (NX3 - NX2) / 2); const ry1 = s(NY_LID) + s(5); const ry2 = s(NY_LID + LID_H) - s(5); return (<>
+                        <line x1={rbx} y1={ry1} x2={rbx} y2={ry2} />
+                        <line x1={rbx - tk} y1={ry1} x2={rbx + tk} y2={ry1} />
+                        <line x1={rbx - tk} y1={ry2} x2={rbx + tk} y2={ry2} />
+                        <text x={rbx} y={(ry1 + ry2) / 2} fill="#3b82f6" stroke="none" fontSize={s(11)} fontWeight="800" textAnchor="middle" transform={`rotate(-90 ${rbx} ${(ry1 + ry2) / 2})`}>{LID_H} mm</text>
+                      </>); })()}
+                      {/* Left Side Wall height — horizontal, side-left face */}
+                      {(() => { const sideWallH = SIDE_WALL_H; const cy = s(NY_BASE + sideWallH / 2); const x1 = s(regMirrorTotal - NX1) + s(5); const x2 = s(regMirrorTotal - NX1 + LOCK_FLAP_SIZE) - s(5); return (<>
+                        <line x1={x1} y1={cy} x2={x2} y2={cy} />
+                        <line x1={x1} y1={cy - tk} x2={x1} y2={cy + tk} />
+                        <line x1={x2} y1={cy - tk} x2={x2} y2={cy + tk} />
+                        <text x={(x1 + x2) / 2} y={cy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{sideWallH} mm</text>
+                      </>); })()}
+                      {/* Right Side Wall height — horizontal, side-right face */}
+                      {(() => { const sideWallH = SIDE_WALL_H; const cy = s(NY_BASE + sideWallH / 2); const x1 = s(regMirrorTotal - NX2 - LOCK_FLAP_SIZE) + s(5); const x2 = s(regMirrorTotal - NX2) - s(5); return (<>
+                        <line x1={x1} y1={cy} x2={x2} y2={cy} />
+                        <line x1={x1} y1={cy - tk} x2={x1} y2={cy + tk} />
+                        <line x1={x2} y1={cy - tk} x2={x2} y2={cy + tk} />
+                        <text x={(x1 + x2) / 2} y={cy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{sideWallH} mm</text>
+                      </>); })()}
+                      {/* Top Side Flap (Left) height — split into two equal FLAP_H bands, horizontal, top-side-flap-left face */}
+                      {(() => { const tsfH = DUST_H - TOP_LOCK_R; const yTop = NY0 + TOP_LOCK_R; const cyU = s(yTop + GEO_FLAP_H / 2); const cyL = s(yTop + tsfH - GEO_FLAP_H / 2); const divY = s(yTop + tsfH / 2); const x1 = s(regMirrorTotal - NX1) + s(5); const x2 = s(regMirrorTotal - (NX0 - 60 + (BD + 60) / 2)) - s(5); return (<>
+                        <line x1={x1} y1={divY} x2={x2} y2={divY} stroke="#9ca3af" strokeDasharray="4 3" strokeWidth={s(1)} />
+                        <line x1={x1} y1={cyU} x2={x2} y2={cyU} />
+                        <line x1={x1} y1={cyU - tk} x2={x1} y2={cyU + tk} />
+                        <line x1={x2} y1={cyU - tk} x2={x2} y2={cyU + tk} />
+                        <text x={(x1 + x2) / 2} y={cyU - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{Math.round(GEO_FLAP_H)} mm</text>
+                        <line x1={x1} y1={cyL} x2={x2} y2={cyL} />
+                        <line x1={x1} y1={cyL - tk} x2={x1} y2={cyL + tk} />
+                        <line x1={x2} y1={cyL - tk} x2={x2} y2={cyL + tk} />
+                        <text x={(x1 + x2) / 2} y={cyL - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{Math.round(GEO_FLAP_H)} mm</text>
+                      </>); })()}
+                      {/* Top Side Flap (Right) height — split into two equal FLAP_H bands, horizontal, top-side-flap-right face */}
+                      {(() => { const tsfH = DUST_H - TOP_LOCK_R; const yTop = NY0 + TOP_LOCK_R; const cyU = s(yTop + GEO_FLAP_H / 2); const cyL = s(yTop + tsfH - GEO_FLAP_H / 2); const divY = s(yTop + tsfH / 2); const x1 = s(regMirrorTotal - NX2 - (BD + 60) / 2) + s(5); const x2 = s(regMirrorTotal - NX2) - s(5); return (<>
+                        <line x1={x1} y1={divY} x2={x2} y2={divY} stroke="#9ca3af" strokeDasharray="4 3" strokeWidth={s(1)} />
+                        <line x1={x1} y1={cyU} x2={x2} y2={cyU} />
+                        <line x1={x1} y1={cyU - tk} x2={x1} y2={cyU + tk} />
+                        <line x1={x2} y1={cyU - tk} x2={x2} y2={cyU + tk} />
+                        <text x={(x1 + x2) / 2} y={cyU - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{Math.round(GEO_FLAP_H)} mm</text>
+                        <line x1={x1} y1={cyL} x2={x2} y2={cyL} />
+                        <line x1={x1} y1={cyL - tk} x2={x1} y2={cyL + tk} />
+                        <line x1={x2} y1={cyL - tk} x2={x2} y2={cyL + tk} />
+                        <text x={(x1 + x2) / 2} y={cyL - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{Math.round(GEO_FLAP_H)} mm</text>
+                      </>); })()}
+                      {/* Front Bottom Flap height — vertical */}
+                      {(() => { const fby1 = s(NY_BOT) + s(5); const fby2 = s(NY_BOT + topLockFlapH) - s(5); return (<>
+                        <line x1={lx} y1={fby1} x2={lx} y2={fby2} />
+                        <line x1={lx - tk} y1={fby1} x2={lx + tk} y2={fby1} />
+                        <line x1={lx - tk} y1={fby2} x2={lx + tk} y2={fby2} />
+                        <text x={lx} y={(fby1 + fby2) / 2} fill="#3b82f6" stroke="none" fontSize={s(11)} fontWeight="800" textAnchor="middle" transform={`rotate(-90 ${lx} ${(fby1 + fby2) / 2})`}>{topLockFlapH} mm</text>
+                      </>); })()}
+                      {/* Left Bottom Triangle height — horizontal */}
+                      {(() => { const cy = s(NY_BOT - BOTTOM_LOCK_W / 2); const x1 = s(regMirrorTotal - NX2 - BOTTOM_LOCK_W) + s(5); const x2 = s(regMirrorTotal - NX2) - s(5); return (<>
+                        <line x1={x1} y1={cy} x2={x2} y2={cy} />
+                        <line x1={x1} y1={cy - tk} x2={x1} y2={cy + tk} />
+                        <line x1={x2} y1={cy - tk} x2={x2} y2={cy + tk} />
+                        <text x={(x1 + x2) / 2} y={cy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{BOTTOM_LOCK_W} mm</text>
+                      </>); })()}
+                      {/* Right Bottom Triangle height — horizontal */}
+                      {(() => { const cy = s(NY_BOT - BOTTOM_LOCK_W / 2); const x1 = s(regMirrorTotal - NX1) + s(5); const x2 = s(regMirrorTotal - NX1 + BOTTOM_LOCK_W) - s(5); return (<>
+                        <line x1={x1} y1={cy} x2={x2} y2={cy} />
+                        <line x1={x1} y1={cy - tk} x2={x1} y2={cy + tk} />
+                        <line x1={x2} y1={cy - tk} x2={x2} y2={cy + tk} />
+                        <text x={(x1 + x2) / 2} y={cy - s(8)} fill="#3b82f6" stroke="none" fontSize={s(10)} fontWeight="800" textAnchor="middle">{BOTTOM_LOCK_W} mm</text>
+                      </>); })()}
                     </g>
+                    {/* Bottom Tuck Flap Left — W and H dimensions along tuck flap sides (same style as lock flap) */}
+                    {(() => {
+                      const z = zoom;
+                      const s = (n: number) => n * z;
+                      // Tuck flap "diamond equivalent" center = (regMirrorTotal-NX2-k, NY_BOT+k)
+                      // top vertex = (tcx, tcy-r), right vertex = (tcx+r, tcy), bottom vertex = (tcx, tcy+r)
+                      const tcx  = s(regMirrorTotal - NX2 - BOTTOM_LOCK_W);
+                      const tcy  = s(NY_BOT + BOTTOM_LOCK_W);
+                      const r    = s(BOTTOM_LOCK_W);
+                      const sq2  = Math.SQRT2;
+                      const od   = s(16) / sq2;   // outward offset (lower-left direction)
+                      const td   = s(5)  / sq2;   // tick half-size
+                      const sideLen = Math.round(GEO_FLAP_H);
+
+                      // W: top→right side, offset lower-left = (-od, +od)
+                      const wx1 = tcx - od,     wy1 = (tcy - r) + od;
+                      const wx2 = (tcx + r) - od, wy2 = tcy + od;
+                      const wMX = (wx1 + wx2) / 2, wMY = (wy1 + wy2) / 2;
+
+                      // H: right→bottom side, offset lower-left = (-od, +od)
+                      // Clamped to tuck face bottom boundary (NY_BOT + 2k) so it stays within frame
+                      const faceBotPx = s(NY_BOT + BOTTOM_LOCK_W * 2);
+                      const hx1 = (tcx + r) - od, hy1 = tcy + od;
+                      const hx2Raw = tcx - od,     hy2Raw = (tcy + r) + od;
+                      const hx2 = hy2Raw > faceBotPx
+                        ? hx1 + (hx2Raw - hx1) * (faceBotPx - hy1) / (hy2Raw - hy1)
+                        : hx2Raw;
+                      const hy2 = Math.min(hy2Raw, faceBotPx);
+                      const hMX = (hx1 + hx2) / 2, hMY = (hy1 + hy2) / 2;
+
+                      return (
+                        <g fill="none" stroke="#9333ea" strokeWidth={s(1.2)}>
+                          {/* W line + ticks */}
+                          <line x1={wx1} y1={wy1} x2={wx2} y2={wy2} />
+                          <line x1={wx1 + td} y1={wy1 - td} x2={wx1 - td} y2={wy1 + td} />
+                          <line x1={wx2 + td} y1={wy2 - td} x2={wx2 - td} y2={wy2 + td} />
+                          <text x={wMX} y={wMY} fill="#9333ea" stroke="none"
+                            fontSize={s(11)} fontWeight="800" textAnchor="middle" dominantBaseline="middle"
+                            transform={`rotate(-45 ${wMX} ${wMY})`}>W: {sideLen} mm</text>
+                          {/* H line + ticks — right→bottom side, clamped to face boundary */}
+                          <line x1={hx1} y1={hy1} x2={hx2} y2={hy2} />
+                          <line x1={hx1 - td} y1={hy1 - td} x2={hx1 + td} y2={hy1 + td} />
+                          <line x1={hx2 - td} y1={hy2 - td} x2={hx2 + td} y2={hy2 + td} />
+                          <text x={hMX} y={hMY} fill="#9333ea" stroke="none"
+                            fontSize={s(11)} fontWeight="800" textAnchor="middle" dominantBaseline="middle"
+                            transform={`rotate(45 ${hMX} ${hMY})`}>H: {sideLen} mm</text>
+                        </g>
+                      );
+                    })()}
+                    {/* Bottom Lock Flap Left + Right — W and H dimensions along diamond sides */}
+                    {[s(regMirrorTotal - NX2), s(regMirrorTotal - NX1)].map((cx, i) => {
+                      const cy  = s(NY_BOT);
+                      const r   = s(BOTTOM_LOCK_W);
+                      const sq2 = Math.SQRT2;
+                      const od  = s(16) / sq2;  // outward offset component
+                      const td  = s(5)  / sq2;  // tick half-size component
+                      const sideLen = Math.round(GEO_FLAP_H);
+                      const hLen    = Math.round(GEO_FLAP_H);
+
+                      // W: along top-right side (Top→Right), outward normal = (1,-1)/√2
+                      const wx1 = cx + od,     wy1 = cy - r - od;
+                      const wx2 = cx + r + od, wy2 = cy     - od;
+                      const wMX = (wx1 + wx2) / 2, wMY = (wy1 + wy2) / 2;
+
+                      // H: along bottom-right side (Right→Bottom), outward normal = (1,1)/√2
+                      const hx1 = cx + r + od, hy1 = cy     + od;
+                      const hx2 = cx     + od, hy2 = cy + r + od;
+                      const hMX = (hx1 + hx2) / 2, hMY = (hy1 + hy2) / 2;
+
+                      return (
+                        <g key={i} fill="none" stroke="#9333ea" strokeWidth={s(1.2)}>
+                          {/* W line + ticks */}
+                          <line x1={wx1} y1={wy1} x2={wx2} y2={wy2} />
+                          <line x1={wx1 - td} y1={wy1 + td} x2={wx1 + td} y2={wy1 - td} />
+                          <line x1={wx2 - td} y1={wy2 + td} x2={wx2 + td} y2={wy2 - td} />
+                          <text x={wMX} y={wMY} fill="#9333ea" stroke="none"
+                            fontSize={s(11)} fontWeight="800"
+                            textAnchor="middle" dominantBaseline="middle"
+                            transform={`rotate(-45 ${wMX} ${wMY})`}>
+                            {i === 1 ? `H: ${sideLen} mm` : `W: ${sideLen} mm`}
+                          </text>
+                          {/* H line + ticks */}
+                          <line x1={hx1} y1={hy1} x2={hx2} y2={hy2} />
+                          <line x1={hx1 - td} y1={hy1 - td} x2={hx1 + td} y2={hy1 + td} />
+                          <line x1={hx2 - td} y1={hy2 - td} x2={hx2 + td} y2={hy2 + td} />
+                          <text x={hMX} y={hMY} fill="#9333ea" stroke="none"
+                            fontSize={s(11)} fontWeight="800"
+                            textAnchor="middle" dominantBaseline="middle"
+                            transform={`rotate(45 ${hMX} ${hMY})`}>
+                            {i === 1 ? `W: ${hLen} mm` : `H: ${hLen} mm`}
+                          </text>
+                        </g>
+                      );
+                    })}
                   </svg>
                 );
               })()}
+
+              {/* Key row dividers, highlighted red — rendered last so it stays on top of the
+                  purple dimension lines that share some of the same positions */}
+              <svg style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 20, overflow: "visible" }} width={TOTAL_DIELINE_W * zoom} height={DIELINE_H_FULL * zoom}>
+                {/* Top Lock Flap (Left)/(Right) — outer cut edges (left, top, right of each
+                    diamond), leaving only the fold edge shared with Dust Flap Super Top red.
+                    The diamond peak sits above y=0 in this SVG's own coordinate space (the
+                    Top Lock Flap diamonds poke above the canvas top edge), so overflow must
+                    stay visible or the N-tip arc gets clipped by the SVG's default bounds.
+                    dielineFaces mirrors each face's position (regMirrorTotal - f.x - f.w) but
+                    NOT its interior clip-path, so a diamond's local W/E tips land on the
+                    OPPOSITE mx() point from what the raw world x would suggest — e.g. local
+                    W-tip screen-x is mx(NX2 + TOP_LOCK_W), not mx(NX2 - TOP_LOCK_W). Endpoints
+                    below are inset by the same radius/offset the roundDiamondTL/TR clip-path
+                    uses so the stroke follows the rounded tip instead of overshooting past it. */}
+                {(() => {
+                  const rcr = 6 * zoom, roff = rcr / Math.SQRT2;
+                  const k = TOP_LOCK_R * zoom; // == TOP_LOCK_W * zoom
+                  const mx = (n: number) => (regMirrorTotal - n) * zoom;
+                  const ny0 = NY0 * zoom;
+                  return (
+                    <g stroke="#1e3a8a" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                      {/* Left flap: rounded tips are local N & W; fold (red) is the local S↔E edge */}
+                      <path d={`M ${mx(NX2)} ${ny0 + k}
+                                L ${mx(NX2 + TOP_LOCK_W) + roff} ${ny0 + roff}
+                                A ${rcr} ${rcr} 0 0 1 ${mx(NX2 + TOP_LOCK_W) + roff} ${ny0 - roff}
+                                L ${mx(NX2) - roff} ${ny0 - k + roff}
+                                A ${rcr} ${rcr} 0 0 1 ${mx(NX2) + roff} ${ny0 - k + roff}
+                                L ${mx(NX2 - TOP_LOCK_W)} ${ny0}`} />
+                      {/* Right flap: rounded tips are local N & E; fold (red) is the local W↔S edge */}
+                      <path d={`M ${mx(NX1 + TOP_LOCK_W)} ${ny0}
+                                L ${mx(NX1) - roff} ${ny0 - k + roff}
+                                A ${rcr} ${rcr} 0 0 1 ${mx(NX1) + roff} ${ny0 - k + roff}
+                                L ${mx(NX1 - TOP_LOCK_W) - roff} ${ny0 - roff}
+                                A ${rcr} ${rcr} 0 0 1 ${mx(NX1 - TOP_LOCK_W) - roff} ${ny0 + roff}
+                                L ${mx(NX1)} ${ny0 + k}`} />
+                    </g>
+                  );
+                })()}
+                {/* Top Side Flap (Left)/(Right) — outer cut edges (the wing outline minus the
+                    straight edge that folds into the main body). Per the _dfSwaps table, the
+                    div labeled "(Left)" actually uses the clipBottomLeft+clipTopRight geometry
+                    anchored at NX2, and "(Right)" uses clipBottomRight+clipTopLeft anchored at
+                    NX1 — verified empirically against the live clip-path/rect, since the swap
+                    makes the naive world-x assumption unreliable (as it was for the diamonds). */}
+                {(() => {
+                  const mx = (n: number) => (regMirrorTotal - n) * zoom;
+                  const w = LOCK_FLAP_SIZE * zoom;
+                  const h = (DUST_H - TOP_LOCK_R) * zoom;
+                  const cs = 8 * zoom;
+                  const startY = Math.min(15 * zoom, h * 0.2);
+                  const endY = h - startY;
+                  const fy = (NY0 + TOP_LOCK_R) * zoom;
+                  const fxLeft = mx(NX2) - w;
+                  const fxRight = mx(NX1);
+                  return (
+                    <g stroke="#1e3a8a" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                      <path d={`M ${fxLeft + w + 2} ${fy + h - cs}
+                                Q ${fxLeft + w + 2} ${fy + h + 2} ${fxLeft + w - cs} ${fy + h + 2}
+                                L ${fxLeft + cs} ${fy + endY + cs}
+                                Q ${fxLeft} ${fy + endY} ${fxLeft} ${fy + endY - cs}
+                                L ${fxLeft} ${fy + startY + cs}
+                                Q ${fxLeft} ${fy + startY} ${fxLeft + cs} ${fy + startY - cs}
+                                L ${fxLeft + w + 2} ${fy - 2}`} />
+                      <path d={`M ${fxRight - 2} ${fy + h - cs}
+                                Q ${fxRight - 2} ${fy + h + 2} ${fxRight + cs} ${fy + h + 2}
+                                L ${fxRight + w - cs} ${fy + endY + cs}
+                                Q ${fxRight + w + 2} ${fy + endY} ${fxRight + w + 2} ${fy + endY - cs}
+                                L ${fxRight + w + 2} ${fy + startY + cs}
+                                Q ${fxRight + w + 2} ${fy + startY} ${fxRight + w - cs} ${fy + startY - cs}
+                                L ${fxRight - 2} ${fy - 2}`} />
+                    </g>
+                  );
+                })()}
+                {/* Side Wall Flap (Left)/(Right) — outer top + outer side edge, plus the
+                    edge shared with Back Side (vertical, full row height). */}
+                {(() => {
+                  const mx = (n: number) => (regMirrorTotal - n) * zoom;
+                  const yTop = NY_LID * zoom;
+                  const yBot = (NY_LID + LID_H) * zoom;
+                  const outerRight = mx(NX1) + LOCK_FLAP_SIZE * zoom; // Side Wall Flap (Left), screen-right
+                  const innerRight = mx(NX1);
+                  const outerLeft = mx(NX2) - LOCK_FLAP_SIZE * zoom;  // Side Wall Flap (Right), screen-left
+                  const innerLeft = mx(NX2);
+                  return (
+                    <g stroke="#1e3a8a" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                      <path d={`M ${innerLeft} ${yTop} L ${outerLeft} ${yTop} L ${outerLeft} ${yBot}`} />
+                      <path d={`M ${innerRight} ${yTop} L ${outerRight} ${yTop} L ${outerRight} ${yBot}`} />
+                      <line x1={innerLeft} y1={yTop} x2={innerLeft} y2={yBot} />
+                      <line x1={innerRight} y1={yTop} x2={innerRight} y2={yBot} />
+                    </g>
+                  );
+                })()}
+                {/* Right Side Wall / Left Side Wall — outer vertical edge only (top is already
+                    covered by the existing Back Side ↔ Base red line; bottom is left as-is). */}
+                {(() => {
+                  const mx = (n: number) => (regMirrorTotal - n) * zoom;
+                  const ySwTop = NY_BASE * zoom;
+                  // Right/Left Side Wall's own portion extends down only until it just touches
+                  // Bottom Tuck Flap Left/Right's own outer edge (the (0.64,0)-(0.36,0.40)
+                  // segment of its outline, and its mirror) — not past it, so the lines meet
+                  // without crossing.
+                  const tuckW = BOTTOM_LOCK_W * 2 + Math.round(BOTTOM_LOCK_W * 0.8);
+                  const tuckH = BOTTOM_LOCK_W * 2;
+                  const tTuck = (LOCK_FLAP_SIZE - 0.36 * tuckW) / (0.28 * tuckW);
+                  const ySwBotTuck = (NY_BOT + tTuck * 0.40 * tuckH) * zoom;
+                  const outerRight = mx(NX1) + LOCK_FLAP_SIZE * zoom; // Left Side Wall, screen-right
+                  const outerLeft = mx(NX2) - LOCK_FLAP_SIZE * zoom;  // Right Side Wall, screen-left
+                  return (
+                    <g stroke="#1e3a8a" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                      <line x1={outerLeft} y1={ySwTop} x2={outerLeft} y2={ySwBotTuck} />
+                      <line x1={outerRight} y1={ySwTop} x2={outerRight} y2={ySwBotTuck} />
+                    </g>
+                  );
+                })()}
+                {/* Bottom Tuck Flap (Left)/(Right) — outline of the arrow-shaped tuck. The
+                    peak-to-tip edge (local 0.64,0 → 1.00,0.50 and its mirror) is omitted:
+                    those two points sit exactly on the adjacent Bottom Lock Flap diamond's
+                    W/N and S vertices, so that edge is the diamond's own W↔S edge, already
+                    its boundary — drawing it again here just duplicates a line that lands
+                    on top of (and pokes into) the diamond's base vertex. */}
+                {(() => {
+                  const mx = (n: number) => (regMirrorTotal - n) * zoom;
+                  const w = (BOTTOM_LOCK_W * 2 + Math.round(BOTTOM_LOCK_W * 0.8)) * zoom;
+                  const h = BOTTOM_LOCK_W * 2 * zoom;
+                  const fxLeft = mx(NX2) - w;
+                  const fxRight = mx(NX1);
+                  const fy = NY_BOT * zoom;
+                  const pt = (fx: number, xPct: number, yPct: number) => `${fx + xPct * w} ${fy + yPct * h}`;
+                  return (
+                    <g stroke="#1e3a8a" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                      <path d={`M ${pt(fxLeft, 0.29, 0.50)}
+                                L ${pt(fxLeft, 0.36, 0.40)}
+                                L ${pt(fxLeft, 0.64, 0)}`} />
+                      <path d={`M ${pt(fxLeft, 1.00, 0.50)}
+                                L ${pt(fxLeft, 0.71, 0.90)}
+                                L ${pt(fxLeft, 0.64, 1.00)}
+                                L ${pt(fxLeft, 0.43, 1.00)}
+                                L ${pt(fxLeft, 0.29, 0.80)}
+                                L ${pt(fxLeft, 0.29, 0.50)}`} />
+                      <path d={`M ${pt(fxRight, 0.71, 0.50)}
+                                L ${pt(fxRight, 0.64, 0.40)}
+                                L ${pt(fxRight, 0.36, 0)}`} />
+                      <path d={`M ${pt(fxRight, 0, 0.50)}
+                                L ${pt(fxRight, 0.29, 0.90)}
+                                L ${pt(fxRight, 0.36, 1.00)}
+                                L ${pt(fxRight, 0.57, 1.00)}
+                                L ${pt(fxRight, 0.71, 0.80)}
+                                L ${pt(fxRight, 0.71, 0.50)}`} />
+                      {/* Front Bottom Flap bottom edge, extended across the Bottom Lock Flap
+                          gusset tabs on either side — the whole row's outer cut edge (their
+                          top/left/right edges are folds, drawn red below; this is the one
+                          free cut edge shared by all three faces at this row's bottom). */}
+                      <line x1={(regMirrorTotal - NX2) * zoom} y1={(NY_BOT + topLockFlapH) * zoom}
+                            x2={(regMirrorTotal - NX1) * zoom} y2={(NY_BOT + topLockFlapH) * zoom} />
+                      {/* Bottom Lock Flap gusset ↔ Bottom Tuck Flap shared vertical edge —
+                          from the tuck's tip (diamond's base vertex) down to the bottom edge. */}
+                      <line x1={(regMirrorTotal - NX2) * zoom} y1={(NY_BOT + BOTTOM_LOCK_W) * zoom}
+                            x2={(regMirrorTotal - NX2) * zoom} y2={(NY_BOT + topLockFlapH) * zoom} />
+                      <line x1={(regMirrorTotal - NX1) * zoom} y1={(NY_BOT + BOTTOM_LOCK_W) * zoom}
+                            x2={(regMirrorTotal - NX1) * zoom} y2={(NY_BOT + topLockFlapH) * zoom} />
+                      {/* Bottom Lock Flap diamond's outer edge on the tuck-flap side — N vertex
+                          down to the vertex shared with the tuck's peak, closing the gap between
+                          the diamond and the tuck flap outline on the left/right. */}
+                      <line x1={(regMirrorTotal - NX2) * zoom} y1={(NY_BOT - BOTTOM_LOCK_W) * zoom}
+                            x2={(regMirrorTotal - (NX2 + BOTTOM_LOCK_W)) * zoom} y2={NY_BOT * zoom} />
+                      <line x1={(regMirrorTotal - NX1) * zoom} y1={(NY_BOT - BOTTOM_LOCK_W) * zoom}
+                            x2={(regMirrorTotal - (NX1 - BOTTOM_LOCK_W)) * zoom} y2={NY_BOT * zoom} />
+                      {/* Bottom Lock Flap diamond's outer edge on the Front Bottom Flap side —
+                          L vertex down to the base vertex, mirroring the tuck-flap-side edge
+                          above so the diamond's boundary is fully closed on both sides. */}
+                      <line x1={(regMirrorTotal - (NX2 - BOTTOM_LOCK_W)) * zoom} y1={NY_BOT * zoom}
+                            x2={(regMirrorTotal - NX2) * zoom} y2={(NY_BOT + BOTTOM_LOCK_W) * zoom} />
+                      <line x1={(regMirrorTotal - (NX1 + BOTTOM_LOCK_W)) * zoom} y1={NY_BOT * zoom}
+                            x2={(regMirrorTotal - NX1) * zoom} y2={(NY_BOT + BOTTOM_LOCK_W) * zoom} />
+                    </g>
+                  );
+                })()}
+                <g stroke="#ef4444" strokeWidth={1.4 * zoom} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                  {/* Front Top Flap bottom edge ↔ Dust Flap Super Top */}
+                  <line x1={(regMirrorTotal - (NX2 - BOTTOM_LOCK_W)) * zoom} y1={NY0 * zoom}
+                        x2={(regMirrorTotal - (NX1 + BOTTOM_LOCK_W)) * zoom} y2={NY0 * zoom} />
+                  {/* Left spine: diagonal into Top Lock Flap (Left) corner, then straight down
+                      to the top of the Side Wall Flap (Right) / Back Side row — skips that row,
+                      resumes below it down to the Bottom Lock Flap diamond's top corner */}
+                  <path d={`M ${(regMirrorTotal - (NX2 - TOP_LOCK_W)) * zoom} ${NY0 * zoom}
+                            L ${(regMirrorTotal - NX2) * zoom} ${(NY0 + TOP_LOCK_R) * zoom}
+                            L ${(regMirrorTotal - NX2) * zoom} ${NY_LID * zoom}`} />
+                  <path d={`M ${(regMirrorTotal - NX2) * zoom} ${NY_BASE * zoom}
+                            L ${(regMirrorTotal - NX2) * zoom} ${(NY_BOT - BOTTOM_LOCK_W) * zoom}`} />
+                  {/* Right spine: mirror of the above through Top Lock Flap (Right) — also skips
+                      the Side Wall Flap (Left) / Back Side row */}
+                  <path d={`M ${(regMirrorTotal - (NX1 + TOP_LOCK_W)) * zoom} ${NY0 * zoom}
+                            L ${(regMirrorTotal - NX1) * zoom} ${(NY0 + TOP_LOCK_R) * zoom}
+                            L ${(regMirrorTotal - NX1) * zoom} ${NY_LID * zoom}`} />
+                  <path d={`M ${(regMirrorTotal - NX1) * zoom} ${NY_BASE * zoom}
+                            L ${(regMirrorTotal - NX1) * zoom} ${(NY_BOT - BOTTOM_LOCK_W) * zoom}`} />
+                  {/* Dust Flap Super Top ↔ Back Side row boundary — skips both the Side Wall
+                      Flap (Right) and Side Wall Flap (Left) wings on top, covers Back Side only */}
+                  <line x1={(regMirrorTotal - NX2) * zoom} y1={NY_LID * zoom}
+                        x2={(regMirrorTotal - NX1) * zoom} y2={NY_LID * zoom} />
+                  {/* Back Side ↔ Base row boundary, full width incl. wings */}
+                  <line x1={(regMirrorTotal - (NX2 + LOCK_FLAP_SIZE)) * zoom} y1={NY_BASE * zoom}
+                        x2={(regMirrorTotal - (NX1 - LOCK_FLAP_SIZE)) * zoom} y2={NY_BASE * zoom} />
+                  {/* Left Bottom Triangle top edge */}
+                  <line x1={(regMirrorTotal - NX2) * zoom} y1={(NY_BOT - BOTTOM_LOCK_W) * zoom}
+                        x2={(regMirrorTotal - (NX2 + LOCK_FLAP_SIZE)) * zoom} y2={(NY_BOT - BOTTOM_LOCK_W) * zoom} />
+                  {/* Right Bottom Triangle top edge */}
+                  <line x1={(regMirrorTotal - NX1) * zoom} y1={(NY_BOT - BOTTOM_LOCK_W) * zoom}
+                        x2={(regMirrorTotal - (NX1 - LOCK_FLAP_SIZE)) * zoom} y2={(NY_BOT - BOTTOM_LOCK_W) * zoom} />
+                  {/* Front Bottom Flap top edge */}
+                  <line x1={(regMirrorTotal - (NX2 - BOTTOM_LOCK_W)) * zoom} y1={NY_BOT * zoom}
+                        x2={(regMirrorTotal - (NX1 + BOTTOM_LOCK_W)) * zoom} y2={NY_BOT * zoom} />
+                  {/* Front Bottom Flap left edge */}
+                  <line x1={(regMirrorTotal - (NX2 - BOTTOM_LOCK_W)) * zoom} y1={NY_BOT * zoom}
+                        x2={(regMirrorTotal - (NX2 - BOTTOM_LOCK_W)) * zoom} y2={(NY_BOT + topLockFlapH) * zoom} />
+                  {/* Front Bottom Flap right edge */}
+                  <line x1={(regMirrorTotal - (NX1 + BOTTOM_LOCK_W)) * zoom} y1={NY_BOT * zoom}
+                        x2={(regMirrorTotal - (NX1 + BOTTOM_LOCK_W)) * zoom} y2={(NY_BOT + topLockFlapH) * zoom} />
+                  {/* Base's chamfered corner ↔ Bottom Lock Flap diamond (the diamond's other
+                      top edge, opposite side from the Left Bottom Triangle wedge) */}
+                  <line x1={(regMirrorTotal - NX2) * zoom} y1={(NY_BOT - BOTTOM_LOCK_W) * zoom}
+                        x2={(regMirrorTotal - (NX2 - BOTTOM_LOCK_W)) * zoom} y2={NY_BOT * zoom} />
+                  {/* Base's chamfered corner ↔ Bottom Lock Flap Right diamond */}
+                  <line x1={(regMirrorTotal - NX1) * zoom} y1={(NY_BOT - BOTTOM_LOCK_W) * zoom}
+                        x2={(regMirrorTotal - (NX1 + BOTTOM_LOCK_W)) * zoom} y2={NY_BOT * zoom} />
+                </g>
+              </svg>
 
               {/* Face color popup above selected face */}
               {selectedFace && selectedFaceDef && showFaceColorPopup && (
@@ -2431,17 +2628,16 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 });
               })()}
 
-              {/* ── Global items layer (above all face panels, full dieline canvas) ── */}
+              {/* Global items overlay */}
               {(vd.globalItems ?? []).map(item => {
                 const isSel = selectedItemId === item.id && selectedItemIsGlobal;
-                const isEd = editingItemId === item.id;
+                const isEd = editingItemId === item.id && selectedItemIsGlobal;
                 if (item.kind === "text") {
                   return (
                     <div key={item.id + (isEd ? "-e" : "")} contentEditable={isEd} suppressContentEditableWarning
-                      // eslint-disable-next-line jsx-a11y/no-autofocus
                       autoFocus={isEd}
-                      style={{ position: "absolute", left: item.x * zoom, top: item.y * zoom, width: item.w * zoom, fontFamily: item.font, fontSize: `${item.size * zoom}px`, fontWeight: item.bold ? 700 : 400, color: item.color, textAlign: item.align, padding: "2px 4px", outline: isEd ? "none" : isSel ? "1.5px solid #3b82f6" : "none", outlineOffset: "0px", borderRadius: 2, cursor: isEd ? "text" : "move", userSelect: isEd ? "text" : "none", whiteSpace: "pre-wrap", wordBreak: "break-word", zIndex: isSel ? 50 : 40, background: "transparent" }}
-                      onPointerDown={e => { if (isEd) return; e.stopPropagation(); setSelectedItemId(item.id); setSelectedItemIsGlobal(true); startDragGlobalItem(e, item); }}
+                      style={{ position: "absolute", left: item.x * zoom, top: item.y * zoom, width: item.w * zoom, fontFamily: item.font, fontSize: `${item.size * zoom}px`, fontWeight: item.bold ? 700 : 400, color: item.color, textAlign: item.align, padding: "2px 4px", outline: isEd ? "none" : isSel ? "1.5px solid #f59e0b" : "none", outlineOffset: "0px", borderRadius: 2, cursor: isEd ? "text" : "move", userSelect: isEd ? "text" : "none", whiteSpace: "pre-wrap", wordBreak: "break-word", zIndex: isSel ? 25 : 15, background: "transparent" }}
+                      onPointerDown={e => { if (isEd) return; e.stopPropagation(); setSelectedFace(null); setSelectedItemId(item.id); setSelectedItemIsGlobal(true); startDragGlobalItem(e, item); }}
                       onDoubleClick={e => { e.stopPropagation(); setEditingItemId(item.id); }}
                       onBlur={e => { updateGlobalItem(item.id, { text: e.currentTarget.textContent ?? item.text }); setEditingItemId(null); }}
                       onClick={e => e.stopPropagation()}
@@ -2449,10 +2645,10 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                       {isSel && !isEd && (
                         <>
                           {(["tl","tr","bl","br"] as const).map(c => (
-                            <div key={c} onPointerDown={e => startResizeGlobalItem(e, item, c)} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: c === "tl" ? "nw-resize" : c === "tr" ? "ne-resize" : c === "bl" ? "sw-resize" : "se-resize", ...(c[0]==="t" ? { top: -4 } : { bottom: -4 }), ...(c[1]==="l" ? { left: -4 } : { right: -4 }) }} />
+                            <div key={c} onPointerDown={e => startResizeGlobalItem(e, item, c)} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 2, zIndex: 30, cursor: c === "tl" ? "nw-resize" : c === "tr" ? "ne-resize" : c === "bl" ? "sw-resize" : "se-resize", ...(c[0]==="t" ? { top: -4 } : { bottom: -4 }), ...(c[1]==="l" ? { left: -4 } : { right: -4 }) }} />
                           ))}
-                          <div onPointerDown={e => startResizeGlobalItem(e, item, "l")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", left: -4, top: "calc(50% - 4px)" }} />
-                          <div onPointerDown={e => startResizeGlobalItem(e, item, "r")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", right: -4, top: "calc(50% - 4px)" }} />
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "l")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 2, zIndex: 30, cursor: "ew-resize", left: -4, top: "calc(50% - 4px)" }} />
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "r")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 2, zIndex: 30, cursor: "ew-resize", right: -4, top: "calc(50% - 4px)" }} />
                         </>
                       )}
                     </div>
@@ -2460,19 +2656,19 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 }
                 if (item.kind === "image") {
                   return (
-                    <div key={item.id} style={{ position: "absolute", left: item.x * zoom, top: item.y * zoom, width: item.w * zoom, height: item.h * zoom, outline: isSel ? "1.5px solid #3b82f6" : "none", outlineOffset: "0px", cursor: "move", zIndex: isSel ? 50 : 40, overflow: "visible" }}
-                      onPointerDown={e => { e.stopPropagation(); setSelectedItemId(item.id); setSelectedItemIsGlobal(true); startDragGlobalItem(e, item); }}
+                    <div key={item.id} style={{ position: "absolute", left: item.x * zoom, top: item.y * zoom, width: item.w * zoom, height: item.h * zoom, outline: isSel ? "1.5px solid #f59e0b" : "none", outlineOffset: "0px", cursor: "move", zIndex: isSel ? 25 : 15, overflow: "hidden" }}
+                      onPointerDown={e => { e.stopPropagation(); setSelectedFace(null); setSelectedItemId(item.id); setSelectedItemIsGlobal(true); startDragGlobalItem(e, item); }}
                       onClick={e => e.stopPropagation()}
                     >
                       <img src={item.src} alt="" draggable={false} style={{ width: `${item.w * zoom}px`, height: `${item.h * zoom}px`, display: "block", pointerEvents: "none" }} />
                       {isSel && (
                         <>
-                          <button onClick={e => { e.stopPropagation(); removeGlobalItem(item.id); setSelectedItemId(null); setSelectedItemIsGlobal(false); }} style={{ position: "absolute", top: -8, right: -8, width: 18, height: 18, borderRadius: "50%", background: "#ef4444", color: "#fff", border: "none", cursor: "pointer", fontSize: "0.6rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>✕</button>
+                          <button onClick={e => { e.stopPropagation(); removeGlobalItem(item.id); setSelectedItemId(null); }} style={{ position: "absolute", top: -8, right: -8, width: 18, height: 18, borderRadius: "50%", background: "#ef4444", color: "#fff", border: "none", cursor: "pointer", fontSize: "0.6rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30 }}>✕</button>
                           {(["tl","tr","bl","br"] as const).map(c => (
-                            <div key={c} onPointerDown={e => startResizeGlobalItem(e, item, c)} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: c === "tl" ? "nw-resize" : c === "tr" ? "ne-resize" : c === "bl" ? "sw-resize" : "se-resize", ...(c[0]==="t" ? { top: -4 } : { bottom: -4 }), ...(c[1]==="l" ? { left: -4 } : { right: -4 }) }} />
+                            <div key={c} onPointerDown={e => startResizeGlobalItem(e, item, c)} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 2, zIndex: 30, cursor: c === "tl" ? "nw-resize" : c === "tr" ? "ne-resize" : c === "bl" ? "sw-resize" : "se-resize", ...(c[0]==="t" ? { top: -4 } : { bottom: -4 }), ...(c[1]==="l" ? { left: -4 } : { right: -4 }) }} />
                           ))}
-                          <div onPointerDown={e => startResizeGlobalItem(e, item, "l")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", left: -4, top: "calc(50% - 4px)" }} />
-                          <div onPointerDown={e => startResizeGlobalItem(e, item, "r")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #3b82f6", borderRadius: 2, zIndex: 60, cursor: "ew-resize", right: -4, top: "calc(50% - 4px)" }} />
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "l")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 2, zIndex: 30, cursor: "ew-resize", left: -4, top: "calc(50% - 4px)" }} />
+                          <div onPointerDown={e => startResizeGlobalItem(e, item, "r")} style={{ position: "absolute", width: 8, height: 8, background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 2, zIndex: 30, cursor: "ew-resize", right: -4, top: "calc(50% - 4px)" }} />
                         </>
                       )}
                     </div>
@@ -2516,8 +2712,8 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
             </div>
 
             {/* Delete selected item — pinned right */}
-            {selectedItemId && selectedFace && (
-              <button onClick={() => { removeItem(selectedFace, selectedItemId); setSelectedItemId(null); }} style={{ position: "absolute", right: "1.5rem", padding: "0.4rem 1rem", border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600 }}>Delete</button>
+            {selectedItemId && (selectedFace || selectedItemIsGlobal) && (
+              <button onClick={() => { if (selectedItemIsGlobal) { removeGlobalItem(selectedItemId); } else if (selectedFace) { removeItem(selectedFace, selectedItemId); } setSelectedItemId(null); }} style={{ position: "absolute", right: "1.5rem", padding: "0.4rem 1rem", border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600 }}>Delete</button>
             )}
           </div>
         </div>
@@ -2536,7 +2732,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               style={{ cursor: "grab", borderRadius: 12, overflow: "hidden", background: "#f0f0f0", userSelect: "none", position: "relative" }}
             >
               <div style={{ transform: `scale(${preview3dZoom})`, transformOrigin: "center 65%", transition: "transform 0.15s" }}>
-                <Box3DPreview faceColors={state.outside.faceColors} insideFaceColors={state.inside.faceColors} insideColor={state.insideColor} outsideItems={state.outside.items} insideItems={state.inside.items} outsideGlobalItems={outsideGlobalItemsForPreview} insideGlobalItems={insideGlobalItemsForPreview} openAmount={openAmount} rotX={rotX} rotY={rotY} hideFlaps={hideFlaps} squareFaces={hideFlaps ? faces : undefined} />
+                <Box3DPreview faceColors={state.outside.faceColors} insideFaceColors={state.inside.faceColors} insideColor={state.insideColor} outsideItems={state.outside.items} insideItems={state.inside.items} outsideGlobalItems={outGlobalForPreview} insideGlobalItems={inGlobalForPreview} openAmount={openAmount} rotX={rotX} rotY={rotY} geo={geo} />
               </div>
               {/* Zoom buttons — bottom right */}
               <div style={{ position: "absolute", bottom: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
@@ -2567,7 +2763,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           <div style={{ padding: "0.75rem", borderBottom: "1px solid #f0f0f0" }}>
             <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 3 }}>
               {(["outside", "inside"] as const).map(v => (
-                <button key={v} onClick={() => { setView(v); setSelectedFace(null); setSelectedItemId(null); setShowFaceColorPopup(false); }} style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: "0.8rem", background: view === v ? "#fff" : "transparent", color: view === v ? "#111827" : "#6b7280", boxShadow: view === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none", textTransform: "capitalize" }}>
+                <button key={v} onClick={() => { setView(v); setSelectedFace(null); setSelectedItemId(null); setShowFaceColorPopup(false); setSelectedItemIsGlobal(false); }} style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: "0.8rem", background: view === v ? "#fff" : "transparent", color: view === v ? "#111827" : "#6b7280", boxShadow: view === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none", textTransform: "capitalize" }}>
                   {v.charAt(0).toUpperCase() + v.slice(1)}
                 </button>
               ))}
@@ -2578,7 +2774,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
       </div>
     </div>
 
-    {/* ── Finalize Your Order modal ───────────────────────────────────── */}
+    {/* ── Finalize Your Order modal ─────────────────────────────────────── */}
     {finalStepsOpen && (
       <div style={{ position: "fixed", inset: 0, zIndex: 700, display: "flex", flexDirection: "column", background: "#f0f2f5" }}>
 
@@ -2623,15 +2819,15 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 insideColor={state.insideColor}
                 outsideItems={state.outside.items}
                 insideItems={state.inside.items}
-                outsideGlobalItems={outsideGlobalItemsForPreview}
-                insideGlobalItems={insideGlobalItemsForPreview}
+                outsideGlobalItems={outGlobalForPreview}
+                insideGlobalItems={inGlobalForPreview}
                 openAmount={100}
                 rotX={finalRotX}
                 rotY={finalRotY}
-                hideFlaps={hideFlaps}
-                squareFaces={hideFlaps ? faces : undefined}
+                geo={geo}
               />
             </div>
+            <p style={{ margin: 0, fontSize: "0.72rem", color: "#9ca3af", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>Drag to rotate</p>
           </div>
 
           {/* RIGHT — Final Steps form */}
@@ -2653,11 +2849,11 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
             {/* Quantity */}
             <div style={{ background: "#fff", borderRadius: 16, padding: "24px 24px 20px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 20, border: "1.5px solid #e5e7eb" }}>
-              <label htmlFor="sb-qty-input" style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+              <label htmlFor="pb-qty-input" style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
                 Quantity
               </label>
               <input
-                id="sb-qty-input"
+                id="pb-qty-input"
                 type="number"
                 min={1}
                 placeholder="e.g. 100"
@@ -2667,7 +2863,6 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                 onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
                 onBlur={(e)  => (e.target.style.borderColor = "#e5e7eb")}
               />
-              {/* Price calculation */}
               {(() => {
                 const raw = product.startingPrice?.trim() ?? "";
                 const num = parseFloat(raw.replace(/[^0-9.]/g, ""));
@@ -2727,16 +2922,14 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               disabled={!designApproved || selectedQty < 1}
               onClick={async () => {
                 if (!designApproved || selectedQty < 1) return;
-                // Generate 2.5D box thumbnail using actual face colors
+                // Generate 2.5D box thumbnail
                 let thumb: string | undefined;
                 try {
                   const fc = state.outside.faceColors;
                   const DEFAULT = "#c8a97e";
-                  const frontColor = fc["sq-front-panel"] ?? fc["front"] ?? DEFAULT;
-                  const rightColor = fc["sq-right-side-panel"] ?? fc["side-right"] ?? frontColor;
-                  const topColor   = fc["sq-outer-flap"] ?? fc["lid"] ?? frontColor;
-
-                  // Darken a hex color by mixing with black
+                  const frontColor = fc["front"] ?? DEFAULT;
+                  const rightColor = fc["side-right"] ?? frontColor;
+                  const topColor   = fc["lid"] ?? frontColor;
                   const mix = (hex: string, amount: number) => {
                     const n = parseInt(hex.replace("#",""), 16);
                     const r = Math.round(((n >> 16) & 0xff) * amount);
@@ -2744,100 +2937,52 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                     const b = Math.round(((n)       & 0xff) * amount);
                     return `rgb(${r},${g},${b})`;
                   };
-
-                  const c = document.createElement("canvas");
-                  c.width = 160; c.height = 160;
-                  const ctx = c.getContext("2d")!;
-
-                  // Background
-                  ctx.fillStyle = "#f5f5f5";
-                  ctx.fillRect(0, 0, 160, 160);
-
-                  // Square shipping box stays cubic; pizza/shipping are wider than tall
-                  const isSquare = hideFlaps;
-                  const W = isSquare ? 74 : 88;
-                  const H = isSquare ? 74 : 56;
-                  const D = isSquare ? 26 : 18;
-                  const sx = isSquare ? 18 : 12;
-                  const sy = isSquare ? 56 : 62;
-
-                  // Top face
-                  ctx.fillStyle = mix(topColor, 1.15) === topColor ? topColor : mix(topColor, 1.0);
+                  const cv = document.createElement("canvas");
+                  cv.width = 160; cv.height = 160;
+                  const ctx = cv.getContext("2d")!;
+                  ctx.fillStyle = "#f5f5f5"; ctx.fillRect(0, 0, 160, 160);
+                  // Mailer box is wider than tall (BW=315, BH derived from FLAP_H — see geometry constants)
+                  const W = 88, H = 56, D = 18;
+                  const sx = 12, sy = 62;
                   ctx.fillStyle = topColor;
-                  ctx.beginPath();
-                  ctx.moveTo(sx,     sy);
-                  ctx.lineTo(sx + D, sy - D);
-                  ctx.lineTo(sx + W + D, sy - D);
-                  ctx.lineTo(sx + W, sy);
-                  ctx.closePath();
-                  ctx.fill();
-
-                  // Right face (slightly darker)
+                  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx+D, sy-D); ctx.lineTo(sx+W+D, sy-D); ctx.lineTo(sx+W, sy); ctx.closePath(); ctx.fill();
                   ctx.fillStyle = mix(rightColor, 0.78);
-                  ctx.beginPath();
-                  ctx.moveTo(sx + W,     sy);
-                  ctx.lineTo(sx + W + D, sy - D);
-                  ctx.lineTo(sx + W + D, sy + H - D);
-                  ctx.lineTo(sx + W,     sy + H);
-                  ctx.closePath();
-                  ctx.fill();
-
-                  // Front face
-                  ctx.fillStyle = frontColor;
-                  ctx.fillRect(sx, sy, W, H);
-
-                  // Edge lines
-                  ctx.strokeStyle = "rgba(0,0,0,0.22)";
-                  ctx.lineWidth = 1.5;
-                  // Front rect
+                  ctx.beginPath(); ctx.moveTo(sx+W, sy); ctx.lineTo(sx+W+D, sy-D); ctx.lineTo(sx+W+D, sy+H-D); ctx.lineTo(sx+W, sy+H); ctx.closePath(); ctx.fill();
+                  ctx.fillStyle = frontColor; ctx.fillRect(sx, sy, W, H);
+                  ctx.strokeStyle = "rgba(0,0,0,0.22)"; ctx.lineWidth = 1.5;
                   ctx.strokeRect(sx, sy, W, H);
-                  // Top
-                  ctx.beginPath();
-                  ctx.moveTo(sx, sy);
-                  ctx.lineTo(sx + D, sy - D);
-                  ctx.lineTo(sx + W + D, sy - D);
-                  ctx.lineTo(sx + W, sy);
-                  ctx.stroke();
-                  // Right
-                  ctx.beginPath();
-                  ctx.moveTo(sx + W + D, sy - D);
-                  ctx.lineTo(sx + W + D, sy + H - D);
-                  ctx.lineTo(sx + W, sy + H);
-                  ctx.stroke();
-
-                  thumb = c.toDataURL("image/jpeg", 0.92);
+                  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx+D, sy-D); ctx.lineTo(sx+W+D, sy-D); ctx.lineTo(sx+W, sy); ctx.stroke();
+                  ctx.beginPath(); ctx.moveTo(sx+W+D, sy-D); ctx.lineTo(sx+W+D, sy+H-D); ctx.lineTo(sx+W, sy+H); ctx.stroke();
+                  thumb = cv.toDataURL("image/jpeg", 0.92);
                 } catch { /* ignore */ }
-                // Generate per-face canvas snapshots (color + images) for admin preview
+                // Generate per-face canvas snapshots for admin preview
                 const DEFAULT_FC = "#c8a97e";
                 const fc2 = state.outside.faceColors;
                 // Project global items onto faces with face-relative coordinates
-                const globalProjected = projectGlobalItemsToFaces(state.outside.globalItems ?? [], faces);
+                const globalProjected2 = projectGlobalItemsToFaces(state.outside.globalItems ?? [], FACES_OUTSIDE);
                 const fi = (id: string): CanvasItem[] => {
-                  const fDef = faces.find(f => f.id === id);
+                  const fDef = FACES_OUTSIDE.find(f => f.id === id);
                   const perFace = state.outside.items[id] ?? [];
                   if (!fDef) return perFace;
-                  const translated = (globalProjected[id] ?? []).map(item => ({ ...item, x: item.x - fDef.x, y: item.y - fDef.y }));
+                  const translated = (globalProjected2[id] ?? []).map(item => ({ ...item, x: item.x - fDef.x, y: item.y - fDef.y }));
                   return [...translated, ...perFace];
                 };
                 let boxFaceImages: { front?: string; right?: string; top?: string } = {};
                 try {
                   const [front, right, top] = await Promise.all([
-                    renderFaceToCanvas(fc2["sq-front-panel"] ?? DEFAULT_FC, fi("sq-front-panel"), sqBackWidthPx, sqBaseHeightPx),
-                    renderFaceToCanvas(fc2["sq-right-side-panel"] ?? DEFAULT_FC, fi("sq-right-side-panel"), sqSideWidthPx, sqBaseHeightPx),
-                    renderFaceToCanvas(fc2["sq-outer-flap"] ?? DEFAULT_FC, fi("sq-outer-flap"), sqSideWidthPx, sqLidH),
+                    renderFaceToCanvas(fc2["front"] ?? DEFAULT_FC, fi("front"), BW, BH),
+                    renderFaceToCanvas(fc2["side-right"] ?? DEFAULT_FC, fi("side-right"), BD, BH),
+                    renderFaceToCanvas(fc2["lid"] ?? DEFAULT_FC, fi("lid"), BW, LID_H),
                   ]);
                   boxFaceImages = { front, right, top };
                 } catch { /* ignore */ }
-
                 const cartId = Date.now().toString();
-                // Save to localStorage immediately so header badge updates
                 try {
                   const raw = product.startingPrice?.trim() ?? "";
                   const ppu = parseFloat(raw.replace(/[^0-9.]/g, "")) || 0;
                   const existing = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<Record<string, unknown>>;
                   const previewBoxColor = Object.values(state.outside.faceColors)[0] ?? "#c8a97e";
-                  const pW = hideFlaps ? sqBackWidthPx : BW, pD = hideFlaps ? sqSideWidthPx : BD, pH = hideFlaps ? sqBaseHeightPx : BH;
-                  existing.push({ id: cartId, name: product.name, qty: selectedQty, pricePerUnit: ppu, total: ppu * selectedQty, thumb, boxFaceImages, previewBoxColor, previewW: pW, previewH: pH, previewD: pD });
+                  existing.push({ id: cartId, name: product.name, qty: selectedQty, pricePerUnit: ppu, total: ppu * selectedQty, thumb, boxFaceImages, previewBoxColor, previewW: BW, previewH: BH, previewD: BD });
                   localStorage.setItem("wp_cart", JSON.stringify(existing));
                   localStorage.setItem("wp_cart_count", String(existing.length));
                   window.dispatchEvent(new CustomEvent("wp-cart-updated", { detail: { count: existing.length } }));
@@ -2849,9 +2994,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               }}
               style={{
                 width: "100%", padding: "16px",
-                background: designApproved && selectedQty >= 1
-                  ? "linear-gradient(135deg, #7c3aed, #db2777)"
-                  : "#e5e7eb",
+                background: designApproved && selectedQty >= 1 ? "linear-gradient(135deg, #7c3aed, #db2777)" : "#e5e7eb",
                 color: designApproved && selectedQty >= 1 ? "#fff" : "#9ca3af",
                 border: "none", borderRadius: 14, fontSize: "1rem", fontWeight: 800,
                 cursor: designApproved && selectedQty >= 1 ? "pointer" : "not-allowed",
@@ -2871,13 +3014,13 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
       </div>
     )}
 
-    {/* ── Checkout Overlay ─────────────────────────────────────────────────── */}
+    {/* ── Checkout Overlay ──────────────────────────────────────────────────── */}
     {checkoutOpen && (() => {
       const raw = product.startingPrice?.trim() ?? "";
       const pricePerUnit = parseFloat(raw.replace(/[^0-9.]/g, ""));
       return (
         <CheckoutOverlay
-          productName={product.name ?? "Shipping Box"}
+          productName={product.name ?? "Packaging Box"}
           pricePerUnit={isNaN(pricePerUnit) ? 0 : pricePerUnit}
           selectedQty={selectedQty}
           setSelectedQty={(fn) => setSelectedQty(fn)}
@@ -2900,13 +3043,12 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               insideColor={state.insideColor}
               outsideItems={state.outside.items}
               insideItems={state.inside.items}
-              outsideGlobalItems={outsideGlobalItemsForPreview}
-              insideGlobalItems={insideGlobalItemsForPreview}
+              outsideGlobalItems={outGlobalForPreview}
+              insideGlobalItems={inGlobalForPreview}
               openAmount={100}
               rotX={rx}
               rotY={ry}
-              hideFlaps={hideFlaps}
-              squareFaces={hideFlaps ? faces : undefined}
+              geo={geo}
             />
           )}
         />
@@ -2916,12 +3058,10 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
     {/* ── Box 3D Preview Modal (from checkout thumbnail click) ── */}
     {boxPreviewOpen && (
       <div style={{ position: "fixed", inset: 0, zIndex: 900, background: "rgba(0,0,0,0.6)", display: "flex", flexDirection: "column", alignItems: "stretch" }}>
-        {/* Header */}
         <div style={{ background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", padding: "0 28px", height: 54, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ color: "#fff", fontWeight: 800, fontSize: "1rem" }}>{product.name}</span>
           <button onClick={() => setBoxPreviewOpen(false)} style={{ background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)", borderRadius: "50%", width: 34, height: 34, cursor: "pointer", color: "#fff", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         </div>
-        {/* 3D preview area */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f5", overflow: "hidden" }}>
           <div
             style={{ cursor: "grab", userSelect: "none", transform: "scale(2.4)", transformOrigin: "center center" }}
@@ -2931,8 +3071,8 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               const onMove = (me: MouseEvent) => {
                 boxPreviewRotRef.current.ry = startRY + (me.clientX - startX) * 0.5;
                 boxPreviewRotRef.current.rx = Math.max(-80, Math.min(80, startRX - (me.clientY - startY) * 0.5));
-                setBoxPreviewRotY(boxPreviewRotRef.current.ry);
                 setBoxPreviewRotX(boxPreviewRotRef.current.rx);
+                setBoxPreviewRotY(boxPreviewRotRef.current.ry);
               };
               const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
               window.addEventListener("mousemove", onMove);
@@ -2945,21 +3085,18 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
               insideColor={state.insideColor}
               outsideItems={state.outside.items}
               insideItems={state.inside.items}
-              outsideGlobalItems={outsideGlobalItemsForPreview}
-              insideGlobalItems={insideGlobalItemsForPreview}
               openAmount={100}
               rotX={boxPreviewRotX}
               rotY={boxPreviewRotY}
-              hideFlaps={hideFlaps}
-              squareFaces={hideFlaps ? faces : undefined}
+              geo={geo}
             />
           </div>
         </div>
-        <div style={{ padding: "12px 0 16px", textAlign: "center", background: "#f5f5f5", fontSize: "0.78rem", color: "#9ca3af" }}>
-          Drag to rotate
+        <div style={{ background: "#fff", borderTop: "1px solid #e5e7eb", padding: "10px 28px", display: "flex", justifyContent: "center" }}>
+          <span style={{ fontSize: "0.75rem", color: "#9ca3af", fontWeight: 600 }}>Drag to rotate</span>
         </div>
       </div>
     )}
-    </Fragment>
-  );
+
+  </Fragment>);
 }

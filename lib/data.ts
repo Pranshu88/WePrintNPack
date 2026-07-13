@@ -101,6 +101,29 @@ export const categories: Category[] = [
   }
 ];
 
+// Preserves the fixed template-gallery slugs used by existing, purpose-built UI (business
+// cards/flyers/posters/etc). Any newly added sub-product label falls back to a slugified
+// version of its name, which routes to the generic gallery-grid UI.
+export const LEGACY_SUBPRODUCT_SLUGS: Record<string, string> = {
+  "Flyers": "bold-flyers",
+  "Postcards": "promotional-postcards",
+  "Brochures": "tri-fold-brochures",
+  "Posters": "posters",
+  "Banners": "vinyl-banners",
+  "Yard Signs": "yard-signs",
+  "Stickers & Labels": "stickers-and-labels",
+  "Round Collar T-Shirt": "round-neck-tshirt",
+  "Straight Collar T-Shirt": "collar-tshirt",
+};
+
+export function slugifyLabel(label: string) {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+export function subProductSlug(label: string) {
+  return LEGACY_SUBPRODUCT_SLUGS[label] ?? slugifyLabel(label);
+}
+
 type SeedProductTemplate = {
   slug: string;
   name: string;
@@ -109,6 +132,7 @@ type SeedProductTemplate = {
   description: string;
   startingPrice: string;
   colors?: string[];
+  subProducts?: string[];
   specs: Array<{ label: string; value: string }>;
 };
 
@@ -121,6 +145,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
       image: "https://images.unsplash.com/photo-1545239351-1141bd82e8a6?auto=format&fit=crop&w=1200&q=80",
       description: "Heavy stock business cards with a clean premium finish for everyday networking.",
       startingPrice: "$49",
+      subProducts: ["Business Cards", "Flyers"],
       specs: [
         { label: "Stock", value: "16pt / 18pt" },
         { label: "Finish", value: "Matte / Velvet" },
@@ -179,6 +204,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
       image: "/images/cardprint.jpg",
       description: "Custom stickers, labels, and promotional items for packaging, events, and giveaways.",
       startingPrice: "$28",
+      subProducts: ["Stickers & Labels", "Roll Labels", "Product Labels", "Die-Cut Stickers"],
       specs: [
         { label: "Material", value: "Paper gloss / BOPP / Vinyl" },
         { label: "Cut", value: "Die-cut / Roll" },
@@ -242,6 +268,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
       description: "Soft cotton round neck tees for events, staff, and everyday branded wear.",
       startingPrice: "$18",
       colors: ["#ffffff", "#111827", "#2563eb", "#9ca3af", "#ef4444"],
+      subProducts: ["Round Collar T-Shirt", "Straight Collar T-Shirt"],
       specs: [
         { label: "Fabric", value: "100% cotton" },
         { label: "Neck", value: "Round neck" },
@@ -303,6 +330,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
       image: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80",
       description: "Posters, banners, and yard signs for events, storefronts, and promotions.",
       startingPrice: "$24",
+      subProducts: ["Posters", "Banners", "Yard Signs"],
       specs: [
         { label: "Types", value: "Posters / Banners / Yard Signs" },
         { label: "Finish", value: "Gloss / Matte / Vinyl" },
@@ -369,6 +397,7 @@ const initialProducts: Product[] = catalogGroups.flatMap((group) =>
     description: item.description,
     startingPrice: item.startingPrice,
     colors: item.colors,
+    subProducts: item.subProducts,
     specs: item.specs,
     createdAt: new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString(),
     updatedAt: new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString()
@@ -380,7 +409,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __productStore: { items: Product[] } | undefined;
 }
-if (!globalThis.__productStore || process.env.NODE_ENV === "development") {
+if (!globalThis.__productStore) {
   globalThis.__productStore = {
     items: initialProducts.map((product, index) => {
       const timestamp = new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString();
@@ -461,6 +490,26 @@ function createUniqueSlug(baseSlug: string, ignoreSlug?: string) {
 
   return candidate;
 }
+
+export const CATEGORY_SUBPRODUCT_OPTIONS: Record<string, string[]> = {
+  "business-cards": [
+    "Business Cards", "Postcards", "Flyers", "Brochures", "Door Hangers", "Rack Cards",
+    "Presentation Folders", "Letterheads", "Envelopes", "NCR Forms", "Notepads",
+    "Greeting Cards", "Thank You Cards",
+  ],
+  "marketing-material": [
+    "Posters", "Yard Signs", "Coroplast Signs", "PVC Signs", "Foam Board Signs",
+    "Acrylic Signs", "Aluminum Signs", "Window Graphics", "Wall Decals", "Floor Graphics",
+    "Car Magnets", "Banners", "Pull-Up Banners", "X-Stand Banners", "Backdrops",
+    "Trade Show Displays",
+  ],
+  "promotional-products": [
+    "Stickers & Labels", "Roll Labels", "Product Labels", "Food Labels", "Bottle Labels",
+    "Jar Labels", "Square Cut Labels", "Die-Cut Stickers", "Vinyl Stickers", "Clear Stickers",
+    "BOPP Labels", "Waterproof Labels",
+  ],
+  "t-shirts": ["Round Collar T-Shirt", "Straight Collar T-Shirt"],
+};
 
 export const LISTING_ALLOWED_CATEGORIES = new Set([
   "business-cards", "flyers", "marketing-material", "promotional-products",
@@ -558,6 +607,7 @@ export function createProduct(input: {
   startingPrice: string;
   colors?: string[];
   colorVariants?: ColorVariant[];
+  subProducts?: string[];
   specs: Array<{ label: string; value: string }>;
 }) {
   const categoryName = ensureCategoryName(input.category);
@@ -574,6 +624,7 @@ export function createProduct(input: {
     startingPrice: input.startingPrice.trim(),
     colors: input.colors?.length ? input.colors : undefined,
     colorVariants: input.colorVariants?.length ? input.colorVariants : undefined,
+    subProducts: input.subProducts?.length ? input.subProducts : undefined,
     specs: parseSpecs(input.specs),
     createdAt: timestamp,
     updatedAt: timestamp
@@ -595,6 +646,7 @@ export function updateProduct(
     startingPrice: string;
     colors: string[];
     colorVariants: ColorVariant[];
+    subProducts: string[];
     specs: Array<{ label: string; value: string }>;
   }>
 ) {
@@ -623,6 +675,7 @@ export function updateProduct(
     startingPrice: input.startingPrice?.trim() || current.startingPrice,
     colors: input.colors !== undefined ? (input.colors.length ? input.colors : undefined) : current.colors,
     colorVariants: input.colorVariants !== undefined ? (input.colorVariants.length ? input.colorVariants : undefined) : current.colorVariants,
+    subProducts: input.subProducts !== undefined ? (input.subProducts.length ? input.subProducts : undefined) : current.subProducts,
     specs: input.specs ? parseSpecs(input.specs) : current.specs.map((spec) => ({ ...spec })),
     updatedAt: new Date().toISOString()
   };

@@ -7,6 +7,29 @@ import type { GalleryTemplate, DesignTemplateItem, SerializableItem } from "@/li
 import type { ColorVariant, Product } from "@/lib/types";
 import DesignEditorShell from "./design-editor-shell";
 
+function openBcDB(): Promise<IDBDatabase> {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open("bc-packages-db", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("images");
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function loadBcImage(id: string): Promise<string> {
+  try {
+    const db = await openBcDB();
+    return await new Promise<string>((res) => {
+      const tx = db.transaction("images", "readonly");
+      const req = tx.objectStore("images").get(id);
+      req.onsuccess = () => res((req.result as string) ?? "");
+      req.onerror = () => res("");
+    });
+  } catch {
+    return "";
+  }
+}
+
 const BC_CARD_OUTLINE =
   "data:image/svg+xml;charset=utf-8," +
   encodeURIComponent(
@@ -14,6 +37,18 @@ const BC_CARD_OUTLINE =
     '<rect width="460" height="270" rx="10" fill="none" stroke="#d1d5db" stroke-width="1.5"/>' +
     "</svg>"
   );
+
+// Custom-sized card outline — sharp corners, viewBox matches the real aspect ratio so it
+// never has to be non-uniformly stretched (which is what distorted BC_CARD_OUTLINE's
+// baked-in rx=10 corner into a curve for non-3.5:2 custom sizes).
+function buildCustomCardOutline(widthIn: number, heightIn: number): string {
+  const w = Math.round(widthIn * 100), h = Math.round(heightIn * 100);
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">` +
+    `<rect width="${w}" height="${h}" fill="none" stroke="#d1d5db" stroke-width="1.5"/>` +
+    "</svg>"
+  );
+}
 
 // Express Flyer: 8.5" × 5.5" (landscape) — matches FLYER_EXPRESS_DIMS (460×297)
 const FLYER_OUTLINE =
@@ -307,6 +342,46 @@ const BC_PACKAGE_NAMES: Record<string, string> = {
   "fly-premium": "Prime Flyers",
 };
 
+// Custom packages added via "+ Add Gallery Template" declare their own title/Width/
+// Length (stored in localStorage). Once the first design/seed creates the real
+// gallery_templates row, the page navigates to a new real id — matched by id first
+// (works once ensureRealGalleryId's remap has run), falling back to a name match
+// (covers galleries created before that remap existed, so they self-heal here too).
+function findCustomPackage(galleryId: string, galleryName: string | undefined): { title: string; price: string; specs: string[] } | null {
+  for (const key of ["bc-packages-list", "fly-packages-list"]) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const list = JSON.parse(raw) as { id: string; title: string; price: string; specs: string[] }[];
+      const match = list.find((p) => p.id === galleryId) ?? (galleryName ? list.find((p) => p.title === galleryName) : undefined);
+      if (match) return match;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function parseSizeFromSpecs(specs: string[] | undefined | null): { width: number; height: number } | null {
+  const sizeSpec = specs?.find((s) => s.startsWith("Size:"));
+  if (!sizeSpec) return null;
+  const [width, height] = sizeSpec.slice(sizeSpec.indexOf(":") + 1).split(/x|×/i).map((p) => parseFloat(p.trim()));
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  return { width, height };
+}
+
+function parseColorsFromSpecs(specs: string[] | undefined | null): string[] {
+  const colorSpec = specs?.find((s) => s.startsWith("Color:"));
+  if (!colorSpec) return [];
+  return colorSpec.slice(colorSpec.indexOf(":") + 1).split(",").map((c) => c.trim()).filter(Boolean);
+}
+
+function getCustomPackageSizeInches(galleryId: string, galleryName?: string): { width: number; height: number } | null {
+  return parseSizeFromSpecs(findCustomPackage(galleryId, galleryName)?.specs);
+}
+
+function getCustomPackageTitle(galleryId: string, galleryName?: string): string | null {
+  return findCustomPackage(galleryId, galleryName)?.title ?? null;
+}
+
 type Props = { productSlug: string; galleryId: string };
 
 export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
@@ -317,6 +392,12 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  /* bulk select */
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   /* design form */
   const [formOpen, setFormOpen] = useState(false);
@@ -369,6 +450,12 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     const gn = gallery?.name?.toLowerCase() ?? "";
     const isLabelGallery = gn.includes("label") || gn.includes("sticker");
     const modalDims: PreviewDims =
+      customDimsInches                     ? {
+        CW: Math.round(customDimsInches.width * 130),
+        CH: Math.round(customDimsInches.height * 130),
+        PX: Math.round(customDimsInches.width * 130 * 0.065),
+        PY: Math.round(customDimsInches.height * 130 * 0.065),
+      } :
       isTShirt                             ? SHIRT_PREVIEW_DIMS         :
       isYardSign                           ? YARD_SIGN_PREVIEW_DIMS     :
       gn.includes("large poster")          ? POSTER_LARGE_PREVIEW_DIMS  :
@@ -474,7 +561,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
 
       if (isBcPackage) {
         // Look for a real template already created for this BC package (e.g. after seeding)
-        const bcName = BC_PACKAGE_NAMES[galleryId] ?? galleryId;
+        const bcName = BC_PACKAGE_NAMES[galleryId] ?? getCustomPackageTitle(galleryId) ?? galleryId;
         const tplsRes = await fetch(`/api/products/${productSlug}/templates`, { cache: "no-store" });
         const tplsData = (await tplsRes.json()) as { templates?: GalleryTemplate[] };
         const existing = tplsData.templates?.find((t) => t.name === bcName) ?? null;
@@ -498,25 +585,62 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setTimeout(() => isError ? setErr("") : setMsg(""), 3000);
   }
 
+  // bc-/fly- package IDs (custom or legacy) are virtual until their first design/seed
+  // creates the real gallery_templates row. Resolves (creating it if needed) to a real id.
+  async function ensureRealGalleryId(): Promise<string> {
+    if (gallery) return galleryId;
+    if (!(galleryId.startsWith("bc-") || galleryId.startsWith("fly-"))) return galleryId;
+    const bcName = BC_PACKAGE_NAMES[galleryId] ?? getCustomPackageTitle(galleryId) ?? galleryId;
+    // The pricing-card image the admin uploaded for this package only ever lived in
+    // this browser's IndexedDB (bc-packages-db, keyed by the virtual id) — use it here
+    // if present, instead of a generic placeholder, so the real row starts out right.
+    const savedImage = await loadBcImage(galleryId);
+    const placeholder = savedImage || product?.image ||
+      "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250"><rect width="400" height="250" fill="#f3f4f6"/></svg>');
+    const createRes = await fetch(`/api/products/${productSlug}/templates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: bcName, previewImage: placeholder }),
+    });
+    const createData = (await createRes.json()) as { template?: { id: string }; error?: string };
+    if (!createRes.ok) throw new Error(createData.error ?? "Failed to create template.");
+    const realId = createData.template!.id;
+
+    // The price/specs the admin set for this package only ever lived in localStorage
+    // (bc-/fly- packages have their own pricing-card UI that never PATCHes the DB
+    // row). Sync them onto the real row now so the storefront — which reads only
+    // from the DB — actually shows them.
+    const pkg = findCustomPackage(galleryId, bcName);
+    if (pkg && (pkg.price || pkg.specs?.length)) {
+      await fetch(`/api/products/${productSlug}/templates/${realId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ price: pkg.price, specs: pkg.specs }),
+      });
+    }
+
+    // Custom packages (title, price, specs incl. size) live in localStorage keyed by
+    // the old virtual id — remap to the new real id so future lookups (size, title
+    // for this gallery) still resolve once we've navigated to the real URL.
+    if (galleryId.startsWith("bc-custom-") || galleryId.startsWith("fly-custom-")) {
+      const key = galleryId.startsWith("bc-") ? "bc-packages-list" : "fly-packages-list";
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const list = JSON.parse(raw) as { id: string }[];
+          const next = list.map((p) => p.id === galleryId ? { ...p, id: realId } : p);
+          localStorage.setItem(key, JSON.stringify(next));
+        }
+      } catch { /* ignore */ }
+    }
+
+    return realId;
+  }
+
   async function seedDesigns() {
     setSeeding(true);
     try {
-      let effectiveId = galleryId;
-
-      // bc-/fly- package IDs are virtual — create the real template first
-      if (galleryId.startsWith("bc-") || galleryId.startsWith("fly-")) {
-        const bcName = BC_PACKAGE_NAMES[galleryId] ?? galleryId;
-        const placeholder = product?.image ||
-          "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250"><rect width="400" height="250" fill="#f3f4f6"/></svg>');
-        const createRes = await fetch(`/api/products/${productSlug}/templates`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: bcName, previewImage: placeholder }),
-        });
-        const createData = (await createRes.json()) as { template?: { id: string }; error?: string };
-        if (!createRes.ok) throw new Error(createData.error ?? "Failed to create template.");
-        effectiveId = createData.template!.id;
-      }
+      const effectiveId = await ensureRealGalleryId();
 
       const res = await fetch(
         `/api/products/${productSlug}/templates/${effectiveId}/seed-designs`,
@@ -573,13 +697,20 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDFrontAdminItems([]); setDBackAdminItems([]);
     setDFrontBgColor("#ffffff"); setDBackBgColor("#ffffff");
     if (isBusinessCard) {
-      setDFrontImage(BC_CARD_OUTLINE); setDFrontImageName("Business Card (Front)");
-      setDBackImage(BC_CARD_OUTLINE);  setDBackImageName("Business Card (Back)");
+      setDFrontImage(bcCardOutline); setDFrontImageName("Business Card (Front)");
+      setDBackImage(bcCardOutline);  setDBackImageName("Business Card (Back)");
       setAdminEditorOpen(true);
       return;
     } else if (isFlyer) {
       setDFrontImage(flyerOutline); setDFrontImageName("Flyer (Front)");
       setDBackImage(flyerOutline);  setDBackImageName("Flyer (Back)");
+      setAdminEditorOpen(true);
+      return;
+    } else if (!isTShirt) {
+      // Every non-apparel category goes straight to the 2D editor (like BC/flyers) —
+      // only T-Shirts (which need per-color front/back mockup uploads) use the field form.
+      setDFrontImage(""); setDFrontImageName("");
+      setDBackImage("");  setDBackImageName("");
       setAdminEditorOpen(true);
       return;
     } else {
@@ -602,8 +733,8 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDBackAdminItems(d.backAdminItems ?? []);
     setDFrontBgColor(d.frontBgColor ?? "#ffffff");
     setDBackBgColor(d.backBgColor ?? "#ffffff");
-    // For BC, flyers, and sticker/label, go straight to the 2D editor; for apparel open the field form.
-    if (isBusinessCard || isFlyer || isStickerLabel) setAdminEditorOpen(true);
+    // Every non-apparel category goes straight to the 2D editor; T-Shirts use the field form.
+    if (!isTShirt) setAdminEditorOpen(true);
     else setFormOpen(true);
   }
 
@@ -618,8 +749,8 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   async function saveDesign() {
     if (!dName.trim() || (!isBusinessCard && !isFlyer && !isStickerLabel && !dFrontImage)) { flash("Design name and front base image are required.", true); return; }
     setSaving(true);
-    const frontImg = dFrontImage || (isBusinessCard ? BC_CARD_OUTLINE : isFlyer ? flyerOutline : "");
-    const backImg  = dBackImage  || (isBusinessCard ? BC_CARD_OUTLINE : isFlyer ? flyerOutline : "");
+    const frontImg = dFrontImage || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : "");
+    const backImg  = dBackImage  || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : "");
     const payload = {
       name: dName,
       ...(dColorHex ? { colorHex: dColorHex } : {}),
@@ -652,6 +783,41 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     if (!window.confirm("Delete this design?")) return;
     await fetch(`/api/products/${productSlug}/templates/${galleryId}/designs/${designId}`, { method: "DELETE" });
     flash("Deleted."); await loadData();
+  }
+
+  function toggleSelectMode() {
+    setSelectMode((prev) => !prev);
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set((gallery?.designs ?? []).map((d) => d.id)));
+  }
+
+  async function bulkDeleteSelected() {
+    setBulkDeleting(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/products/${productSlug}/templates/${galleryId}/designs/${id}`, { method: "DELETE" })
+        )
+      );
+      flash("Deleted.");
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      await loadData();
+    } finally {
+      setBulkDeleting(false);
+      setConfirmBulkDelete(false);
+    }
   }
 
   /* ── Overlay editor ── */
@@ -763,6 +929,19 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   );
 
   const isBusinessCard = product?.category === "business-cards";
+  // Universal path: any gallery template created via the rich "+ Add Gallery Template"
+  // modal (any category except T-Shirts) has its declared Size stored directly on the
+  // template's own specs. Falls back to the legacy localStorage lookup for older
+  // bc-/fly- custom packages (e.g. "Blossom Card") created before that existed.
+  const specsSizeInches = product?.category !== "t-shirts" ? parseSizeFromSpecs(gallery?.specs) : null;
+  const customDimsInches = specsSizeInches ?? ((isBusinessCard || product?.category === "flyers")
+    ? getCustomPackageSizeInches(galleryId, gallery?.name)
+    : null);
+  const templateMaterialColors = parseColorsFromSpecs(gallery?.specs);
+  const bcCardOutline = customDimsInches ? buildCustomCardOutline(customDimsInches.width, customDimsInches.height) : BC_CARD_OUTLINE;
+  // Custom galleries created via "+ Add Gallery Template" (e.g. "bc-custom-…") declare
+  // their own size, so the generic business-card-shaped Seed Designs don't apply to them.
+  const isCustomPackage = galleryId.includes("-custom-");
   const isTShirt = product?.category === "t-shirts";
   const FLAT_ART_SLUGS = ["posters", "vinyl-banners", "roll-up-banners", "yard-signs", "stickers-and-labels"];
   const isStickerLabel = productSlug === "stickers-and-labels";
@@ -791,6 +970,16 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const designs = gallery?.designs ?? [];
   const hasDesigns = designs.length > 0;
 
+  // Mirrors the exact set of galleries the seed-designs API route (app/api/products/[slug]/
+  // templates/[templateId]/seed-designs/route.ts) knows how to generate art for. Any gallery
+  // outside this set would fall into that route's generic business-card-shaped fallback,
+  // which doesn't fit e.g. a label or sign — so the button simply doesn't show for those.
+  const isBannerProductSlug = productSlug === "vinyl-banners" || productSlug === "roll-up-banners" || productSlug === "large-outdoor-banner";
+  const isNamedBcGallery = gallery?.name === "Business Cards" || gallery?.name === "Premium Business Cards" || gallery?.name === "Luxury Business Cards";
+  const canSeedDesigns = !isCustomPackage && !isTShirt && (
+    isBannerProductSlug || productSlug === "posters" || productSlug === "bold-flyers" || isStickerLabel || isYardSign || isNamedBcGallery
+  );
+
   const editorBase = editorDesign ? (editorSide === "front" ? editorDesign.frontImage : editorDesign.backImage) : undefined;
   const editorOverlay = editorDesign ? (editorSide === "front" ? editorDesign.frontOverlay : editorDesign.backOverlay) : undefined;
 
@@ -804,28 +993,66 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           <Link href="/admin/templates" style={{ fontSize: "0.8rem", color: "#7c3aed", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.5rem" }}>
             ← Back to Templates
           </Link>
-          <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 800, color: "#111827" }}>{gallery?.name ?? BC_PACKAGE_NAMES[galleryId] ?? product?.name ?? "Gallery"}</h2>
+          <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 800, color: "#111827" }}>{gallery?.name ?? BC_PACKAGE_NAMES[galleryId] ?? getCustomPackageTitle(galleryId) ?? product?.name ?? "Gallery"}</h2>
           <p style={{ margin: "2px 0 0", fontSize: "0.85rem", color: "#6b7280" }}>Design templates for this gallery</p>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
-          {!isTShirt && (
-          <button
-            type="button"
-            onClick={() => void seedDesigns()}
-            disabled={seeding}
-            title="Auto-generate 8 visually distinct design templates"
-            style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#f97316", border: `1.5px solid ${seeding ? "#d1d5db" : "#f97316"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-            </svg>
-            {seeding ? "Seeding…" : "Seed Designs"}
-          </button>
+        <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0, alignItems: "center" }}>
+          {selectMode ? (
+            <>
+              <button
+                type="button"
+                onClick={selectAll}
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                disabled={selectedIds.size === 0}
+                onClick={() => setConfirmBulkDelete(true)}
+                style={{ padding: "0.6rem 1.1rem", background: selectedIds.size === 0 ? "#fca5a5" : "#dc2626", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: selectedIds.size === 0 ? "not-allowed" : "pointer" }}
+              >
+                Delete{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={toggleSelectMode}
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              {hasDesigns && (
+                <button
+                  type="button"
+                  onClick={toggleSelectMode}
+                  style={{ padding: "0.6rem 1.1rem", background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}
+                >
+                  Select
+                </button>
+              )}
+              {canSeedDesigns && (
+              <button
+                type="button"
+                onClick={() => void seedDesigns()}
+                disabled={seeding}
+                title="Auto-generate 8 visually distinct design templates"
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#f97316", border: `1.5px solid ${seeding ? "#d1d5db" : "#f97316"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Designs"}
+              </button>
+              )}
+              <button type="button" onClick={openAddDesign}
+                style={{ padding: "0.6rem 1.15rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
+                + Add Design Template
+              </button>
+            </>
           )}
-          <button type="button" onClick={openAddDesign}
-            style={{ padding: "0.6rem 1.15rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
-            + Add Design Template
-          </button>
         </div>
       </div>
 
@@ -854,8 +1081,14 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               isBusinessCard={isBusinessCard}
               isLabel={isStickerLabel}
               isTShirt={isTShirt}
-              imageAspect={isBusinessCard ? "16/9" : isLargePoster ? "2/3" : isSmallPoster ? "3/4" : isStickerLabel ? "1/1" : (isBannerVinyl || isBannerOutdoor) ? "9/4" : (isBannerRollupStd || isBannerRollupPrem) ? "1/1" : "4/3"}
+              imageAspect={customDimsInches ? `${customDimsInches.width}/${customDimsInches.height}` : isBusinessCard ? "16/9" : isLargePoster ? "2/3" : isSmallPoster ? "3/4" : isStickerLabel ? "1/1" : (isBannerVinyl || isBannerOutdoor) ? "9/4" : (isBannerRollupStd || isBannerRollupPrem) ? "1/1" : "4/3"}
               previewDims={
+                customDimsInches   ? {
+                  CW: Math.round(customDimsInches.width * 130),
+                  CH: Math.round(customDimsInches.height * 130),
+                  PX: Math.round(customDimsInches.width * 130 * 0.065),
+                  PY: Math.round(customDimsInches.height * 130 * 0.065),
+                } :
                 isTShirt           ? SHIRT_PREVIEW_DIMS         :
                 isYardSign         ? YARD_SIGN_PREVIEW_DIMS     :
                 isLargePoster      ? POSTER_LARGE_PREVIEW_DIMS  :
@@ -877,6 +1110,10 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               onDelete={() => void deleteDesign(d.id)}
               onEditFrontOverlay={d.frontOverlay ? () => openEditor(d, "front") : undefined}
               onEditBackOverlay={(d.backOverlay && d.backImage) ? () => openEditor(d, "back") : undefined}
+              selectMode={selectMode}
+              selected={selectedIds.has(d.id)}
+              onToggleSelect={() => toggleSelected(d.id)}
+              hasCustomDims={!!customDimsInches}
             />
           ))}
         </div>
@@ -1138,15 +1375,23 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     {adminEditorOpen && (
       <DesignEditorShell
         adminMode
-        adminFrontImage={dFrontImage || (isBusinessCard ? BC_CARD_OUTLINE : isFlyer ? flyerOutline : undefined)}
-        adminBackImage={dBackImage || (isBusinessCard ? BC_CARD_OUTLINE : isFlyer ? flyerOutline : undefined)}
+        adminFrontImage={dFrontImage || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : undefined)}
+        adminBackImage={dBackImage || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : undefined)}
         initialFrontItems={dFrontAdminItems}
         initialBackItems={dBackAdminItems}
-        {...((isBusinessCard || isFlyer || isStickerLabel) ? {
-          productType: isBusinessCard ? "business-card" as const : isStickerLabel ? "sticker-label" as const : flyerProductType,
+        {...(!isTShirt ? {
+          // Any category without its own dedicated product type (e.g. a new ad-hoc
+          // sub-product like "Roll Label") falls back to the generic flat-art background
+          // color picker rather than the apparel color list, which would have nothing to show.
+          productType: isBusinessCard ? "business-card" as const
+            : isStickerLabel ? "sticker-label" as const
+            : isFlyer ? flyerProductType
+            : "business-card" as const,
           initialFrontBgColor: dFrontBgColor,
           initialBackBgColor: dBackBgColor,
+          materialColors: templateMaterialColors,
         } : {})}
+        customDimsInches={customDimsInches ?? undefined}
         onClose={() => setAdminEditorOpen(false)}
         onSaveAdmin={(frontItems, backItems, frontPNG, backPNG, frontBg, backBg, frontBgSvg, backBgSvg) => {
           // Update local state first, then immediately persist to DB so
@@ -1162,10 +1407,10 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           // preserve the original full label SVG as frontImage.
           const nextFrontImg = isStickerLabel
             ? (dFrontImage || "")
-            : (frontBgSvg || dFrontImage || (isBusinessCard ? BC_CARD_OUTLINE : isFlyer ? flyerOutline : ""));
+            : (frontBgSvg || dFrontImage || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : ""));
           const nextBackImg  = isStickerLabel
             ? (dBackImage || "")
-            : (backBgSvg  || dBackImage  || (isBusinessCard ? BC_CARD_OUTLINE : isFlyer ? flyerOutline : ""));
+            : (backBgSvg  || dBackImage  || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : ""));
 
           setDFrontAdminItems(nextFrontItems);
           setDBackAdminItems(nextBackItems);
@@ -1177,8 +1422,9 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           if (backBgSvg)  setDBackImage(nextBackImg);
           setAdminEditorOpen(false);
 
-          // For new BC/flyer/sticker-label designs, auto-save directly (no form needed)
-          if (!editingDesignId && (isBusinessCard || isFlyer || isStickerLabel)) {
+          // For new designs on any category that goes through the 2D editor (everything
+          // except T-Shirts, which use the field form instead), auto-save directly.
+          if (!editingDesignId && !isTShirt) {
             const autoName = `Design ${(gallery?.designs?.length ?? 0) + 1}`;
             const newPayload = {
               name: autoName,
@@ -1191,12 +1437,25 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               frontBgColor: nextFrontBg,
               backBgColor: nextBackBg,
             };
-            fetch(`/api/products/${productSlug}/templates/${galleryId}/designs`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(newPayload),
-            })
-              .then(() => loadData())
-              .catch(() => flash("Save failed.", true));
+            void (async () => {
+              try {
+                const effectiveId = await ensureRealGalleryId();
+                const res = await fetch(`/api/products/${productSlug}/templates/${effectiveId}/designs`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(newPayload),
+                });
+                if (!res.ok) throw new Error("Save failed.");
+                if (effectiveId !== galleryId) {
+                  // Virtual bc-/fly- id resolved to a freshly created real template —
+                  // navigate there so the new design (and future ones) show up.
+                  router.replace(`/admin/templates/${productSlug}/${effectiveId}`);
+                } else {
+                  await loadData();
+                }
+              } catch {
+                flash("Save failed.", true);
+              }
+            })();
             return;
           }
 
@@ -1210,7 +1469,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
             ...(nextBackOverlay  ? { backOverlay:  nextBackOverlay  } : {}),
             ...(nextFrontItems.length ? { frontAdminItems: nextFrontItems } : {}),
             ...(nextBackItems.length  ? { backAdminItems:  nextBackItems  } : {}),
-            ...((isBusinessCard || isFlyer || isStickerLabel) ? { frontBgColor: nextFrontBg, backBgColor: nextBackBg } : {}),
+            ...(!isTShirt ? { frontBgColor: nextFrontBg, backBgColor: nextBackBg } : {}),
           };
           fetch(`/api/products/${productSlug}/templates/${galleryId}/designs/${editingDesignId}`, {
             method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -1283,6 +1542,38 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       </div>
     )}
 
+    {/* Bulk delete confirm */}
+    {confirmBulkDelete && (
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+        onClick={() => !bulkDeleting && setConfirmBulkDelete(false)}
+      >
+        <div style={{ background: "#fff", borderRadius: 18, width: "min(340px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ height: 5, background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)" }} />
+          <div style={{ padding: "22px 22px 18px", textAlign: "center" }}>
+            <p style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700, color: "#111827" }}>
+              Do you want to delete {selectedIds.size} design{selectedIds.size !== 1 ? "s" : ""}?
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => void bulkDeleteSelected()}
+                disabled={bulkDeleting}
+                style={{ flex: 1, padding: "0.6rem 1rem", background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", cursor: bulkDeleting ? "not-allowed" : "pointer", opacity: bulkDeleting ? 0.7 : 1 }}
+              >
+                {bulkDeleting ? "Deleting…" : "Yes"}
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                disabled={bulkDeleting}
+                style={{ flex: 1, padding: "0.6rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.875rem", cursor: "pointer", color: "#374151" }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }
@@ -1305,6 +1596,10 @@ function DesignCard({
   onDelete,
   onEditFrontOverlay,
   onEditBackOverlay,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
+  hasCustomDims = false,
 }: {
   design: DesignTemplateItem;
   isBusinessCard: boolean;
@@ -1319,6 +1614,10 @@ function DesignCard({
   onDelete: () => void;
   onEditFrontOverlay?: () => void;
   onEditBackOverlay?: () => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  hasCustomDims?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -1369,18 +1668,31 @@ function DesignCard({
   }, [design.frontAdminItems, design.frontBgColor, design.frontImage, previewDims, editorDims, isLabel, labelPreviewDims]);
 
   return (
-    <div style={{ background: "#fff", border: `1.5px solid ${hovered ? "#7c3aed" : "#e5e7eb"}`, borderRadius: "12px", overflow: "hidden", transition: "border-color 0.15s, box-shadow 0.15s", boxShadow: hovered ? "0 4px 18px rgba(124,58,237,0.13)" : "0 1px 4px rgba(0,0,0,0.07)" }}
+    <div style={{ background: "#fff", border: `1.5px solid ${selected ? "#7c3aed" : hovered ? "#7c3aed" : "#e5e7eb"}`, borderRadius: "12px", overflow: "hidden", transition: "border-color 0.15s, box-shadow 0.15s", boxShadow: selected || hovered ? "0 4px 18px rgba(124,58,237,0.13)" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {selectMode && (
+        <label
+          onClick={(e) => e.stopPropagation()}
+          style={{ position: "absolute", top: 10, left: 10, zIndex: 3, width: 24, height: 24, borderRadius: 6, background: "#fff", boxShadow: "0 1px 4px rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#7c3aed" }}
+          />
+        </label>
+      )}
       {/* Preview / Color Variants click */}
-      <div style={{ padding: "8px 8px 0", cursor: "pointer" }} onClick={isTShirt ? onAddColor : onPreview}>
+      <div style={{ padding: "8px 8px 0", cursor: "pointer" }} onClick={selectMode ? onToggleSelect : (isTShirt ? onAddColor : onPreview)}>
         <div style={{ position: "relative", background: previewSrc || design.frontOverlay ? "transparent" : (design.frontBgColor ?? "#ffffff"), borderRadius: isLabel ? (labelIsCircle ? "50%" : "8px") : "6px", overflow: "hidden", aspectRatio: isLabel ? (labelIsCircle ? "1/1" : labelAspect) : `${previewDims.CW}/${previewDims.CH}`, boxShadow: "0 2px 8px rgba(0,0,0,0.14)" }}>
           {/* Crop the outer background band (~16px on all sides in canvas coords) from BC
               thumbnails. clip-path inset percentages are relative to the element's own
               dimensions, so 5.93% top/bottom (=16/270) and 3.48% left/right (=16/460)
               removes exactly 16 canvas pixels from every edge, regardless of display size. */}
-          <div style={{ width: "100%", height: "100%", clipPath: (!isLabel && isBusinessCard) ? "inset(5.93% 3.48%)" : undefined }}>
+          <div style={{ width: "100%", height: "100%", clipPath: (!isLabel && isBusinessCard && !hasCustomDims) ? "inset(5.93% 3.48%)" : undefined }}>
             {previewSrc ? (
               <img src={previewSrc} alt={design.name} style={{ width: "100%", height: "100%", objectFit: "fill", display: "block" }} />
             ) : (

@@ -35,6 +35,16 @@ function readString(body: Record<string, unknown>, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function parseSubProducts(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> }
@@ -82,6 +92,8 @@ export async function PATCH(
         )
       : undefined;
 
+    const subProducts = parseSubProducts(body.subProducts);
+
     const product = updateProduct(slug, {
       slug: readString(body, "slug"),
       name,
@@ -91,6 +103,7 @@ export async function PATCH(
       startingPrice,
       colors,
       colorVariants,
+      subProducts,
       specs
     });
 

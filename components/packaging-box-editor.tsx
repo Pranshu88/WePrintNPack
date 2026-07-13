@@ -27,10 +27,9 @@ const NY5 = PAD + DWST + BD + BH + BD + DWST;
 
 // ─── Dust Flap geometry ───────────────────────────────────────────────────────
 const DUST_H  = BH;                      // Dust Flap (Top) height — same as Base
-const LID_H   = BD + DWST - 15;         // Back Side row height — same as Bot row
-const BOT_H   = BD + DWST - 15;         // Bottom row height
-const SUPER_H = LID_H;                  // Dust Flap Super Top height — same as Back Side
-const NY_DUST = NY0 + SUPER_H;          // Dust Flap top y
+const LID_H   = BD + DWST;              // Back Side row height — same as Bot row
+const BOT_H   = BD + DWST;              // Bottom row height
+const NY_DUST = NY0;                     // Dust Flap top y (at canvas top)
 const NY_LID  = NY_DUST + DUST_H;       // Back Side top y
 const NY_BASE = NY_LID + LID_H;         // Base row top y
 const NY_BOT  = NY_BASE + BH;           // Bottom row top y
@@ -38,7 +37,6 @@ const DIELINE_H_FULL = NY_BOT + BOT_H + PAD; // Total canvas height
 
 // ─── Faces ───────────────────────────────────────────────────────────────────
 type FaceId =
-  | "dust-flap-super-top" | "flap-super-top-left" | "flap-super-top-right"
   | "dust-flap-top" | "top-side-flap-left" | "top-side-flap-right"
   | "lid" | "lid-left" | "lid-right"
   | "side-left-flap" | "side-left" | "front" | "side-right" | "side-right-flap"
@@ -47,9 +45,6 @@ type FaceId =
 type FaceDef = { id: FaceId; label: string; x: number; y: number; w: number; h: number; small?: boolean; dashedLines?: boolean; clipBottomLeft?: boolean; clipBottomRight?: boolean; clipTopRight?: boolean; clipTopLeft?: boolean; roundTL?: boolean; roundTR?: boolean; verticalLabel?: boolean };
 
 const FACES_OUTSIDE: FaceDef[] = [
-  { id: "dust-flap-super-top",  label: "Dust Flap Super Top",      x: NX1,                       y: NY0, w: BW,             h: SUPER_H },
-  { id: "flap-super-top-left",  label: "Flap Super Top Left",      x: NX0 - 60 + (BD + 60) / 2, y: NY0, w: NX1 - (NX0 - 60 + (BD + 60) / 2), h: SUPER_H, small: true, roundTL: true },
-  { id: "flap-super-top-right", label: "Flap Super Top Right",     x: NX2,                       y: NY0, w: (BD + 60) / 2,                    h: SUPER_H, small: true, roundTR: true },
   { id: "dust-flap-top",        label: "Dust Flap (Top)",          x: NX1,          y: NY_DUST, w: BW,                                    h: DUST_H },
   { id: "top-side-flap-left",  label: "Top Side Flap (Left)",     x: NX0 - 60 + (BD + 60) / 2, y: NY_DUST, w: NX1 - (NX0 - 60 + (BD + 60) / 2), h: DUST_H, small: true, clipBottomLeft: true, clipTopRight: true },
   { id: "top-side-flap-right", label: "Top Side Flap (Right)",    x: NX2,          y: NY_DUST, w: (BD + 60) / 2,                          h: DUST_H, small: true, clipBottomRight: true, clipTopLeft: true },
@@ -62,8 +57,8 @@ const FACES_OUTSIDE: FaceDef[] = [
   { id: "side-right",      label: "Right Side Wall", x: NX2,      y: NY_BASE, w: BD, h: BH },
   { id: "side-right-flap", label: "Right Side Flap", x: NX2 + BD, y: NY_BASE, w: 60, h: BH },
   { id: "back",                 label: "Base Flap",      x: NX1,              y: NY_BOT, w: BW,     h: BOT_H },
-  { id: "bot-left",      label: "Bot Flap L",       x: NX0 - 20, y: NY_BOT,  w: BD + 20, h: BOT_H, small: true },
-  { id: "bot-right",     label: "Bot Flap R",       x: NX2,      y: NY_BOT,  w: BD + 20, h: BOT_H, small: true },
+  { id: "bot-left",      label: "Bottom Lock Flap Left",  x: NX0 - 20, y: NY_BOT,  w: BD + 20, h: BOT_H, small: true },
+  { id: "bot-right",     label: "Bottom Lock Flap Right", x: NX2,      y: NY_BOT,  w: BD + 20, h: BOT_H, small: true },
 ];
 
 const TOTAL_DIELINE_W = NX3 + PAD;
@@ -335,7 +330,6 @@ function defaultState(): EditorState {
 // Faces that fold 90° vertical in step 1 (0 → 14.28%)
 const FOLD_TOP_IDS = new Set([
   "lid-left", "lid", "lid-right",
-  "flap-super-top-left", "dust-flap-super-top", "flap-super-top-right",
   "top-side-flap-left", "dust-flap-top", "top-side-flap-right",
 ]);
 const FOLD_BOT_IDS = new Set(["bot-left", "back", "bot-right"]);
@@ -452,19 +446,17 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
   const sp = 1 - aT;
   const lT = Math.max(0, Math.min((t - 0.35) / 0.65, 1));
   const lidAngle = -110 * aT * (1 - lT);
-  const step1T    = Math.min(t * 7, 1);
+  const step1T    = Math.min(t * 6, 1);
   const foldAngle  = 90 * step1T;
-  const step2T    = Math.min(Math.max(0, (t - 1 / 7) * 7), 1);
+  const step2T    = Math.min(Math.max(0, (t - 1 / 6) * 6), 1);
   const foldAngle2 = 90 * step2T;
-  const step3T    = Math.min(Math.max(0, (t - 2 / 7) * 7), 1);
+  const step3T    = Math.min(Math.max(0, (t - 2 / 6) * 6), 1);
   const foldAngle3 = 90 * step3T;
-  const step4T    = Math.min(Math.max(0, (t - 3 / 7) * 7), 1);
+  const step4T    = Math.min(Math.max(0, (t - 3 / 6) * 6), 1);
   const foldAngle4 = 180 * step4T;
-  const step5T    = Math.min(Math.max(0, (t - 4 / 7) * 7), 1);
+  const step5T    = Math.min(Math.max(0, (t - 4 / 6) * 6), 1);
   const foldAngle5 = 90 * step5T;
-  const step6T    = Math.min(Math.max(0, (t - 5 / 7) * 7), 1);
-  const foldAngle6 = 90 * step6T;
-  const step7T    = Math.min(Math.max(0, (t - 6 / 7) * 7), 1);
+  const step7T    = Math.min(Math.max(0, (t - 5 / 6) * 6), 1);
   const foldAngle7 = 90 * step7T;
 
   const bw = BW * ps, bh = BH * ps, bd = BD * ps;
@@ -483,11 +475,11 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
   const mIn  = (id: string) => [...(insideItems[id] ?? []),  ...(inProjected[id] ?? [])];
 
   return (
-    <div style={{ width: "100%", height: 620, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700, perspectiveOrigin: "50% 30%", overflow: "hidden" }}>
+    <div style={{ width: "100%", height: 620, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700, perspectiveOrigin: "50% 30%", overflow: "visible" }}>
       <div style={{ position: "relative", width: cW, height: cH, transformStyle: "preserve-3d", transform: `rotateX(${rotX}deg) rotateY(${rotY}deg)` }}>
 
         {/* ── Flat dieline: double-sided — outside on front, inside on back ── */}
-        {FACES_OUTSIDE.filter(f => !FOLD_ALL_IDS.has(f.id) && f.id !== "side-left" && f.id !== "side-left-flap" && f.id !== "side-right" && f.id !== "side-right-flap").map(face => (
+        {FACES_OUTSIDE.filter(f => !FOLD_ALL_IDS.has(f.id) && f.id !== "side-left" && f.id !== "side-right").map(face => (
           <Fragment key={face.id + "-flat"}>
             <div style={{
               ...ff,
@@ -527,7 +519,7 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
 
         {/* ── Top fold group: 9 faces, pivot at NY_BASE ── */}
         <div style={{ position: "absolute", left: 0, top: NY_BASE * ps, width: cW, height: 1, opacity: sp, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle}deg)` }}>
-          {FACES_OUTSIDE.filter(f => FOLD_TOP_IDS.has(f.id) && !((f.id === "flap-super-top-right" || f.id === "top-side-flap-right" || f.id === "flap-super-top-left" || f.id === "top-side-flap-left") && step5T > 0) && !(f.id === "dust-flap-super-top" && step6T > 0) && !(f.id === "dust-flap-top" && step7T > 0)).map(face => {
+          {FACES_OUTSIDE.filter(f => FOLD_TOP_IDS.has(f.id) && !((f.id === "top-side-flap-right" || f.id === "top-side-flap-left") && step5T > 0) && !(f.id === "dust-flap-top" && step7T > 0)).map(face => {
             const isSF = face.id === "lid-left" || face.id === "lid-right";
             const isL  = face.id === "lid-left";
             const fL   = isSF ? (isL ? -face.w * ps : 0) : face.x * ps;
@@ -575,8 +567,8 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
 
         {/* ── Step 5: right + left top flaps fold inward ── */}
         {step5T > 0 && (() => {
-          const s5R = [...(step6T === 0 ? ["flap-super-top-right"] : []), ...(step7T === 0 ? ["top-side-flap-right"] : [])].map(id => FACES_OUTSIDE.find(f => f.id === id)!);
-          const s5L = [...(step6T === 0 ? ["flap-super-top-left"] : []), ...(step7T === 0 ? ["top-side-flap-left"] : [])].map(id => FACES_OUTSIDE.find(f => f.id === id)!);
+          const s5R = (step7T === 0 ? ["top-side-flap-right"] : []).map(id => FACES_OUTSIDE.find(f => f.id === id)!);
+          const s5L = (step7T === 0 ? ["top-side-flap-left"] : []).map(id => FACES_OUTSIDE.find(f => f.id === id)!);
           const renderS5Face = (face: typeof FACES_OUTSIDE[0], pivotX: number, angle: number) => (
             <div key={face.id + "-s5"} style={{ position: "absolute", left: pivotX * ps, top: (face.y - NY_BASE) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${angle}deg)` }}>
               <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: getFaceClipPath(face, ps) }}>
@@ -593,44 +585,6 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
             <div style={{ position: "absolute", left: 0, top: NY_BASE * ps, width: cW, height: 1, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle}deg)`, pointerEvents: "none" }}>
               {s5R.map(face => renderS5Face(face, NX2, foldAngle5))}
               {s5L.map(face => renderS5Face(face, NX1, -foldAngle5))}
-            </div>
-          );
-        })()}
-
-        {/* ── Step 6: dust-flap-super-top + sides fold down around NY_DUST ── */}
-        {step6T > 0 && step7T === 0 && (() => {
-          const renderS6Sideface = (face: typeof FACES_OUTSIDE[0], pivotX: number, yAngle: number) => (
-            <div key={face.id + "-s6y"} style={{ position: "absolute", left: pivotX * ps, top: (face.y - NY_DUST) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${yAngle}deg)` }}>
-              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: getFaceClipPath(face, ps) }}>
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                {mOut(face.id).map(item => renderPreviewItem(item, ps))}
-              </div>
-              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: getFaceClipPath(face, ps, true) }}>
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                {mIn(face.id).map(item => renderPreviewItem(item, ps))}
-              </div>
-            </div>
-          );
-          const faceDFST = FACES_OUTSIDE.find(f => f.id === "dust-flap-super-top")!;
-          const faceFSTL = FACES_OUTSIDE.find(f => f.id === "flap-super-top-left")!;
-          const faceTSFR = FACES_OUTSIDE.find(f => f.id === "top-side-flap-right")!;
-          return (
-            <div style={{ position: "absolute", left: 0, top: NY_BASE * ps, width: cW, height: 1, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle}deg)`, pointerEvents: "none" }}>
-              <div style={{ position: "absolute", left: 0, top: (NY_DUST - NY_BASE) * ps, width: cW, height: 1, transformStyle: "preserve-3d", transformOrigin: "top center", transform: `rotateX(${foldAngle6}deg)` }}>
-                {/* dust-flap-super-top */}
-                <div style={{ position: "absolute", left: faceDFST.x * ps, top: (faceDFST.y - NY_DUST) * ps, width: faceDFST.w * ps, height: faceDFST.h * ps, background: fc["dust-flap-super-top"] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                  <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{faceDFST.label}</span>
-                  {mOut("dust-flap-super-top").map(item => renderPreviewItem(item, ps))}
-                </div>
-                <div style={{ position: "absolute", left: faceDFST.x * ps, top: (faceDFST.y - NY_DUST) * ps, width: faceDFST.w * ps, height: faceDFST.h * ps, background: insideFaceColors["dust-flap-super-top"] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
-                  <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{faceDFST.label}</span>
-                  {mIn("dust-flap-super-top").map(item => renderPreviewItem(item, ps))}
-                </div>
-                {/* flap-super-top-left frozen at step5 -90° */}
-                {renderS6Sideface(faceFSTL, NX1, -90)}
-                {/* flap-super-top-right frozen at step5 +90° */}
-                {renderS6Sideface(FACES_OUTSIDE.find(f => f.id === "flap-super-top-right")!, NX2, 90)}
-              </div>
             </div>
           );
         })()}
@@ -653,9 +607,6 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
             </div>
           );
           const faceDFT  = FACES_OUTSIDE.find(f=>f.id==="dust-flap-top")!;
-          const faceDFST = FACES_OUTSIDE.find(f=>f.id==="dust-flap-super-top")!;
-          const faceFSTL = FACES_OUTSIDE.find(f=>f.id==="flap-super-top-left")!;
-          const faceFSTR = FACES_OUTSIDE.find(f=>f.id==="flap-super-top-right")!;
           const faceTSFL = FACES_OUTSIDE.find(f=>f.id==="top-side-flap-left")!;
           const faceTSFR = FACES_OUTSIDE.find(f=>f.id==="top-side-flap-right")!;
           const dFromLid = (NY_DUST - NY_LID) * ps;
@@ -664,12 +615,6 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
               <div style={{ position:"absolute", left:0, top:(NY_LID-NY_BASE)*ps, width:cW, height:1, transformStyle:"preserve-3d", transformOrigin:"top center", transform:`rotateX(${foldAngle7}deg)` }}>
                 {/* dust-flap-top */}
                 {renderFace(faceDFT, faceDFT.x*ps, dFromLid)}
-                {/* step-6 sub-group: rotateX(90°) frozen */}
-                <div style={{ position:"absolute", left:0, top:dFromLid, width:cW, height:1, transformStyle:"preserve-3d", transformOrigin:"top center", transform:"rotateX(90deg)" }}>
-                  {renderFace(faceDFST, faceDFST.x*ps, (faceDFST.y-NY_DUST)*ps)}
-                  {renderSideY(faceFSTL, NX1, -90, (faceFSTL.y-NY_DUST)*ps)}
-                  {renderSideY(faceFSTR, NX2,  90, (faceFSTR.y-NY_DUST)*ps)}
-                </div>
                 {/* top-side-flap-left frozen at -90° */}
                 {renderSideY(faceTSFL, NX1, -90, dFromLid)}
                 {/* top-side-flap-right frozen at +90° */}
@@ -779,6 +724,7 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
             </div>
           );
         })()}
+
 
         {/* ── Assembled box faces ── */}
 
@@ -976,8 +922,7 @@ export default function PackagingBoxEditor({ product, onClose }: Props) {
   const regMirrorMax = faces.reduce((m, f) => Math.max(m, f.x + f.w), -Infinity);
   const regMirrorTotal = regMirrorMin + regMirrorMax;
   const _dfSwaps: Partial<Record<FaceId, FaceId>> = {
-    "flap-super-top-left": "flap-super-top-right", "flap-super-top-right": "flap-super-top-left",
-    "top-side-flap-left": "top-side-flap-right",   "top-side-flap-right": "top-side-flap-left",
+    "top-side-flap-left": "top-side-flap-right", "top-side-flap-right": "top-side-flap-left",
   };
   const dielineFaces = faces.map(f => {
     const swapId = _dfSwaps[f.id];
@@ -1373,7 +1318,7 @@ export default function PackagingBoxEditor({ product, onClose }: Props) {
                 const x0=LX0*z, x1=LX1*z, x2=LX2*z, x3=LX3*z, x4=LX4*z, x5=LX5*z;
                 const yt=LY_TOP*z, y2=LY2*z, y3=LY3*z, y4=LY4*z;
                 const cr = s(COR);
-                const W = TOTAL_DIELINE_W * z, H = TOTAL_DIELINE_H * z;
+                const W = TOTAL_DIELINE_W * z, H = DIELINE_H_FULL * z;
 
                 // Wing geometry
                 const ch    = s(16);   // chamfer size at wing outer corners
@@ -1446,6 +1391,8 @@ export default function PackagingBoxEditor({ product, onClose }: Props) {
                   // Bottom flap outer side folds
                   `M ${x1},${y3} L ${x1},${y4 - br}`,
                   `M ${x4},${y3} L ${x4},${y4 - br}`,
+                  // Right Side Wall bottom separator — connects to Bottom Lock Flap Right edges
+                  `M ${x3},${NY_BOT * z} L ${x5 + s(20)},${NY_BOT * z}`,
                   // Bottom flap inner dividers (4 equal sections)
                   `M ${x1 + (x4 - x1) / 4},${y3} L ${x1 + (x4 - x1) / 4},${y4}`,
                   `M ${x1 + (x4 - x1) / 2},${y3} L ${x1 + (x4 - x1) / 2},${y4}`,
@@ -1497,6 +1444,7 @@ export default function PackagingBoxEditor({ product, onClose }: Props) {
                   />
                 );
               })}
+
 
               {/* Locking tabs on side-left-flap (mirrored: protrude RIGHT from right edge) */}
               {(() => {

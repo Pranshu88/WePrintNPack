@@ -88,6 +88,36 @@ const BC_PACKAGE_DATA: Record<string, { dbKey: string; title: string; price: str
   },
 };
 
+// Gallery template specs are stored as "Label: value" strings (set via the admin
+// Add/Edit Gallery Template modal's Size/Color/Paper Type/Finishing/Quantities fields).
+// These four are always shown on every product page — regardless of what the gallery
+// template or the static product data has — so the spec block stays consistent
+// across templates. Missing values show as "—" instead of being hidden.
+const DISPLAY_SPEC_KEYS = ["Size", "Color", "Paper Type", "Finishing"];
+
+function parseGallerySpecs(specs: string[] | undefined): { label: string; value: string }[] {
+  const byLabel = new Map<string, string>();
+  (specs ?? []).forEach((s) => {
+    const idx = s.indexOf(":");
+    if (idx === -1) return;
+    byLabel.set(s.slice(0, idx).trim(), s.slice(idx + 1).trim());
+  });
+
+  return DISPLAY_SPEC_KEYS.map((label) => ({ label, value: byLabel.get(label) ?? "" }));
+}
+
+// Only the hex codes from the gallery's Color spec are usable as swatch values in the
+// design editor — non-hex tokens like "All Color" are display-only labels, not colors.
+function parseMaterialColors(specs: string[] | undefined): string[] {
+  const colorSpec = (specs ?? []).find((s) => s.slice(0, s.indexOf(":")).trim() === "Color");
+  if (!colorSpec) return [];
+  return colorSpec
+    .slice(colorSpec.indexOf(":") + 1)
+    .split(",")
+    .map((c) => c.trim())
+    .filter((c) => /^#[0-9a-f]{3,8}$/i.test(c));
+}
+
 function openBcDB(): Promise<IDBDatabase> {
   return new Promise((res, rej) => {
     const req = indexedDB.open("bc-packages-db", 1);
@@ -227,12 +257,14 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   // When a BC package gallery is selected, override static product data with package-specific data
   const bcData = gallery ? BC_PACKAGE_DATA[gallery.name] ?? null : null;
   const galleryPrice = gallery ? GALLERY_PRICE_MAP[gallery.name] ?? null : null;
+  const adminPrice = gallery?.price ? gallery.price.replace(/\s*\+\s*tax/i, "").trim() : null;
   const displayTitle = bcData?.title ?? (gallery?.name && !bcData ? gallery.name : null) ?? productNameOverride ?? product.name;
-  const displayPrice = bcData?.price ?? galleryPrice?.price ?? product.startingPrice;
-  const displayPriceNote = bcData?.priceNote ?? galleryPrice?.priceNote ?? "per set · No setup fee";
+  const displayPrice = bcData?.price ?? galleryPrice?.price ?? adminPrice ?? product.startingPrice;
+  const displayPriceNote = bcData?.priceNote ?? galleryPrice?.priceNote ?? (adminPrice ? "+ tax · per set" : "per set · No setup fee");
   const displayPriceNum = parseFloat(displayPrice.replace(/[^0-9.]/g, "")) || undefined;
-  const displaySpecs = bcData?.specs ?? product.specs;
+  const displaySpecs = parseGallerySpecs(gallery?.specs);
   const displayImage = bcImage || gallery?.previewImage || product.image || gallery?.designs[0]?.frontImage;
+  const materialColors = parseMaterialColors(gallery?.specs);
 
   const editorProductType = ((): React.ComponentProps<typeof DesignEditorShell>["productType"] => {
     const gn = gallery?.name ?? "";
@@ -274,6 +306,7 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
         templateId={selectedDesignId}
         productName={displayTitle}
         pricePerUnit={displayPriceNum}
+        materialColors={materialColors.length > 0 ? materialColors : undefined}
         onClose={() => setEditorOpen(false)}
       />
     );
@@ -364,7 +397,26 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
                 {displaySpecs.map((s) => (
                   <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.875rem" }}>
                     <span style={{ color: "#9ca3af" }}>{s.label}</span>
-                    <span style={{ color: "#111827", fontWeight: 700 }}>{s.value}</span>
+                    {s.label === "Color" && s.value ? (
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {s.value.split(",").map((c) => c.trim()).filter(Boolean).map((color) => (
+                          <span
+                            key={color}
+                            title={color}
+                            style={{
+                              width: "18px", height: "18px", borderRadius: "50%",
+                              background: color.startsWith("#") ? color : undefined,
+                              border: "1.5px solid #d1d5db", flexShrink: 0,
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            }}
+                          >
+                            {!color.startsWith("#") && <span style={{ fontSize: "0.5rem", fontWeight: 700, color: "#374151" }}>{color.slice(0, 2).toUpperCase()}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: s.value ? "#111827" : "#d1d5db", fontWeight: 700 }}>{s.value || "—"}</span>
+                    )}
                   </div>
                 ))}
               </div>

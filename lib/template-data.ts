@@ -61,6 +61,7 @@ export type GalleryTemplate = {
   createdAt: string;
   price?: string;
   specs?: string[];
+  visible: boolean;
 };
 
 export type PaginatedTemplates = {
@@ -73,7 +74,7 @@ export type PaginatedTemplates = {
 
 // ─── Internal row shapes ──────────────────────────────────────────────────────
 
-type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null };
+type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null; visible?: number | null };
 type DesignRow = { id: string; gallery_id: string; name: string; color_hex: string | null; color_name: string | null; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; front_bg_color: string | null; back_bg_color: string | null; created_at: string };
 type ColorRow  = { id: string; design_id: string; color_hex: string; color_name: string; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; created_at: string };
 
@@ -85,7 +86,7 @@ function s(v: unknown): string | null { return v == null ? null : String(v); }
 function n(v: unknown): number { return Number(v) || 0; }
 
 function toGtRow(r: Row): GtRow {
-  return { id: s(r.id)!, product_slug: s(r.product_slug)!, name: s(r.name)!, preview_image: s(r.preview_image)!, created_at: s(r.created_at)!, price: s(r.price), specs_json: s(r.specs_json) };
+  return { id: s(r.id)!, product_slug: s(r.product_slug)!, name: s(r.name)!, preview_image: s(r.preview_image)!, created_at: s(r.created_at)!, price: s(r.price), specs_json: s(r.specs_json), visible: r.visible == null ? 1 : n(r.visible) };
 }
 
 function toDesignRow(r: Row): DesignRow {
@@ -135,7 +136,7 @@ function assembleTemplates(rows: GtRow[], allDesigns: DesignRow[], allColors: Co
   for (const d of allDesigns) { const arr = designsByGallery.get(d.gallery_id) ?? []; arr.push(d); designsByGallery.set(d.gallery_id, arr); }
   return rows.map((r) => {
     const designs = (designsByGallery.get(r.id) ?? []).map((d) => rowToDesign(d, colorsByDesign.get(d.id) ?? []));
-    const t: GalleryTemplate = { id: r.id, productSlug: r.product_slug, name: r.name, previewImage: r.preview_image, createdAt: r.created_at, designs };
+    const t: GalleryTemplate = { id: r.id, productSlug: r.product_slug, name: r.name, previewImage: r.preview_image, createdAt: r.created_at, designs, visible: r.visible !== 0 };
     if (r.price) t.price = r.price;
     if (r.specs_json) { try { t.specs = JSON.parse(r.specs_json) as string[]; } catch { /* ignore */ } }
     return t;
@@ -155,20 +156,24 @@ async function fetchDesignsAndColors(client: Client, galleryIds: string[]): Prom
 
 // ─── Public API (all async) ───────────────────────────────────────────────────
 
-export async function getGalleryTemplates(productSlug: string): Promise<GalleryTemplate[]> {
+export async function getGalleryTemplates(productSlug: string, includeHidden = false): Promise<GalleryTemplate[]> {
   const db = await getDb();
-  const rows = (await db.execute({ sql: "SELECT * FROM gallery_templates WHERE product_slug = ? ORDER BY created_at DESC", args: [productSlug] })).rows.map(toGtRow);
+  const sql = includeHidden
+    ? "SELECT * FROM gallery_templates WHERE product_slug = ? ORDER BY created_at DESC"
+    : "SELECT * FROM gallery_templates WHERE product_slug = ? AND visible != 0 ORDER BY created_at DESC";
+  const rows = (await db.execute({ sql, args: [productSlug] })).rows.map(toGtRow);
   if (rows.length === 0) return [];
   const { designs, colors } = await fetchDesignsAndColors(db, rows.map((r) => r.id));
   return assembleTemplates(rows, designs, colors);
 }
 
-export async function getGalleryTemplatesPaginated(productSlug: string, page: number, limit: number): Promise<PaginatedTemplates> {
+export async function getGalleryTemplatesPaginated(productSlug: string, page: number, limit: number, includeHidden = false): Promise<PaginatedTemplates> {
   const db = await getDb();
   const offset = (page - 1) * limit;
-  const cntRes = await db.execute({ sql: "SELECT COUNT(*) as cnt FROM gallery_templates WHERE product_slug = ?", args: [productSlug] });
+  const visibleClause = includeHidden ? "" : " AND visible != 0";
+  const cntRes = await db.execute({ sql: `SELECT COUNT(*) as cnt FROM gallery_templates WHERE product_slug = ?${visibleClause}`, args: [productSlug] });
   const cnt = n(cntRes.rows[0]?.cnt);
-  const rows = (await db.execute({ sql: "SELECT * FROM gallery_templates WHERE product_slug = ? ORDER BY created_at DESC LIMIT ? OFFSET ?", args: [productSlug, limit, offset] })).rows.map(toGtRow);
+  const rows = (await db.execute({ sql: `SELECT * FROM gallery_templates WHERE product_slug = ?${visibleClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`, args: [productSlug, limit, offset] })).rows.map(toGtRow);
   const totalPages = Math.max(1, Math.ceil(cnt / limit));
   if (rows.length === 0) return { templates: [], total: cnt, page, totalPages, limit };
   const { designs, colors } = await fetchDesignsAndColors(db, rows.map((r) => r.id));
@@ -188,15 +193,16 @@ export async function createGalleryTemplate(productSlug: string, name: string, p
   const db = await getDb();
   const id = uid(), createdAt = new Date().toISOString();
   await db.execute({ sql: "INSERT INTO gallery_templates (id, product_slug, name, preview_image, created_at) VALUES (?, ?, ?, ?, ?)", args: [id, productSlug, name.trim(), previewImage, createdAt] });
-  return { id, productSlug, name: name.trim(), previewImage, designs: [], createdAt };
+  return { id, productSlug, name: name.trim(), previewImage, designs: [], createdAt, visible: true };
 }
 
-export async function updateGalleryTemplate(id: string, updates: { name?: string; previewImage?: string; price?: string; specs?: string[] }): Promise<GalleryTemplate | undefined> {
+export async function updateGalleryTemplate(id: string, updates: { name?: string; previewImage?: string; price?: string; specs?: string[]; visible?: boolean }): Promise<GalleryTemplate | undefined> {
   const db = await getDb();
   if (updates.name !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET name = ? WHERE id = ?", args: [updates.name.trim(), id] });
   if (updates.previewImage !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET preview_image = ? WHERE id = ?", args: [updates.previewImage, id] });
   if (updates.price !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET price = ? WHERE id = ?", args: [updates.price, id] });
   if (updates.specs !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET specs_json = ? WHERE id = ?", args: [JSON.stringify(updates.specs), id] });
+  if (updates.visible !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET visible = ? WHERE id = ?", args: [updates.visible ? 1 : 0, id] });
   return getGalleryTemplate(id);
 }
 

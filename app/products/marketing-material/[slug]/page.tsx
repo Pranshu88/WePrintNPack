@@ -1,15 +1,9 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import { getGalleryTemplate } from "@/lib/template-data";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
 export const dynamic = "force-dynamic";
-
-const SUB_NAMES: Record<string, string> = {
-  "posters":       "Posters",
-  "vinyl-banners": "Banners",
-  "yard-signs":    "Yard Signs",
-};
 
 export default async function MarketingMaterialOrderPage({
   params,
@@ -20,11 +14,12 @@ export default async function MarketingMaterialOrderPage({
 }) {
   const { slug } = await params;
   const { gallery } = await searchParams;
-  const name = SUB_NAMES[slug];
-  if (!name) notFound();
 
   const parent = getProductBySlug("marketing-material");
   if (!parent) notFound();
+
+  const name = CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"].find((n) => subProductSlug(n) === slug);
+  if (!name) notFound();
 
   // Use gallery name if available, otherwise fall back to SUB_NAMES
   const galleryName = gallery ? (await getGalleryTemplate(gallery))?.name : undefined;

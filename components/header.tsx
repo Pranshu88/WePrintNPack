@@ -28,15 +28,11 @@ export function Header() {
           <Image
             src="/images/applogo.jpeg"
             alt="We Print N Pack"
-            width={52}
+            width={180}
             height={52}
             className={styles.brandImg}
             priority
           />
-          <div className={styles.brandText}>
-            <strong>WE PRINT N PACK</strong>
-            <span>PRINT. DESIGN. PACK. DELIVER.</span>
-          </div>
         </Link>
 
         {/* ── Nav ──────────────────────────────────────── */}

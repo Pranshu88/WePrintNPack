@@ -32,6 +32,16 @@ function readString(body: Record<string, unknown>, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function parseSubProducts(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get("category") || undefined;
@@ -51,6 +61,7 @@ export async function POST(request: Request) {
     const startingPrice = readString(body, "startingPrice");
     const slug = readString(body, "slug");
     const specs = parseSpecs(body.specs);
+    const subProducts = parseSubProducts(body.subProducts);
 
     if (!name || !category || !image || !description || !startingPrice || specs.length === 0) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
@@ -63,6 +74,7 @@ export async function POST(request: Request) {
       image,
       description,
       startingPrice,
+      subProducts,
       specs
     });
 

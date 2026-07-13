@@ -17,6 +17,7 @@ type ProductFormState = {
   description: string;
   startingPrice: string;
   specs: string;
+  subProducts: string[];
 };
 
 const emptyForm = (category = categories[0]?.slug ?? ""): ProductFormState => ({
@@ -28,6 +29,7 @@ const emptyForm = (category = categories[0]?.slug ?? ""): ProductFormState => ({
   description: "",
   startingPrice: "",
   specs: "",
+  subProducts: [],
 });
 
 function specsToText(specs: Product["specs"]) {
@@ -192,6 +194,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
       description: product.description,
       startingPrice: product.startingPrice,
       specs: specsToText(product.specs),
+      subProducts: product.subProducts ?? [],
     });
     setMessage("");
     setError("");
@@ -202,6 +205,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     setSaving(true);
     setError("");
     setMessage("");
+    const parsedSpecs = parseSpecsText(form.specs);
     const payload = {
       slug: form.slug.trim(),
       name: form.name.trim(),
@@ -209,7 +213,8 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
       image: form.image.trim(),
       description: form.description.trim(),
       startingPrice: form.startingPrice.trim(),
-      specs: parseSpecsText(form.specs),
+      subProducts: form.subProducts,
+      specs: parsedSpecs.length > 0 ? parsedSpecs : [{ label: "Details", value: form.description.trim() }],
     };
     try {
       const response = await fetch(
@@ -237,6 +242,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
 
   const visibleProducts = products.filter((p) => LISTING_ALLOWED_CATEGORIES.has(p.category) && !LISTING_EXCLUDED_SLUGS.has(p.slug));
   const deduplicatedProducts = visibleProducts.reduce<Product[]>((acc, p) => {
+    if (p.category === "flyers") return acc;
     if (p.category === "t-shirts") {
       if (!acc.some((x) => x.category === "t-shirts")) acc.push({ ...p, name: "T-Shirts" });
     } else {
@@ -249,16 +255,6 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
   const latestUpdatedAt = products
     .map((p) => p.updatedAt || p.createdAt || "")
     .filter(Boolean).sort().at(-1);
-
-  const statusList = ["Active", "Active", "Low Stock", "Active", "Draft"] as const;
-  const statusColors: Record<string, { dot: string; text: string; bg: string }> = {
-    "Active":    { dot: "#22c55e", text: "#15803d", bg: "#f0fdf4" },
-    "Low Stock": { dot: "#f97316", text: "#c2410c", bg: "#fff7ed" },
-    "Draft":     { dot: "#9ca3af", text: "#6b7280", bg: "#f9fafb" },
-  };
-  function getStatus(index: number) {
-    return statusList[index % statusList.length];
-  }
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   const S = {
@@ -308,9 +304,9 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     chartsRow: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 28 } as React.CSSProperties,
     panel: { background: "#fff", borderRadius: 16, padding: "22px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" } as React.CSSProperties,
     panelTitle: { fontSize: "1rem", fontWeight: 700, color: "#111827", margin: 0 } as React.CSSProperties,
-    tableHead: { display: "grid", gridTemplateColumns: "2fr 0.8fr 0.9fr 1fr 0.9fr", padding: "10px 16px", background: "#f8f9fc", borderRadius: 10, marginBottom: 4 } as React.CSSProperties,
+    tableHead: { display: "grid", gridTemplateColumns: "1.6fr 0.9fr 0.9fr", padding: "10px 16px", background: "#f8f9fc", borderRadius: 10, marginBottom: 4 } as React.CSSProperties,
     tableHeadCell: { fontSize: "0.7rem", fontWeight: 700, color: "#6b7280", textTransform: "uppercase" as const, letterSpacing: "0.06em" },
-    tableRow: { display: "grid", gridTemplateColumns: "2fr 0.8fr 0.9fr 1fr 0.9fr", padding: "12px 16px", alignItems: "center", borderBottom: "1px solid #f9fafb" } as React.CSSProperties,
+    tableRow: { display: "grid", gridTemplateColumns: "1.6fr 0.9fr 0.9fr", padding: "12px 16px", alignItems: "center", borderBottom: "1px solid #f9fafb" } as React.CSSProperties,
     productThumb: { width: 40, height: 40, borderRadius: 8, objectFit: "cover" as const, background: "#f3f4f6", flexShrink: 0 } as React.CSSProperties,
     editBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "1.5px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, color: "#374151" } as React.CSSProperties,
     btnPrimary: { display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", border: "none", borderRadius: 10, background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" } as React.CSSProperties,
@@ -477,8 +473,6 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
             {/* Table header */}
             <div style={S.tableHead}>
               <span style={S.tableHeadCell}>Product</span>
-              <span style={S.tableHeadCell}>Price</span>
-              <span style={S.tableHeadCell}>Status</span>
               <span style={S.tableHeadCell}>Updated</span>
               <span style={S.tableHeadCell}>Actions</span>
             </div>
@@ -493,9 +487,6 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
               )}
               {groupedProducts.flatMap((group) =>
                 group.products.map((product, idx) => {
-                  const globalIdx = products.findIndex((p) => p.slug === product.slug);
-                  const statusLabel = getStatus(globalIdx);
-                  const sc = statusColors[statusLabel];
                   return (
                     <div key={product.slug} style={{ ...S.tableRow, background: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
                       {/* Product */}
@@ -509,13 +500,6 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
                           <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#111827" }}>{product.name}</div>
                           <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>{product.slug}</div>
                         </div>
-                      </div>
-                      {/* Price */}
-                      <span style={{ fontSize: "0.875rem", fontWeight: 700, color: "#111827" }}>{product.startingPrice}</span>
-                      {/* Status */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: sc?.dot ?? "#9ca3af", display: "inline-block" }} />
-                        <span style={{ fontSize: "0.82rem", fontWeight: 600, color: sc?.text ?? "#6b7280" }}>{statusLabel}</span>
                       </div>
                       {/* Updated */}
                       <span style={{ fontSize: "0.82rem", color: "#6b7280" }}>{formatDate(product.updatedAt || product.createdAt)}</span>
@@ -698,19 +682,6 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
                   value={form.description}
                   onChange={(e) => setForm((c) => ({ ...c, description: e.target.value }))}
                   placeholder="Product description…"
-                  style={{ padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.875rem", resize: "vertical", outline: "none" }}
-                />
-              </label>
-
-              {/* Specs */}
-              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#374151" }}>Specs</span>
-                <textarea
-                  required
-                  rows={5}
-                  value={form.specs}
-                  onChange={(e) => setForm((c) => ({ ...c, specs: e.target.value }))}
-                  placeholder="Board: E-flute corrugated"
                   style={{ padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.875rem", resize: "vertical", outline: "none" }}
                 />
               </label>

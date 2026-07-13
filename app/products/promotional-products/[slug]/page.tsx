@@ -1,12 +1,8 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
 export const dynamic = "force-dynamic";
-
-const SUB_NAMES: Record<string, string> = {
-  "stickers-and-labels": "Stickers & Labels",
-};
 
 export default async function PromotionalProductsOrderPage({
   params,
@@ -17,11 +13,12 @@ export default async function PromotionalProductsOrderPage({
 }) {
   const { slug } = await params;
   const { gallery } = await searchParams;
-  const name = SUB_NAMES[slug];
-  if (!name) notFound();
 
   const parent = getProductBySlug("promotional-products");
   if (!parent) notFound();
+
+  const name = CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"].find((n) => subProductSlug(n) === slug);
+  if (!name) notFound();
 
   const product = { ...parent, slug };
 

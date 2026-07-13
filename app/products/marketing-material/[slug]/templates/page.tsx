@@ -1,13 +1,8 @@
 import { notFound } from "next/navigation";
+import { getProductBySlug, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import GalleryTemplatePage from "@/components/gallery-templates-page";
 
 export const dynamic = "force-dynamic";
-
-const SUB_NAMES: Record<string, string> = {
-  "posters":       "Posters",
-  "vinyl-banners": "Banners",
-  "yard-signs":    "Yard Signs",
-};
 
 export default async function MarketingMaterialTemplatesPage({
   params,
@@ -15,7 +10,11 @@ export default async function MarketingMaterialTemplatesPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const name = SUB_NAMES[slug];
+
+  const parent = getProductBySlug("marketing-material");
+  if (!parent) notFound();
+
+  const name = CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"].find((n) => subProductSlug(n) === slug);
   if (!name) notFound();
 
   return (

@@ -7,7 +7,28 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/products/dress-shirts/mens-embroidered-dress-shirts)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/products/dress-shirts/cambridge-dress-shirts)",
       "Bash(curl -s http://localhost:3000/products/dress-shirts)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(sqlite3 \"/Users/apple/Documents/WebPrint/data/webprint.db\" \"SELECT product_slug, id, name FROM gallery_templates ORDER BY product_slug;\")",
+      "Bash(sqlite3 \"/Users/apple/Documents/WebPrint/data/webprint.db\" \"SELECT DISTINCT product_slug FROM gallery_templates;\")",
+      "Bash(sqlite3 /Users/apple/Documents/WebPrint/data/webprint.db \"SELECT product_slug, id, name, preview_image FROM gallery_templates WHERE product_slug LIKE '%shirt%' OR product_slug LIKE '%tshirt%' ORDER BY product_slug;\")",
+      "Bash(node scripts/seed-labels-new-designs.mjs)",
+      "Bash(sqlite3 webprint.db \"SELECT gt.name, COUNT\\(d.id\\) as design_count FROM gallery_templates gt LEFT JOIN designs d ON d.gallery_id = gt.id WHERE gt.name LIKE '%Roll%' GROUP BY gt.id, gt.name ORDER BY gt.name;\")",
+      "Bash(sqlite3 /Users/apple/Documents/WebPrint/data/webprint.db \"SELECT gt.name, COUNT\\(d.id\\) as design_count FROM gallery_templates gt LEFT JOIN designs d ON d.gallery_id = gt.id WHERE gt.name LIKE '%Roll%' GROUP BY gt.id, gt.name ORDER BY gt.name;\")",
+      "Bash(sqlite3 /Users/apple/Documents/WebPrint/data/webprint.db \"SELECT d.name FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.name = 'Premium Roll-Up Banner' ORDER BY d.created_at;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT d.created_at, gt.created_at as gallery_created FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.id = 'bn0084mpmc48nb' LIMIT 3;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT d.name, d.created_at, gt.name as gallery_name, gt.created_at as gallery_created FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.product_slug = 'vinyl-banners' AND gt.name IN \\('Standard Roll-Up Banner', 'Vinyl Banner'\\) ORDER BY gt.name, d.created_at LIMIT 15;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT COUNT\\(*\\), MIN\\(d.created_at\\), MAX\\(d.created_at\\), gt.name FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.product_slug = 'vinyl-banners' GROUP BY gt.name;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT COUNT\\(*\\), MIN\\(d.created_at\\) FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.id = 'bn0001mpmc48n5';\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT gt.name, gt.created_at as gallery_created, COUNT\\(d.id\\) as design_count FROM gallery_templates gt LEFT JOIN designs d ON d.gallery_id = gt.id WHERE gt.product_slug = 'vinyl-banners' GROUP BY gt.id ORDER BY gt.created_at;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT d.name, d.created_at FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.id = 'bn0001mpmc48n5' ORDER BY d.created_at;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT name FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.product_slug = 'bold-flyers' LIMIT 5;\")",
+      "Bash(sqlite3 data/webprint.db \"SELECT d.name FROM designs d JOIN gallery_templates gt ON d.gallery_id = gt.id WHERE gt.product_slug = 'bold-flyers' LIMIT 5;\")",
+      "Bash(node scripts/seed-vinyl-banner-new-designs.mjs)",
+      "Bash(sqlite3 data/webprint.db \"SELECT d.name FROM designs d WHERE d.gallery_id = 'bn0001mpmc48n5' ORDER BY d.created_at;\")",
+      "Bash(grep -rn \"Shop Now\\\\|shop.*now\\\\|shopNow\\\\|\\\\$150\\\\|\\\\$200\\\\|\\\\$220\" /Users/apple/Documents/WebPrint/app/ --include=\"*.tsx\")",
+      "Bash(grep -rn \"Shop Now\\\\|\\\\$150\\\\|\\\\$220\\\\|pizza.*box\\\\|mailer.*box\\\\|shipping.*box\" /Users/apple/Documents/WebPrint/components/ --include=\"*.tsx\")",
+      "Bash(lsof -i :3000 -sTCP:LISTEN)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/products/packaging-box/pizza-boxes)"
     ]
   }
 }

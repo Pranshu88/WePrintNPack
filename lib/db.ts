@@ -121,6 +121,10 @@ async function initializeDb(client: Client): Promise<void> {
       password_hash TEXT NOT NULL,
       created_at    TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS applied_fixes (
+      id TEXT PRIMARY KEY
+    );
   `);
 
   // Migrations — add columns if missing
@@ -133,6 +137,54 @@ async function initializeDb(client: Client): Promise<void> {
   try {
     await client.execute("ALTER TABLE gallery_templates ADD COLUMN specs_json TEXT");
   } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE gallery_templates ADD COLUMN visible INTEGER NOT NULL DEFAULT 1");
+  } catch { /* already exists */ }
+
+  // One-time data fixes — each runs at most once per database, tracked via applied_fixes.
+  const hideStrayFixId = "hide-stray-seed-business-card-templates-2026-07";
+  const hideStrayApplied = await client.execute({ sql: "SELECT 1 FROM applied_fixes WHERE id = ?", args: [hideStrayFixId] });
+  if (hideStrayApplied.rows.length === 0) {
+    await client.execute({
+      sql: `UPDATE gallery_templates SET visible = 0 WHERE product_slug = 'premium-business-cards' AND name IN (
+        'Corporate Business Cards','Restaurant & Food Business Cards','Healthcare & Medical Business Cards',
+        'Real Estate Business Cards','Law & Legal Business Cards','Beauty & Salon Business Cards',
+        'Technology & Startup Business Cards','Creative & Design Business Cards','Finance & Accounting Business Cards',
+        'Fitness & Sports Business Cards','Education & Consulting Business Cards'
+      )`,
+      args: [],
+    });
+    await client.execute({ sql: "INSERT OR IGNORE INTO applied_fixes (id) VALUES (?)", args: [hideStrayFixId] });
+  }
+
+  const deleteStrayFixId = "delete-stray-seed-business-card-templates-2026-07";
+  const deleteStrayApplied = await client.execute({ sql: "SELECT 1 FROM applied_fixes WHERE id = ?", args: [deleteStrayFixId] });
+  if (deleteStrayApplied.rows.length === 0) {
+    const strayNamesClause = `product_slug = 'premium-business-cards' AND name IN (
+      'Corporate Business Cards','Restaurant & Food Business Cards','Healthcare & Medical Business Cards',
+      'Real Estate Business Cards','Law & Legal Business Cards','Beauty & Salon Business Cards',
+      'Technology & Startup Business Cards','Creative & Design Business Cards','Finance & Accounting Business Cards',
+      'Fitness & Sports Business Cards','Education & Consulting Business Cards'
+    )`;
+    // SQLite foreign keys aren't enforced here, so ON DELETE CASCADE won't fire — delete
+    // child rows (design_colors, designs) before the gallery_templates rows themselves.
+    await client.execute({
+      sql: `DELETE FROM design_colors WHERE design_id IN (
+        SELECT id FROM designs WHERE gallery_id IN (
+          SELECT id FROM gallery_templates WHERE ${strayNamesClause}
+        )
+      )`,
+      args: [],
+    });
+    await client.execute({
+      sql: `DELETE FROM designs WHERE gallery_id IN (
+        SELECT id FROM gallery_templates WHERE ${strayNamesClause}
+      )`,
+      args: [],
+    });
+    await client.execute({ sql: `DELETE FROM gallery_templates WHERE ${strayNamesClause}`, args: [] });
+    await client.execute({ sql: "INSERT OR IGNORE INTO applied_fixes (id) VALUES (?)", args: [deleteStrayFixId] });
+  }
 
   // Seed default admin
   const adminHash = crypto.createHash("sha256").update("Admin@86301" + "webprint-salt-2024").digest("hex");

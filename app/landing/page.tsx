@@ -4,11 +4,12 @@ import { Fragment, useState, useEffect } from "react";
 import Image from "next/image";
 import LandingContactForm from "@/components/landing-form";
 import PopularProductsCarousel from "@/components/popular-products-carousel";
-import { getListingProducts } from "@/lib/data";
+import { LISTING_ALLOWED_CATEGORIES, LISTING_EXCLUDED_SLUGS } from "@/lib/data";
 import { getProductLink } from "@/lib/product-link";
 import AuthModal from "@/components/auth-modal";
 import { WelcomePopup } from "@/components/welcome-popup";
 import { PolicyModal } from "@/components/policy-modal";
+import type { Product } from "@/lib/types";
 
 const WHATSAPP = "19024122133";
 
@@ -77,6 +78,8 @@ export default function LandingPage() {
   const [cartToast, setCartToast] = useState(false);
   const [ratingAvg, setRatingAvg] = useState<string>("4.9");
   const [policyOpen, setPolicyOpen] = useState<"privacy" | "terms" | null>(null);
+  const [categoryProducts, setCategoryProducts] = useState<Product[]>([]);
+  const [carouselProducts, setCarouselProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     try {
@@ -93,15 +96,39 @@ export default function LandingPage() {
         if (d.average !== null) setRatingAvg(String(d.average));
       })
       .catch(() => { /* keep default */ });
+    fetch("/api/products", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { products: Product[] }) => {
+        const listing = d.products.filter(
+          (p) => LISTING_ALLOWED_CATEGORIES.has(p.category) && !LISTING_EXCLUDED_SLUGS.has(p.slug)
+        );
+        // Popular Products carousel shows every product's gallery templates, not just the
+        // curated set used for the "Browse by Category" cards below.
+        setCarouselProducts(d.products.filter((p) => !LISTING_EXCLUDED_SLUGS.has(p.slug)));
+        const deduped = listing.reduce<Product[]>((acc, p) => {
+          if (p.category === "flyers") return acc;
+          if (p.category === "t-shirts") {
+            if (!acc.some((x) => x.category === "t-shirts")) acc.push({ ...p, name: "T-Shirts" });
+          } else {
+            acc.push(p);
+          }
+          return acc;
+        }, []);
+        setCategoryProducts(deduped);
+      })
+      .catch(() => { /* keep empty */ });
 
-    // Scroll-triggered animations
+  }, []);
+
+  useEffect(() => {
+    // Scroll-triggered animations (re-scans whenever new .lp-anim nodes, e.g. category cards, mount)
     const observer = new IntersectionObserver(
       (entries) => entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add("lp-visible"); }),
       { threshold: 0.12 }
     );
     document.querySelectorAll(".lp-anim").forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, []);
+  }, [categoryProducts]);
 
   function handleCartClick() {
     if (cartCount === 0) {
@@ -116,17 +143,6 @@ export default function LandingPage() {
       setAuthOpen(true);
     }
   }
-
-  const products = getListingProducts();
-  const categoryProducts = products.reduce<typeof products>((acc, p) => {
-    if (p.category === "flyers") return acc;
-    if (p.category === "t-shirts") {
-      if (!acc.some((x) => x.category === "t-shirts")) acc.push({ ...p, name: "T-Shirts" });
-    } else {
-      acc.push(p);
-    }
-    return acc;
-  }, []);
 
   return (
     <div className="landing-page">
@@ -153,11 +169,7 @@ export default function LandingPage() {
       <header className="lp-header">
         <div className="lp-header-inner">
           <a href="/landing" className="lp-brand">
-            <Image src="/images/applogo.jpeg" alt="We Print N Pack" width={50} height={50} className="lp-brand-img" priority />
-            <div className="lp-brand-text">
-              <strong>WE PRINT N PACK</strong>
-              <span>PRINT. DESIGN. PACK. DELIVER.</span>
-            </div>
+            <Image src="/images/applogo.jpeg" alt="We Print N Pack" width={250} height={80} className="lp-brand-img" style={{ width: 250, height: 80, objectFit: "fill", marginLeft: -10 }} priority />
           </a>
 
           <nav className="lp-nav">
@@ -419,7 +431,7 @@ export default function LandingPage() {
             <h2>POPULAR PRODUCTS</h2>
             <div className="lp-underline-bar" />
           </div>
-          <PopularProductsCarousel products={products} />
+          <PopularProductsCarousel products={carouselProducts} />
         </div>
       </section>
 

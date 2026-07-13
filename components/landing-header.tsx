@@ -52,11 +52,7 @@ export function LandingHeader() {
       <header className="lp-header">
         <div className="lp-header-inner">
           <a href="/" className="lp-brand">
-            <Image src="/images/applogo.jpeg" alt="We Print N Pack" width={50} height={50} className="lp-brand-img" priority />
-            <div className="lp-brand-text">
-              <strong>WE PRINT N PACK</strong>
-              <span>PRINT. DESIGN. PACK. DELIVER.</span>
-            </div>
+            <Image src="/images/applogo.jpeg" alt="We Print N Pack" width={180} height={50} className="lp-brand-img" style={{ width: 180, objectFit: "contain" }} priority />
           </a>
 
           <nav className="lp-nav">

@@ -10,15 +10,16 @@ export async function GET(
   const { slug } = await params;
   const { searchParams } = new URL(req.url);
   const rawPage = searchParams.get("page");
+  const includeHidden = searchParams.get("admin") === "1";
 
   if (rawPage === null) {
-    const templates = await getGalleryTemplates(slug);
+    const templates = await getGalleryTemplates(slug, includeHidden);
     return NextResponse.json({ templates });
   }
 
   const page = Math.max(1, parseInt(rawPage, 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10)));
-  const result = await getGalleryTemplatesPaginated(slug, page, limit);
+  const result = await getGalleryTemplatesPaginated(slug, page, limit, includeHidden);
   return NextResponse.json(result);
 }
 

@@ -832,7 +832,10 @@ body:has(.landing-page) {
   padding: 40px 0 60px;
 }
 .lp-cta .lp-wrap {
+  position: relative;
   background: linear-gradient(100deg, #0f172a 0%, #1e1b4b 35%, #701a75 65%, #f97316 100%);
+  background-size: 220% 220%;
+  animation: lpCtaGradient 14s ease-in-out infinite;
   border-radius: 20px;
   overflow: hidden;
   min-height: 200px;
@@ -840,12 +843,50 @@ body:has(.landing-page) {
   margin-left: auto;
   margin-right: auto;
 }
+.lp-cta .lp-wrap::before,
+.lp-cta .lp-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: -50%;
+  bottom: 0;
+  height: 140px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 120' preserveAspectRatio='none'%3E%3Cpath d='M0,40 C150,90 350,0 600,40 C850,80 1050,10 1200,40 L1200,120 L0,120 Z' fill='%23ffffff'/%3E%3C/svg%3E");
+  background-repeat: repeat-x;
+  background-size: 1200px 140px;
+  pointer-events: none;
+}
+.lp-cta .lp-wrap::before {
+  opacity: 0.06;
+  animation: lpCtaWave 16s linear infinite;
+}
+.lp-cta .lp-wrap::after {
+  opacity: 0.1;
+  animation: lpCtaWave 10s linear infinite reverse;
+}
+@keyframes lpCtaGradient {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+@keyframes lpCtaWave {
+  from { background-position-x: 0; }
+  to { background-position-x: -1200px; }
+}
 .lp-cta-inner {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
   align-items: center;
   min-height: 420px;
   gap: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-cta .lp-wrap,
+  .lp-cta .lp-wrap::before,
+  .lp-cta .lp-wrap::after {
+    animation: none;
+  }
 }
 .lp-cta-copy {
   padding: 56px 56px;
@@ -1316,6 +1357,8 @@ body:has(.landing-page) {
 .lp-pop-name  { font-weight: 700; font-size: 0.9rem; color: #111827; }
 .lp-pop-price { font-size: 0.8rem; color: #6b7280; font-weight: 500; }
 .lp-pop-btn {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1327,9 +1370,28 @@ body:has(.landing-page) {
   text-decoration: none;
   margin-top: auto;
   padding-top: 8px;
-  transition: opacity 0.2s;
+  transition: opacity 0.2s, transform 0.2s, box-shadow 0.2s;
 }
-.lp-pop-btn:hover { opacity: 0.88; }
+.lp-pop-btn:hover { opacity: 0.92; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
+.lp-pop-btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -75%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(115deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%);
+  transform: skewX(-20deg);
+  animation: lpPopBtnShine 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes lpPopBtnShine {
+  0% { left: -75%; }
+  35%, 100% { left: 130%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-pop-btn::after { animation: none; }
+}
 .lp-shimmer {
   background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
   background-size: 200% 100%;

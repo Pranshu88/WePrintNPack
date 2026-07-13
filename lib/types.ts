@@ -27,6 +27,7 @@ export type Product = {
   }>;
   colors?: string[];
   colorVariants?: ColorVariant[];
+  subProducts?: string[];
   createdAt?: string;
   updatedAt?: string;
 };

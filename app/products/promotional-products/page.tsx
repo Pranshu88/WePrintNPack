@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 
 function TileCard({ tile }: { tile: { id: string; name: string; price: string; image: string; link: string } }) {
   const [hovered, setHovered] = useState(false);
@@ -55,10 +56,6 @@ function TileCard({ tile }: { tile: { id: string; name: string; price: string; i
   );
 }
 
-const GALLERY_SOURCES = [
-  { gallerySlug: "stickers-and-labels", metaKey: "sticker-packages-meta", subSlug: "stickers-and-labels" },
-];
-
 const PRICE_FALLBACKS: Record<string, string> = {
   "Die-Cut Stickers": "$89 + tax",
   "Product Labels":   "$139 + tax",
@@ -95,29 +92,41 @@ export default function PromotionalProductsPage() {
   useEffect(() => {
     async function load() {
       const result: Tile[] = [];
+      let startingPrice = "$28";
 
-      for (const { gallerySlug, metaKey, subSlug } of GALLERY_SOURCES) {
+      try {
+        const res = await fetch("/api/products?category=promotional-products", { cache: "no-store" });
+        const data = (await res.json()) as { products?: { startingPrice: string }[] };
+        const product = data.products?.[0];
+        if (product) startingPrice = product.startingPrice || startingPrice;
+      } catch { /* use default starting price */ }
+
+      for (const name of CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"]) {
+        const gallerySlug = subProductSlug(name);
+
         let meta: Record<string, { price: string }> = {};
-        try {
-          const raw = localStorage.getItem(metaKey);
-          if (raw) meta = JSON.parse(raw) as Record<string, { price: string }>;
-        } catch { /* ignore */ }
+        if (gallerySlug === "stickers-and-labels") {
+          try {
+            const raw = localStorage.getItem("sticker-packages-meta");
+            if (raw) meta = JSON.parse(raw) as Record<string, { price: string }>;
+          } catch { /* ignore */ }
+        }
 
         try {
           const res = await fetch(`/api/products/${gallerySlug}/templates`, { cache: "no-store" });
-          const data = (await res.json()) as { templates?: { id: string; name: string; previewImage: string }[] };
+          const data = (await res.json()) as { templates?: { id: string; name: string; previewImage: string; price?: string }[] };
           for (const t of (data.templates ?? [])) {
             const idbImg = await loadIDBImage(t.id);
-            const price = meta[t.id]?.price ?? PRICE_FALLBACKS[t.name] ?? "Starting at $28";
+            const price = meta[t.id]?.price || t.price || PRICE_FALLBACKS[t.name] || `Starting at ${startingPrice}`;
             result.push({
               id: t.id,
               name: t.name,
               price,
               image: idbImg || t.previewImage,
-              link: `/products/promotional-products/${subSlug}?gallery=${t.id}`,
+              link: `/products/promotional-products/${gallerySlug}?gallery=${t.id}`,
             });
           }
-        } catch { /* skip */ }
+        } catch { /* skip this sub-product, keep the rest */ }
       }
 
       setTiles(result);

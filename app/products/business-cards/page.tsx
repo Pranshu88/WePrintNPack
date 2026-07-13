@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { categories, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+
+const PRINT_ESSENTIALS_CATEGORIES = new Set(
+  categories.filter((c) => c.groupSlug === "print-essentials").map((c) => c.slug)
+);
 
 function TileCard({ tile }: { tile: { id: string; name: string; price: string; image: string; link: string } }) {
   const [hovered, setHovered] = useState(false);
@@ -55,16 +60,16 @@ function TileCard({ tile }: { tile: { id: string; name: string; price: string; i
   );
 }
 
-const BC_TIERS = [
-  { id: "bc-standard", name: "Business Cards",         price: "$79 + tax",        galleryName: "Business Cards" },
-  { id: "bc-premium",  name: "Premium Business Cards", price: "$119 + tax",       galleryName: "Premium Business Cards" },
-  { id: "bc-luxury",   name: "Luxury Business Cards",  price: "From $179 + tax",  galleryName: "Luxury Business Cards" },
-];
-
-const FLY_TIERS = [
-  { id: "fly-standard", name: "Express Flyers", price: "$159 + tax", galleryName: "Express Flyers" },
-  { id: "fly-premium",  name: "Prime Flyers",   price: "$329 + tax", galleryName: "Prime Flyers" },
-];
+// Fixed prices for the original hand-seeded packages (they don't carry a `price` field
+// on their own template row). Anything else — any new gallery template an admin adds —
+// uses its own stored price, falling back to the product's starting price.
+const LEGACY_PRICE: Record<string, string> = {
+  "Business Cards": "$79 + tax",
+  "Premium Business Cards": "$119 + tax",
+  "Luxury Business Cards": "From $179 + tax",
+  "Express Flyers": "$159 + tax",
+  "Prime Flyers": "$329 + tax",
+};
 
 type Tile = { id: string; name: string; price: string; image: string; link: string };
 
@@ -96,70 +101,50 @@ export default function BusinessCardsPage() {
 
   useEffect(() => {
     async function load() {
-      type TplRow = { id: string; name: string; previewImage: string };
-
-      let bcTemplates: TplRow[] = [];
-      let flyTemplates: TplRow[] = [];
-      let bcSlug = "";
-      let flySlug = "";
-      let bcFallback = "";
-      let flyFallback = "";
-
-      try {
-        const res = await fetch("/api/products?category=business-cards", { cache: "no-store" });
-        const data = (await res.json()) as { products?: { slug: string; image: string }[] };
-        const bcProduct = data.products?.[0];
-        if (bcProduct) {
-          bcSlug = bcProduct.slug;
-          bcFallback = bcProduct.image;
-          const tRes = await fetch(`/api/products/${bcProduct.slug}/templates`, { cache: "no-store" });
-          const tData = (await tRes.json()) as { templates?: TplRow[] };
-          bcTemplates = tData.templates ?? [];
-        }
-      } catch { /* skip */ }
-
-      try {
-        const res = await fetch("/api/products?category=flyers", { cache: "no-store" });
-        const data = (await res.json()) as { products?: { slug: string; image: string }[] };
-        const flyProduct = data.products?.[0];
-        if (flyProduct) {
-          flySlug = flyProduct.slug;
-          flyFallback = flyProduct.image;
-          const tRes = await fetch(`/api/products/${flyProduct.slug}/templates`, { cache: "no-store" });
-          const tData = (await tRes.json()) as { templates?: TplRow[] };
-          flyTemplates = tData.templates ?? [];
-        }
-      } catch { /* skip */ }
+      type TplRow = { id: string; name: string; previewImage: string; price?: string };
+      type ProductRow = { slug: string; category: string; image: string; startingPrice: string };
 
       const result: Tile[] = [];
+      const handledSlugs = new Set<string>();
 
-      for (const tier of BC_TIERS) {
-        const idbImg = await loadIDBImage(tier.id);
-        const tpl = bcTemplates.find((t) => t.name === tier.galleryName);
-        result.push({
-          id: tier.id,
-          name: tier.name,
-          price: tier.price,
-          image: idbImg || tpl?.previewImage || bcFallback,
-          link: tpl && bcSlug
-            ? `/products/business-cards/${bcSlug}?gallery=${tpl.id}`
-            : `/products/business-cards${bcSlug ? `/${bcSlug}` : ""}`,
-        });
+      async function fetchInto(slug: string, image: string, startingPrice: string) {
+        if (handledSlugs.has(slug)) return;
+        handledSlugs.add(slug);
+        try {
+          const tRes = await fetch(`/api/products/${slug}/templates`, { cache: "no-store" });
+          const tData = (await tRes.json()) as { templates?: TplRow[] };
+          for (const tpl of (tData.templates ?? [])) {
+            const idbImg = await loadIDBImage(tpl.id);
+            result.push({
+              id: tpl.id,
+              name: tpl.name,
+              price: tpl.price || LEGACY_PRICE[tpl.name] || (startingPrice ? `Starting at ${startingPrice}` : ""),
+              image: idbImg || tpl.previewImage || image,
+              link: `/products/business-cards/${slug}?gallery=${tpl.id}`,
+            });
+          }
+        } catch { /* skip this product, keep the rest */ }
       }
 
-      for (const tier of FLY_TIERS) {
-        const idbImg = await loadIDBImage(tier.id);
-        const tpl = flyTemplates.find((t) => t.name === tier.galleryName);
-        result.push({
-          id: tier.id,
-          name: tier.name,
-          price: tier.price,
-          image: idbImg || tpl?.previewImage || flyFallback,
-          link: tpl && flySlug
-            ? `/products/business-cards/${flySlug}?gallery=${tpl.id}`
-            : `/products/business-cards${flySlug ? `/${flySlug}` : ""}`,
-        });
-      }
+      try {
+        const res = await fetch("/api/products", { cache: "no-store" });
+        const data = (await res.json()) as { products?: ProductRow[] };
+        const products = data.products ?? [];
+        const groupProducts = products.filter((p) => PRINT_ESSENTIALS_CATEGORIES.has(p.category));
+
+        // Real, standalone products (Business Cards, Flyers, Brochures, Postcards…)
+        for (const product of groupProducts) {
+          await fetchInto(product.slug, product.image, product.startingPrice);
+        }
+
+        // Ad-hoc sub-products (Door Hangers, Rack Cards, Letterheads…) that have no
+        // Product record of their own — the canonical list lives in CATEGORY_SUBPRODUCT_OPTIONS.
+        const bcProduct = products.find((p) => p.slug === "premium-business-cards");
+        for (const name of CATEGORY_SUBPRODUCT_OPTIONS["business-cards"]) {
+          const slug = subProductSlug(name);
+          await fetchInto(slug, bcProduct?.image ?? "", bcProduct?.startingPrice ?? "");
+        }
+      } catch { /* leave tiles empty */ }
 
       setTiles(result);
     }

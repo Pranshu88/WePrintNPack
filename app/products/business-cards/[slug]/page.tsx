@@ -1,8 +1,12 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug, categories, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
 export const dynamic = "force-dynamic";
+
+const PRINT_ESSENTIALS_CATEGORIES = new Set(
+  categories.filter((c) => c.groupSlug === "print-essentials").map((c) => c.slug)
+);
 
 export default async function BusinessCardDetailPage({
   params,
@@ -13,9 +17,20 @@ export default async function BusinessCardDetailPage({
 }) {
   const { slug } = await params;
   const { gallery } = await searchParams;
-  const product = getProductBySlug(slug);
 
-  if (!product || (product.category !== "business-cards" && product.category !== "flyers")) notFound();
+  // Real, standalone products (Business Cards, Flyers, Brochures, Postcards…)
+  let product = getProductBySlug(slug);
+  if (product && !PRINT_ESSENTIALS_CATEGORIES.has(product.category)) product = undefined;
+
+  // Ad-hoc sub-products (Door Hangers, Rack Cards, Letterheads…) with no Product of their
+  // own — validated against the canonical list in CATEGORY_SUBPRODUCT_OPTIONS.
+  if (!product) {
+    const parent = getProductBySlug("premium-business-cards");
+    const name = CATEGORY_SUBPRODUCT_OPTIONS["business-cards"].find((n) => subProductSlug(n) === slug);
+    if (parent && name) product = { ...parent, slug, name };
+  }
+
+  if (!product) notFound();
 
   return <BusinessCardOrderClient product={product} galleryId={gallery ?? null} />;
 }

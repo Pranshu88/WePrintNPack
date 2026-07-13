@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { GalleryTemplate } from "@/lib/template-data";
-import { categories, LISTING_ALLOWED_CATEGORIES } from "@/lib/data";
+import { categories, LISTING_ALLOWED_CATEGORIES, LEGACY_SUBPRODUCT_SLUGS, slugifyLabel, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import type { Product } from "@/lib/types";
 
 async function readFile(file: File): Promise<string> {
@@ -50,6 +50,41 @@ async function loadBcImage(id: string): Promise<string> {
   }
 }
 
+const SPEC_KEYS = ["Size", "Color", "Paper Type", "Finishing", "Quantities"];
+
+function buildFixedSpecEntries(existing: string[]): { key: string; value: string }[] {
+  const byKey: Record<string, string> = {};
+  for (const raw of existing) {
+    const separator = raw.indexOf(":");
+    if (separator === -1) continue;
+    const key = raw.slice(0, separator).trim();
+    if (SPEC_KEYS.includes(key)) byKey[key] = raw.slice(separator + 1).trim();
+  }
+  return SPEC_KEYS.map((key) => ({ key, value: byKey[key] ?? "" }));
+}
+
+function formatSpecEntry(entry: { key: string; value: string }) {
+  return `${entry.key}: ${entry.value}`;
+}
+
+function parseSizeValue(value: string): { width: string; length: string } {
+  const parts = value.split(/x|×/i).map((p) => p.trim());
+  return { width: parts[0] ?? "", length: parts[1] ?? "" };
+}
+
+function formatSizeValue(width: string, length: string) {
+  // Always keep both sides + the "x" separator, even if one is still empty —
+  // otherwise editing one field loses the other on the next keystroke, since
+  // parseSizeValue can no longer tell where the split should be.
+  return `${width} x ${length}`;
+}
+
+function formatPriceValue(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  return /[$+]/.test(trimmed) ? trimmed : `$${trimmed} + tax`;
+}
+
 type Props = { products: Product[]; openAddRef?: React.RefObject<(() => void) | null> };
 
 export function AdminTemplateSection({ products, openAddRef }: Props) {
@@ -63,59 +98,78 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
     if (!first) return "";
     return first.category === "t-shirts" ? "t-shirts" : first.slug;
   });
-  const [subProduct, setSubProduct] = useState<"business-cards" | "flyers">(() => {
-    try { const v = localStorage.getItem("tmpl-subProduct"); if (v === "business-cards" || v === "flyers") return v; } catch { /* ignore */ }
-    return "business-cards";
+  const [subProduct, setSubProduct] = useState<string>(() => {
+    try { const v = localStorage.getItem("tmpl-subProduct"); if (v) return v; } catch { /* ignore */ }
+    return "Business Cards";
   });
-  const [marketingSubProduct, setMarketingSubProduct] = useState<"posters" | "banners" | "yard-signs">(() => {
-    try { const v = localStorage.getItem("tmpl-marketingSubProduct"); if (v === "posters" || v === "banners" || v === "yard-signs") return v; } catch { /* ignore */ }
-    return "posters";
+  const [marketingSubProduct, setMarketingSubProduct] = useState<string>(() => {
+    try { const v = localStorage.getItem("tmpl-marketingSubProduct"); if (v) return v; } catch { /* ignore */ }
+    return "Posters";
+  });
+  const [promotionalSubProduct, setPromotionalSubProduct] = useState<string>(() => {
+    try { const v = localStorage.getItem("tmpl-promotionalSubProduct"); if (v) return v; } catch { /* ignore */ }
+    return "Stickers & Labels";
   });
   const [packagingSubProduct, setPackagingSubProduct] = useState<"pizza-boxes" | "shipping-boxes" | "mailer-boxes" | "square-shipping-boxes">(() => {
     try { const v = localStorage.getItem("tmpl-packagingSubProduct"); if (v === "pizza-boxes" || v === "shipping-boxes" || v === "mailer-boxes" || v === "square-shipping-boxes") return v; } catch { /* ignore */ }
     return "pizza-boxes";
   });
-  const [tshirtSubProduct, setTshirtSubProduct] = useState<"round-neck-tshirt" | "collar-tshirt">(() => {
-    try { const v = localStorage.getItem("tmpl-tshirtSubProduct"); if (v === "round-neck-tshirt" || v === "collar-tshirt") return v; } catch { /* ignore */ }
-    return "round-neck-tshirt";
+  const [tshirtSubProduct, setTshirtSubProduct] = useState<string>(() => {
+    try { const v = localStorage.getItem("tmpl-tshirtSubProduct"); if (v) return v; } catch { /* ignore */ }
+    return "Round Collar T-Shirt";
   });
 
   useEffect(() => { try { localStorage.setItem("tmpl-selectedSlug", selectedSlug); } catch { /* ignore */ } }, [selectedSlug]);
   useEffect(() => { try { localStorage.setItem("tmpl-subProduct", subProduct); } catch { /* ignore */ } }, [subProduct]);
   useEffect(() => { try { localStorage.setItem("tmpl-marketingSubProduct", marketingSubProduct); } catch { /* ignore */ } }, [marketingSubProduct]);
+  useEffect(() => { try { localStorage.setItem("tmpl-promotionalSubProduct", promotionalSubProduct); } catch { /* ignore */ } }, [promotionalSubProduct]);
   useEffect(() => { try { localStorage.setItem("tmpl-packagingSubProduct", packagingSubProduct); } catch { /* ignore */ } }, [packagingSubProduct]);
   useEffect(() => { try { localStorage.setItem("tmpl-tshirtSubProduct", tshirtSubProduct); } catch { /* ignore */ } }, [tshirtSubProduct]);
 
   const isTshirts = selectedSlug === "t-shirts";
   const selectedProduct = productList.find((p) => p.slug === selectedSlug);
+  const tshirtProduct = productList.find((p) => p.category === "t-shirts");
   const isBusinessPrinting = selectedProduct?.category === "business-cards";
   const isMarketingMaterial = selectedProduct?.category === "marketing-material";
   const isPackagingBox = selectedProduct?.category === "packaging-box";
   const isPromotionalProducts = selectedProduct?.category === "promotional-products";
-  const marketingSlugMap: Record<string, string> = { posters: "posters", banners: "vinyl-banners", "yard-signs": "yard-signs" };
+
+  const businessPrintingOptions = CATEGORY_SUBPRODUCT_OPTIONS["business-cards"];
+  const marketingOptions = CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"];
+  const promotionalOptions = CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"];
+  const tshirtOptions = CATEGORY_SUBPRODUCT_OPTIONS["t-shirts"];
+
+  useEffect(() => {
+    if (isBusinessPrinting && !businessPrintingOptions.includes(subProduct)) setSubProduct(businessPrintingOptions[0]);
+    if (isMarketingMaterial && !marketingOptions.includes(marketingSubProduct)) setMarketingSubProduct(marketingOptions[0]);
+    if (isPromotionalProducts && !promotionalOptions.includes(promotionalSubProduct)) setPromotionalSubProduct(promotionalOptions[0]);
+    if (isTshirts && !tshirtOptions.includes(tshirtSubProduct)) setTshirtSubProduct(tshirtOptions[0]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlug]);
+
   const packagingSlugMap: Record<string, string> = { "pizza-boxes": "pizza-boxes", "shipping-boxes": "shipping-boxes", "mailer-boxes": "mailer-boxes", "square-shipping-boxes": "square-shipping-boxes" };
-  const effectiveSlug = isBusinessPrinting && subProduct === "flyers"
-    ? "bold-flyers"
+  const effectiveSlug = isBusinessPrinting
+    ? (LEGACY_SUBPRODUCT_SLUGS[subProduct] ?? (subProduct === "Business Cards" ? selectedProduct?.slug ?? selectedSlug : slugifyLabel(subProduct)))
     : isMarketingMaterial
-      ? marketingSlugMap[marketingSubProduct]
+      ? (LEGACY_SUBPRODUCT_SLUGS[marketingSubProduct] ?? slugifyLabel(marketingSubProduct))
       : isPackagingBox
         ? packagingSlugMap[packagingSubProduct]
         : isPromotionalProducts
-          ? "stickers-and-labels"
+          ? (LEGACY_SUBPRODUCT_SLUGS[promotionalSubProduct] ?? slugifyLabel(promotionalSubProduct))
           : isTshirts
-            ? tshirtSubProduct
+            ? (LEGACY_SUBPRODUCT_SLUGS[tshirtSubProduct] ?? slugifyLabel(tshirtSubProduct))
             : selectedSlug;
-  const isBusinessCards = isBusinessPrinting && subProduct === "business-cards";
+  const isBusinessCards = isBusinessPrinting && subProduct === "Business Cards";
   const selectedProductName = isBusinessPrinting
-    ? (subProduct === "flyers" ? "Flyers" : "Business Cards")
+    ? subProduct
     : isMarketingMaterial
-      ? ({ posters: "Posters", banners: "Banners", "yard-signs": "Yard Signs" }[marketingSubProduct] ?? "Marketing Material")
+      ? marketingSubProduct
       : isPackagingBox
         ? ({ "pizza-boxes": "Pizza Box", "shipping-boxes": "Shipping Box", "mailer-boxes": "Mailer Box", "square-shipping-boxes": "Square Shipping Box" }[packagingSubProduct] ?? "Packaging Box")
         : isPromotionalProducts
-          ? "Stickers & Labels"
+          ? promotionalSubProduct
           : isTshirts
-            ? ({ "round-neck-tshirt": "Round Collar T-Shirt", "collar-tshirt": "Straight Collar T-Shirt" }[tshirtSubProduct] ?? "T-Shirt")
+            ? tshirtSubProduct
             : (selectedProduct?.name ?? "");
 
   const [galleryList, setGalleryList] = useState<GalleryTemplate[]>([]);
@@ -129,7 +183,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   const [gName, setGName] = useState("");
   const [gImage, setGImage] = useState("");
   const [gImageName, setGImageName] = useState("");
-  const [gSpecs, setGSpecs] = useState<string[]>([]);
+  const [gSpecs, setGSpecs] = useState<{ key: string; value: string }[]>([]);
   const [gPrice, setGPrice] = useState("");
   const gFileRef = useRef<HTMLInputElement>(null);
 
@@ -155,7 +209,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
     setLoading(true);
     setErr("");
     try {
-      const r = await fetch(`/api/products/${effectiveSlug}/templates`, { cache: "no-store" });
+      const r = await fetch(`/api/products/${effectiveSlug}/templates?admin=1`, { cache: "no-store" });
       const data = (await r.json()) as { templates?: GalleryTemplate[] };
       setGalleryList(data.templates ?? []);
     } catch {
@@ -183,7 +237,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
     setGImageName("Existing image");
     const meta = tshirtMeta[g.id];
     setGPrice(meta?.price ?? "");
-    setGSpecs(meta?.specs?.length ? meta.specs : [...TSHIRT_DEFAULT_SPECS]);
+    setGSpecs(buildFixedSpecEntries(meta?.specs?.length ? meta.specs : TSHIRT_DEFAULT_SPECS));
     setModalOpen(true);
   }
 
@@ -204,6 +258,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
     if (!gName.trim() || !gImage) { flash("Name and image are required.", true); return; }
     setSaving(true);
     try {
+      const gSpecsText = gSpecs.filter((s) => s.value.trim()).map(formatSpecEntry);
       if (editingGalleryId) {
         await fetch(`/api/products/${effectiveSlug}/templates/${editingGalleryId}`, {
           method: "PATCH",
@@ -211,12 +266,12 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
           body: JSON.stringify({
             name: gName,
             previewImage: gImage,
-            ...(isTshirts && { price: gPrice.trim(), specs: gSpecs.filter((s) => s.trim()) }),
+            ...(isTshirts && { price: gPrice.trim(), specs: gSpecsText }),
           }),
         });
         // Also cache in localStorage for instant display
         if (isTshirts) {
-          setTshirtMeta((prev) => ({ ...prev, [editingGalleryId]: { price: gPrice.trim(), specs: gSpecs.filter((s) => s.trim()) } }));
+          setTshirtMeta((prev) => ({ ...prev, [editingGalleryId]: { price: gPrice.trim(), specs: gSpecsText } }));
         }
         flash("Gallery template updated.");
       } else {
@@ -237,7 +292,6 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   }
 
   async function deleteGallery(id: string) {
-    if (!window.confirm("Delete this gallery template and all its designs?")) return;
     await fetch(`/api/products/${effectiveSlug}/templates/${id}`, { method: "DELETE" });
     flash("Deleted.");
     await loadTemplates();
@@ -254,11 +308,11 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
     { id: "fly-premium", title: "Prime Flyers", price: "$329 + tax", specs: ['Size: 8.5" × 11"', "100lb Gloss Text", "Full colour", "Double-sided"], image: "" },
   ];
 
-  const isFlyers = isBusinessPrinting && subProduct === "flyers";
-  const isBanners      = isMarketingMaterial && marketingSubProduct === "banners";
-  const isPosters      = isMarketingMaterial && marketingSubProduct === "posters";
-  const isYardSigns    = isMarketingMaterial && marketingSubProduct === "yard-signs";
-  const isStickers     = isPromotionalProducts;
+  const isFlyers = isBusinessPrinting && subProduct === "Flyers";
+  const isBanners      = isMarketingMaterial && marketingSubProduct === "Banners";
+  const isPosters      = isMarketingMaterial && marketingSubProduct === "Posters";
+  const isYardSigns    = isMarketingMaterial && marketingSubProduct === "Yard Signs";
+  const isStickers     = isPromotionalProducts && promotionalSubProduct === "Stickers & Labels";
   const isMailerBoxes         = isPackagingBox && packagingSubProduct === "mailer-boxes";
   const isShippingBoxes       = isPackagingBox && packagingSubProduct === "shipping-boxes";
   const isPizzaBoxes          = isPackagingBox && packagingSubProduct === "pizza-boxes";
@@ -302,21 +356,21 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
     { id: "ssb-standard", title: "Square Shipping Box", price: "$230 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Square dimensions customizable (L × W × H)", "Quantity: 40", "Full colour print"], image: "" },
   ];
 
-  const [bcPackages, setBcPackages] = useState(() => {
+  type PricingPackage = { id: string; title: string; price: string; specs: string[]; image: string };
+
+  const [bcPackages, setBcPackages] = useState<PricingPackage[]>(() => {
     try {
-      const savedMeta = localStorage.getItem("bc-packages-meta");
-      const meta: Record<string, { title: string; price: string; specs: string[] }> = savedMeta ? JSON.parse(savedMeta) : {};
-      return BC_DEFAULTS.map((d) => ({ ...d, ...(meta[d.id] ?? {}) }));
-    } catch {
-      return BC_DEFAULTS;
-    }
+      const saved = localStorage.getItem("bc-packages-list");
+      if (saved) return JSON.parse(saved) as PricingPackage[];
+    } catch { /* ignore */ }
+    return BC_DEFAULTS;
   });
 
   // Load images from IndexedDB after mount
   useEffect(() => {
     void (async () => {
       const entries = await Promise.all(
-        BC_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
+        bcPackages.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
       );
       setBcPackages((prev) =>
         prev.map((pkg) => {
@@ -328,29 +382,25 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save text metadata to localStorage whenever it changes
+  // Save package list (minus images, which live in IndexedDB) to localStorage whenever it changes
   useEffect(() => {
     try {
-      const meta: Record<string, { title: string; price: string; specs: string[] }> = {};
-      for (const pkg of bcPackages) meta[pkg.id] = { title: pkg.title, price: pkg.price, specs: pkg.specs };
-      localStorage.setItem("bc-packages-meta", JSON.stringify(meta));
+      localStorage.setItem("bc-packages-list", JSON.stringify(bcPackages.map(({ id, title, price, specs }) => ({ id, title, price, specs, image: "" }))));
     } catch { /* ignore */ }
   }, [bcPackages]);
 
-  const [flyPackages, setFlyPackages] = useState(() => {
+  const [flyPackages, setFlyPackages] = useState<PricingPackage[]>(() => {
     try {
-      const savedMeta = localStorage.getItem("fly-packages-meta");
-      const meta: Record<string, { title: string; price: string; specs: string[] }> = savedMeta ? JSON.parse(savedMeta) : {};
-      return FLY_DEFAULTS.map((d) => ({ ...d, ...(meta[d.id] ?? {}) }));
-    } catch {
-      return FLY_DEFAULTS;
-    }
+      const saved = localStorage.getItem("fly-packages-list");
+      if (saved) return JSON.parse(saved) as PricingPackage[];
+    } catch { /* ignore */ }
+    return FLY_DEFAULTS;
   });
 
   useEffect(() => {
     void (async () => {
       const entries = await Promise.all(
-        FLY_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
+        flyPackages.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
       );
       setFlyPackages((prev) =>
         prev.map((pkg) => {
@@ -364,11 +414,86 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
 
   useEffect(() => {
     try {
-      const meta: Record<string, { title: string; price: string; specs: string[] }> = {};
-      for (const pkg of flyPackages) meta[pkg.id] = { title: pkg.title, price: pkg.price, specs: pkg.specs };
-      localStorage.setItem("fly-packages-meta", JSON.stringify(meta));
+      localStorage.setItem("fly-packages-list", JSON.stringify(flyPackages.map(({ id, title, price, specs }) => ({ id, title, price, specs, image: "" }))));
     } catch { /* ignore */ }
   }, [flyPackages]);
+
+  const [addPkgOpen, setAddPkgOpen] = useState(false);
+  const [addPkgTarget, setAddPkgTarget] = useState<"bc" | "fly" | "generic" | null>(null);
+  const [addTitle, setAddTitle] = useState("");
+  const [addPrice, setAddPrice] = useState("");
+  const [addImage, setAddImage] = useState("");
+  const [addImageName, setAddImageName] = useState("");
+  const [addSpecs, setAddSpecs] = useState(buildFixedSpecEntries([]));
+  const [addErrors, setAddErrors] = useState<Record<string, boolean>>({});
+  const addImageRef = useRef<HTMLInputElement>(null);
+
+  function openAddPackageModal(target: "bc" | "fly" | "generic") {
+    setAddPkgTarget(target);
+    setAddTitle(""); setAddPrice(""); setAddImage(""); setAddImageName("");
+    setAddSpecs(buildFixedSpecEntries([]));
+    setAddErrors({});
+    setAddPkgOpen(true);
+  }
+
+  async function handleAddImageChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.currentTarget.files?.[0];
+    if (!file) return;
+    setAddImage(await readFile(file));
+    setAddImageName(file.name);
+  }
+
+  async function saveAddPackage() {
+    const sizeEntry = addSpecs.find((s) => s.key === "Size");
+    const sizeValue = sizeEntry ? parseSizeValue(sizeEntry.value) : { width: "", length: "" };
+    const colorEntry = addSpecs.find((s) => s.key === "Color");
+    const errors: Record<string, boolean> = {
+      title: !addTitle.trim(),
+      price: !addPrice.trim(),
+      image: !addImage,
+      size: !sizeValue.width.trim() || !sizeValue.length.trim(),
+      color: !colorEntry?.value.trim(),
+    };
+    if (Object.values(errors).some(Boolean)) { setAddErrors(errors); return; }
+    setAddErrors({});
+    const title = addTitle.trim();
+    const price = formatPriceValue(addPrice);
+    const specs = addSpecs.filter((s) => s.value.trim()).map(formatSpecEntry);
+
+    if (addPkgTarget === "generic") {
+      // Any product without its own bespoke pricing-card UI — create a real
+      // gallery template, then store price/specs directly on that same
+      // template (the API already supports it) so Edit reads back the same data.
+      try {
+        const res = await fetch(`/api/products/${effectiveSlug}/templates`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: title, previewImage: addImage }),
+        });
+        const data = (await res.json()) as { template?: { id: string }; error?: string };
+        if (!res.ok || !data.template) throw new Error(data.error ?? "Failed to create.");
+        await fetch(`/api/products/${effectiveSlug}/templates/${data.template.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ price, specs }),
+        });
+        setAddPkgOpen(false);
+        flash("Gallery template added.");
+        await loadTemplates();
+      } catch {
+        flash("Save failed.", true);
+      }
+      return;
+    }
+
+    const id = `${addPkgTarget}-custom-${Date.now()}`;
+    const newPkg: PricingPackage = { id, title, price, specs, image: addImage };
+    void saveBcImage(id, addImage);
+    if (addPkgTarget === "bc") setBcPackages((prev) => [...prev, newPkg]);
+    else setFlyPackages((prev) => [...prev, newPkg]);
+    setAddPkgOpen(false);
+    flash("Gallery template added.");
+  }
 
   const [mailerBoxPackages, setMailerBoxPackages] = useState(() => {
     try {
@@ -644,7 +769,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
         ) : (
           <select
             value={selectedSlug}
-            onChange={(e) => { setSelectedSlug(e.target.value); setSubProduct("business-cards"); setMarketingSubProduct("posters"); setPackagingSubProduct("pizza-boxes" as "pizza-boxes" | "shipping-boxes" | "mailer-boxes" | "square-shipping-boxes"); setTshirtSubProduct("round-neck-tshirt"); }}
+            onChange={(e) => { setSelectedSlug(e.target.value); setPackagingSubProduct("pizza-boxes"); }}
             style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
           >
             {(() => {
@@ -670,11 +795,10 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
             </label>
             <select
               value={subProduct}
-              onChange={(e) => setSubProduct(e.target.value as "business-cards" | "flyers")}
+              onChange={(e) => setSubProduct(e.target.value)}
               style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
             >
-              <option value="business-cards">Business Cards</option>
-              <option value="flyers">Flyers</option>
+              {businessPrintingOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
             </select>
           </div>
         )}
@@ -685,12 +809,10 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
             </label>
             <select
               value={marketingSubProduct}
-              onChange={(e) => setMarketingSubProduct(e.target.value as "posters" | "banners" | "yard-signs")}
+              onChange={(e) => setMarketingSubProduct(e.target.value)}
               style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
             >
-              <option value="posters">Posters</option>
-              <option value="banners">Banners</option>
-              <option value="yard-signs">Yard Signs</option>
+              {marketingOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
             </select>
           </div>
         )}
@@ -717,10 +839,11 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
               Select Product
             </label>
             <select
+              value={promotionalSubProduct}
+              onChange={(e) => setPromotionalSubProduct(e.target.value)}
               style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
-              defaultValue="stickers-and-labels"
             >
-              <option value="stickers-and-labels">Stickers &amp; Labels</option>
+              {promotionalOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
             </select>
           </div>
         )}
@@ -731,11 +854,10 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
             </label>
             <select
               value={tshirtSubProduct}
-              onChange={(e) => setTshirtSubProduct(e.target.value as "round-neck-tshirt" | "collar-tshirt")}
+              onChange={(e) => setTshirtSubProduct(e.target.value)}
               style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
             >
-              <option value="round-neck-tshirt">Round Collar T-Shirt</option>
-              <option value="collar-tshirt">Straight Collar T-Shirt</option>
+              {tshirtOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
             </select>
           </div>
         )}
@@ -751,6 +873,14 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
       {/* Business Cards pricing cards */}
       {isBusinessCards ? (
         <div style={{ padding: "1.25rem 1.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+            <button
+              onClick={() => openAddPackageModal("bc")}
+              style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
+            >
+              + Add Gallery Template
+            </button>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.25rem" }}>
             {bcPackages.map((pkg) => (
               <BusinessCardPricingCard
@@ -763,13 +893,33 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   setBcPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
+                  // pkg.id is only a virtual id (e.g. "bc-premium") until a design has been
+                  // added, at which point a real gallery_templates row exists under a
+                  // different id, matched here by name — otherwise this PATCH 404s
+                  // harmlessly and price/specs/image stay in localStorage/IndexedDB until
+                  // that row exists (see ensureRealGalleryId, which syncs them in then).
+                  const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
+                  void fetch(`/api/products/premium-business-cards/templates/${realId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image }),
+                  }).catch(() => {});
                 }}
+                onDelete={() => setBcPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
           </div>
         </div>
       ) : isFlyers ? (
         <div style={{ padding: "1.25rem 1.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+            <button
+              onClick={() => openAddPackageModal("fly")}
+              style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
+            >
+              + Add Gallery Template
+            </button>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.25rem" }}>
             {flyPackages.map((pkg) => (
               <BusinessCardPricingCard
@@ -782,7 +932,19 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   setFlyPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
+                  // pkg.id is only a virtual id (e.g. "fly-premium") until a design has been
+                  // added, at which point a real gallery_templates row exists under a
+                  // different id, matched here by name — otherwise this PATCH 404s
+                  // harmlessly and price/specs/image stay in localStorage/IndexedDB until
+                  // that row exists (see ensureRealGalleryId, which syncs them in then).
+                  const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
+                  void fetch(`/api/products/bold-flyers/templates/${realId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image }),
+                  }).catch(() => {});
                 }}
+                onDelete={() => setFlyPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
           </div>
@@ -812,6 +974,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                       setStickerImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setStickerMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
                     }}
+                    onDelete={() => void deleteGallery(g.id)}
                   />
                 );
               })}
@@ -843,6 +1006,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                       setYardSignImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setYardSignMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
                     }}
+                    onDelete={() => void deleteGallery(g.id)}
                   />
                 );
               })}
@@ -874,6 +1038,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                       setPosterImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setPosterMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
                     }}
+                    onDelete={() => void deleteGallery(g.id)}
                   />
                 );
               })}
@@ -895,6 +1060,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                   void saveBcImage(pkg.id, updated.image);
                   setPizzaBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
+                onDelete={() => setPizzaBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
           </div>
@@ -914,6 +1080,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                   void saveBcImage(pkg.id, updated.image);
                   setShippingBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
+                onDelete={() => setShippingBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
           </div>
@@ -933,6 +1100,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                   void saveBcImage(pkg.id, updated.image);
                   setMailerBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
+                onDelete={() => setMailerBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
           </div>
@@ -952,6 +1120,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                   void saveBcImage(pkg.id, updated.image);
                   setSquareShippingBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
+                onDelete={() => setSquareShippingBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
           </div>
@@ -981,6 +1150,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                       setBannerImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setBannerMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
                     }}
+                    onDelete={() => void deleteGallery(g.id)}
                   />
                 );
               })}
@@ -991,6 +1161,14 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
         /* Gallery grid */
         apparelProducts.length > 0 && (
           <div style={{ padding: "1.25rem 1.5rem" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+              <button
+                onClick={() => isTshirts ? openAddModal() : openAddPackageModal("generic")}
+                style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
+              >
+                + Add Gallery Template
+              </button>
+            </div>
             {loading ? (
               <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Loading…</p>
             ) : galleryList.length === 0 ? (
@@ -1000,6 +1178,26 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "1.25rem" }}>
                 {galleryList.map((g) => {
+                  if (!isTshirts) {
+                    return (
+                      <BusinessCardPricingCard
+                        key={g.id}
+                        title={g.name}
+                        price={g.price || "$0 + tax"}
+                        specs={g.specs ?? []}
+                        image={g.previewImage}
+                        onBrowseDesigns={() => router.push(`/admin/templates/${effectiveSlug}/${g.id}`)}
+                        onEdit={(updated) => {
+                          void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs }),
+                          }).then(() => loadTemplates());
+                        }}
+                        onDelete={() => void deleteGallery(g.id)}
+                      />
+                    );
+                  }
                   const tMeta = tshirtMeta[g.id];
                   const tSpecs = tMeta?.specs?.length ? tMeta.specs : TSHIRT_DEFAULT_SPECS;
                   const tPrice = tMeta?.price || "$18 + tax";
@@ -1080,18 +1278,32 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                   <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#374151" }}>Specs</span>
                   {gSpecs.map((s, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6 }}>
-                      <input
-                        value={s}
-                        onChange={(e) => setGSpecs((prev) => prev.map((v, idx) => idx === i ? e.target.value : v))}
-                        style={{ flex: 1, padding: "0.5rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.825rem", color: "#111827" }}
-                      />
-                      <button onClick={() => setGSpecs((prev) => prev.filter((_, idx) => idx !== i))}
-                        style={{ padding: "0 10px", border: "1.5px solid #fca5a5", borderRadius: 8, background: "#fef2f2", color: "#dc2626", cursor: "pointer", fontWeight: 700, fontSize: "1rem" }}>×</button>
+                    <div key={s.key} style={{ display: "flex", gap: 6 }}>
+                      <span style={{ width: 120, flexShrink: 0, padding: "0.5rem 0.5rem", fontSize: "0.825rem", fontWeight: 600, color: "#374151" }}>{s.key}</span>
+                      {s.key === "Size" ? (
+                        <>
+                          <input
+                            value={parseSizeValue(s.value).width}
+                            onChange={(e) => setGSpecs((prev) => prev.map((v, idx) => idx === i ? { ...v, value: formatSizeValue(e.target.value, parseSizeValue(v.value).length) } : v))}
+                            placeholder="Width"
+                            style={{ flex: 1, maxWidth: 150, padding: "0.5rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.825rem", color: "#111827" }}
+                          />
+                          <input
+                            value={parseSizeValue(s.value).length}
+                            onChange={(e) => setGSpecs((prev) => prev.map((v, idx) => idx === i ? { ...v, value: formatSizeValue(parseSizeValue(v.value).width, e.target.value) } : v))}
+                            placeholder="Length"
+                            style={{ flex: 1, maxWidth: 150, padding: "0.5rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.825rem", color: "#111827" }}
+                          />
+                        </>
+                      ) : (
+                        <input
+                          value={s.value}
+                          onChange={(e) => setGSpecs((prev) => prev.map((v, idx) => idx === i ? { ...v, value: e.target.value } : v))}
+                          style={{ flex: 1, padding: "0.5rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.825rem", color: "#111827" }}
+                        />
+                      )}
                     </div>
                   ))}
-                  <button onClick={() => setGSpecs((prev) => [...prev, ""])}
-                    style={{ alignSelf: "flex-start", padding: "5px 14px", border: "1.5px solid #d1d5db", borderRadius: 8, background: "#fff", color: "#374151", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer" }}>+ Add spec</button>
                 </div>
               </>
             )}
@@ -1114,7 +1326,146 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
         </div>
       </div>
     )}
+
+    {/* Add Package Modal (Business Cards / Flyers) */}
+    {addPkgOpen && (
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+        onClick={() => setAddPkgOpen(false)}
+      >
+        <div style={{ background: "#fff", borderRadius: 18, width: "min(480px,100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ height: 5, background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)" }} />
+          <div style={{ padding: "20px 22px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 800, color: "#111827" }}>Add Gallery Template</h3>
+              <button onClick={() => setAddPkgOpen(false)} style={{ width: 30, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "1rem", color: "#6b7280" }}>✕</button>
+            </div>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
+              Title
+              <input value={addTitle} onChange={(e) => setAddTitle(e.target.value)} style={{ padding: "0.55rem 0.85rem", border: `1.5px solid ${addErrors.title ? "#ef4444" : "#d1d5db"}`, borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
+              {addErrors.title && <span style={{ color: "#ef4444", fontSize: "0.75rem", fontWeight: 500 }}>Title is required.</span>}
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
+              Price
+              <input value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="e.g. $79 + tax" style={{ padding: "0.55rem 0.85rem", border: `1.5px solid ${addErrors.price ? "#ef4444" : "#d1d5db"}`, borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
+              {addErrors.price && <span style={{ color: "#ef4444", fontSize: "0.75rem", fontWeight: 500 }}>Price is required.</span>}
+            </label>
+            <div style={{ marginBottom: 18 }}>
+              <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: "0.35rem" }}>Image</span>
+              {addImage && (
+                <img src={addImage} alt="preview" style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb", marginBottom: 8 }} />
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input ref={addImageRef} type="file" accept="image/*" onChange={(e) => void handleAddImageChange(e)} style={{ display: "none" }} />
+                <button
+                  type="button"
+                  onClick={() => addImageRef.current?.click()}
+                  style={{ padding: "0.5rem 1rem", border: `1.5px solid ${addErrors.image ? "#ef4444" : "#d1d5db"}`, background: "#f9fafb", color: "#374151", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer" }}
+                >
+                  {addImage ? "Change image" : "Upload image"}
+                </button>
+                {addImageName && <span style={{ fontSize: "0.75rem", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{addImageName}</span>}
+              </div>
+              {addErrors.image && <span style={{ color: "#ef4444", fontSize: "0.75rem", fontWeight: 500, display: "block", marginTop: 6 }}>Image is required.</span>}
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#374151", display: "block", marginBottom: 10 }}>Specs</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {addSpecs.map((spec, i) => {
+                  const hasError = spec.key === "Size" ? addErrors.size : spec.key === "Color" ? addErrors.color : false;
+                  return (
+                    <div key={spec.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ color: "#f97316", fontWeight: 700, fontSize: "0.82rem", flexShrink: 0 }}>✓</span>
+                        <span style={{ width: 110, flexShrink: 0, fontSize: "0.82rem", fontWeight: 600, color: "#374151" }}>
+                          {spec.key}
+                        </span>
+                        {spec.key === "Size" ? (
+                          <>
+                            <input
+                              value={parseSizeValue(spec.value).width}
+                              onChange={(e) => setAddSpecs((s) => s.map((v, j) => j === i ? { ...v, value: formatSizeValue(e.target.value, parseSizeValue(v.value).length) } : v))}
+                              placeholder="Width"
+                              style={{ flex: 1, maxWidth: 150, padding: "0.45rem 0.75rem", border: `1.5px solid ${hasError ? "#ef4444" : "#d1d5db"}`, borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
+                            />
+                            <input
+                              value={parseSizeValue(spec.value).length}
+                              onChange={(e) => setAddSpecs((s) => s.map((v, j) => j === i ? { ...v, value: formatSizeValue(parseSizeValue(v.value).width, e.target.value) } : v))}
+                              placeholder="Length"
+                              style={{ flex: 1, maxWidth: 150, padding: "0.45rem 0.75rem", border: `1.5px solid ${hasError ? "#ef4444" : "#d1d5db"}`, borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
+                            />
+                          </>
+                        ) : (
+                          <input
+                            value={spec.value}
+                            onChange={(e) => setAddSpecs((s) => s.map((v, j) => j === i ? { ...v, value: e.target.value } : v))}
+                            style={{ flex: 1, padding: "0.45rem 0.75rem", border: `1.5px solid ${hasError ? "#ef4444" : "#d1d5db"}`, borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
+                          />
+                        )}
+                      </div>
+                      {spec.key === "Color" && (
+                        <div style={{ marginLeft: 116 }}>
+                          <ColorSwatchPicker
+                            value={spec.value}
+                            onChange={(next) => setAddSpecs((s) => s.map((v, j) => j === i ? { ...v, value: next } : v))}
+                          />
+                        </div>
+                      )}
+                      {hasError && <span style={{ color: "#ef4444", fontSize: "0.75rem", fontWeight: 500, marginLeft: 116 }}>{spec.key} is required.</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => void saveAddPackage()}
+                style={{ flex: 1, padding: "0.65rem 1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setAddPkgOpen(false)}
+                style={{ padding: "0.65rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.875rem", cursor: "pointer", color: "#374151" }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
     </>
+  );
+}
+
+function DeleteConfirmPopup({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+      onClick={onCancel}
+    >
+      <div style={{ background: "#fff", borderRadius: 18, width: "min(340px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ height: 5, background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)" }} />
+        <div style={{ padding: "22px 22px 18px", textAlign: "center" }}>
+          <p style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700, color: "#111827" }}>Do you want to delete?</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={onConfirm}
+              style={{ flex: 1, padding: "0.6rem 1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}
+            >
+              Yes
+            </button>
+            <button
+              onClick={onCancel}
+              style={{ flex: 1, padding: "0.6rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.875rem", cursor: "pointer", color: "#374151" }}
+            >
+              No
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1137,6 +1488,7 @@ function GalleryCard({
 }) {
   const [hovered, setHovered] = useState(false);
   const [popup, setPopup] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <>
@@ -1151,6 +1503,12 @@ function GalleryCard({
       onMouseLeave={() => setHovered(false)}
     >
       <div style={{ background: "#f3f4f6", padding: "16px 14px", position: "relative" }}>
+        {/* Delete icon — top left */}
+        <button
+          onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+          style={{ position: "absolute", top: 10, left: 10, zIndex: 2, width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontSize: "0.78rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+          aria-label="Delete"
+        >🗑</button>
         {/* Info icon — top right */}
         {specs.length > 0 && (
           <button
@@ -1185,7 +1543,7 @@ function GalleryCard({
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={onManage} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #06b6d4", background: "#ecfeff", color: "#0891b2", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>Designs</button>
           <button onClick={onEdit} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Edit</button>
-          <button onClick={onDelete} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Delete</button>
+          <button onClick={() => setConfirmDelete(true)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Delete</button>
         </div>
       </div>
     </div>
@@ -1221,25 +1579,88 @@ function GalleryCard({
         </div>
       </div>
     )}
+
+    {confirmDelete && (
+      <DeleteConfirmPopup onConfirm={() => { setConfirmDelete(false); onDelete(); }} onCancel={() => setConfirmDelete(false)} />
+    )}
     </>
+  );
+}
+
+// Lets admin build up a Color spec value ("Red, #2563eb, Navy…") by picking colors
+// one at a time from the native color picker, shown as a row of round swatches.
+function ColorSwatchPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const colors = value.split(",").map((c) => c.trim()).filter(Boolean);
+  const pickerRef = useRef<HTMLInputElement>(null);
+
+  function addColor(hex: string) {
+    if (colors.includes(hex)) return;
+    onChange([...colors, hex].join(", "));
+  }
+
+  function removeColor(color: string) {
+    onChange(colors.filter((c) => c !== color).join(", "));
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+      {colors.map((color) => (
+        <button
+          key={color}
+          type="button"
+          title={`Remove ${color}`}
+          onClick={() => removeColor(color)}
+          style={{
+            width: 28, height: 28, borderRadius: "50%",
+            background: color.startsWith("#") ? color : undefined,
+            border: "2px solid #d1d5db", cursor: "pointer", padding: 0, flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "0.6rem", color: "#fff", position: "relative",
+          }}
+        >
+          {!color.startsWith("#") && <span style={{ fontSize: "0.55rem", color: "#374151", fontWeight: 700 }}>{color.slice(0, 2).toUpperCase()}</span>}
+        </button>
+      ))}
+      <input
+        ref={pickerRef}
+        type="color"
+        onChange={(e) => addColor(e.target.value)}
+        style={{ opacity: 0, position: "absolute", width: 0, height: 0 }}
+      />
+      <button
+        type="button"
+        title="Add a color"
+        onClick={() => pickerRef.current?.click()}
+        style={{
+          width: 28, height: 28, borderRadius: "50%",
+          border: "2px dashed #9ca3af", background: "#fff", color: "#6b7280",
+          cursor: "pointer", padding: 0, flexShrink: 0, fontSize: "0.95rem", fontWeight: 700,
+          display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
+        }}
+      >
+        +
+      </button>
+    </div>
   );
 }
 
 type BcEditPayload = { title: string; price: string; specs: string[]; image: string };
 
 function BusinessCardPricingCard({
-  title, price, specs, image, onBrowseDesigns, onEdit,
+  title, price, specs, image, onBrowseDesigns, onEdit, onDelete,
 }: {
   title: string; price: string; specs: string[]; image: string;
   onBrowseDesigns: () => void;
   onEdit: (updated: BcEditPayload) => void;
+  onDelete: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [popup, setPopup] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [eTitle, setETitle] = useState("");
   const [ePrice, setEPrice] = useState("");
-  const [eSpecs, setESpecs] = useState<string[]>([]);
+  const [eSpecs, setESpecs] = useState<{ key: string; value: string }[]>([]);
   const [eImage, setEImage] = useState("");
   const [eImageName, setEImageName] = useState("");
   const eImageRef = useRef<HTMLInputElement>(null);
@@ -1247,7 +1668,7 @@ function BusinessCardPricingCard({
   function openEdit() {
     setETitle(title);
     setEPrice(price);
-    setESpecs([...specs]);
+    setESpecs(buildFixedSpecEntries(specs));
     setEImage(image);
     setEImageName("");
     setEditOpen(true);
@@ -1261,7 +1682,7 @@ function BusinessCardPricingCard({
   }
 
   function saveEdit() {
-    onEdit({ title: eTitle.trim() || title, price: ePrice.trim() || price, specs: eSpecs.filter((s) => s.trim()), image: eImage });
+    onEdit({ title: eTitle.trim() || title, price: formatPriceValue(ePrice) || price, specs: eSpecs.filter((s) => s.value.trim()).map(formatSpecEntry), image: eImage });
     setEditOpen(false);
   }
 
@@ -1278,6 +1699,13 @@ function BusinessCardPricingCard({
         onMouseLeave={() => setHovered(false)}
       >
         <div style={{ padding: "28px 18px 16px", position: "relative" }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+            style={{ position: "absolute", top: 12, left: 12, zIndex: 2, width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontSize: "0.78rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            aria-label="Delete"
+          >
+            🗑
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); setPopup(true); }}
             style={{ position: "absolute", top: 12, right: 12, zIndex: 2, width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #6366f1", background: "#eef2ff", color: "#6366f1", fontSize: "0.78rem", fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1376,28 +1804,44 @@ function BusinessCardPricingCard({
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#374151" }}>Specs</span>
-                  <button
-                    onClick={() => setESpecs((s) => [...s, ""])}
-                    style={{ fontSize: "0.75rem", fontWeight: 700, color: "#f97316", background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                  >
-                    + Add spec
-                  </button>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {eSpecs.map((spec, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <div key={spec.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span style={{ color: "#f97316", fontWeight: 700, fontSize: "0.82rem", flexShrink: 0 }}>✓</span>
-                      <input
-                        value={spec}
-                        onChange={(e) => setESpecs((s) => s.map((v, j) => j === i ? e.target.value : v))}
-                        style={{ flex: 1, padding: "0.45rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
-                      />
-                      <button
-                        onClick={() => setESpecs((s) => s.filter((_, j) => j !== i))}
-                        style={{ width: 26, height: 26, border: "1px solid #fca5a5", borderRadius: 6, background: "#fef2f2", color: "#dc2626", fontSize: "0.85rem", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                      >
-                        ✕
-                      </button>
+                      <span style={{ width: 110, flexShrink: 0, fontSize: "0.82rem", fontWeight: 600, color: "#374151" }}>{spec.key}</span>
+                      {spec.key === "Size" ? (
+                        <>
+                          <input
+                            value={parseSizeValue(spec.value).width}
+                            onChange={(e) => setESpecs((s) => s.map((v, j) => j === i ? { ...v, value: formatSizeValue(e.target.value, parseSizeValue(v.value).length) } : v))}
+                            placeholder="Width"
+                            style={{ flex: 1, maxWidth: 150, padding: "0.45rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
+                          />
+                          <input
+                            value={parseSizeValue(spec.value).length}
+                            onChange={(e) => setESpecs((s) => s.map((v, j) => j === i ? { ...v, value: formatSizeValue(parseSizeValue(v.value).width, e.target.value) } : v))}
+                            placeholder="Length"
+                            style={{ flex: 1, maxWidth: 150, padding: "0.45rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
+                          />
+                        </>
+                      ) : (
+                        <input
+                          value={spec.value}
+                          onChange={(e) => setESpecs((s) => s.map((v, j) => j === i ? { ...v, value: e.target.value } : v))}
+                          style={{ flex: 1, padding: "0.45rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
+                        />
+                      )}
+                    </div>
+                    {spec.key === "Color" && (
+                      <div style={{ marginLeft: 116 }}>
+                        <ColorSwatchPicker
+                          value={spec.value}
+                          onChange={(next) => setESpecs((s) => s.map((v, j) => j === i ? { ...v, value: next } : v))}
+                        />
+                      </div>
+                    )}
                     </div>
                   ))}
                 </div>
@@ -1419,6 +1863,10 @@ function BusinessCardPricingCard({
             </div>
           </div>
         </div>
+      )}
+
+      {confirmDelete && (
+        <DeleteConfirmPopup onConfirm={() => { setConfirmDelete(false); onDelete(); }} onCancel={() => setConfirmDelete(false)} />
       )}
     </>
   );

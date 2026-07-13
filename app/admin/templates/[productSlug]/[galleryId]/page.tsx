@@ -83,16 +83,6 @@ export default async function GalleryDetailPage({
           ))}
         </nav>
 
-        {/* Upgrade card */}
-        <div style={{ margin: "0 12px 12px", borderRadius: 16, padding: "18px 16px", background: "linear-gradient(135deg, #f97316 0%, #ef4444 50%, #6366f1 100%)", color: "#fff" }}>
-          <div style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 4 }}>Upgrade to Pro</div>
-          <div style={{ fontSize: "0.75rem", opacity: 0.85, marginBottom: 14, lineHeight: 1.5 }}>
-            Unlock powerful features and take your business to next level.
-          </div>
-          <div style={{ width: "100%", padding: "8px 0", borderRadius: 8, background: "#fff", color: "#f97316", fontWeight: 700, fontSize: "0.8rem", textAlign: "center" }}>
-            Upgrade Now
-          </div>
-        </div>
 
         {/* Profile */}
         <div style={{ padding: "14px 16px", borderTop: "1px solid #f5f5f5", display: "flex", alignItems: "center", gap: 10 }}>

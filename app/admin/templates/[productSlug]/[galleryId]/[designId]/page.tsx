@@ -69,11 +69,6 @@ export default async function DesignColorsPage({
           ))}
         </nav>
 
-        <div style={{ margin: "0 12px 12px", borderRadius: 16, padding: "18px 16px", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 50%, #f97316 100%)", color: "#fff" }}>
-          <div style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 4 }}>Upgrade to Pro</div>
-          <div style={{ fontSize: "0.75rem", opacity: 0.85, marginBottom: 14, lineHeight: 1.5 }}>Unlock powerful features and take your business to the next level.</div>
-          <button style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "none", background: "#fff", color: "#7c3aed", fontWeight: 700, fontSize: "0.8rem", cursor: "pointer" }}>Upgrade Now</button>
-        </div>
 
         <div style={{ padding: "14px 16px", borderTop: "1px solid #f5f5f5", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.85rem", flexShrink: 0 }}>AD</div>

@@ -19,11 +19,12 @@ export async function PATCH(
 ) {
   const { templateId } = await params;
   const body = (await req.json()) as Record<string, unknown>;
-  const updates: { name?: string; previewImage?: string; price?: string; specs?: string[] } = {};
+  const updates: { name?: string; previewImage?: string; price?: string; specs?: string[]; visible?: boolean } = {};
   if (typeof body.name === "string") updates.name = body.name.trim();
   if (typeof body.previewImage === "string") updates.previewImage = body.previewImage;
   if (typeof body.price === "string") updates.price = body.price;
   if (Array.isArray(body.specs)) updates.specs = (body.specs as unknown[]).filter((s) => typeof s === "string") as string[];
+  if (typeof body.visible === "boolean") updates.visible = body.visible;
 
   const template = await updateGalleryTemplate(templateId, updates);
   if (!template) {
