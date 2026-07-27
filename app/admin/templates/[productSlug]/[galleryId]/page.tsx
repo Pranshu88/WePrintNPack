@@ -3,31 +3,38 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-const navSections = [
-  {
-    title: "Catalogue",
-    items: [
-      { label: "Category listing", icon: "🗂️", href: "/admin", active: false, count: null as number | null },
-      { label: "Templates", icon: "🎨", href: "/admin/templates", active: true, count: null as number | null },
-      { label: "Categories", icon: "📁", href: "#", active: false, count: null as number | null },
-      { label: "Reviews", icon: "💬", href: "#", active: false, count: 3 as number | null },
-    ],
-  },
-  {
-    title: "Commerce",
-    items: [
-      { label: "Orders", icon: "🛒", href: "#", active: false, count: 12 as number | null },
-      { label: "Customers", icon: "👥", href: "/admin/customers", active: false, count: null as number | null },
-      { label: "Analytics", icon: "📊", href: "#", active: false, count: null as number | null },
-    ],
-  },
-  {
-    title: "System",
-    items: [
-      { label: "Settings", icon: "⚙️", href: "#", active: false, count: null as number | null },
-    ],
-  },
-];
+const APPAREL_PRODUCT_SLUGS = new Set(["t-shirts", "round-neck-tshirt", "collar-tshirt"]);
+const PACKAGING_PRODUCT_SLUGS = new Set(["packaging-box", "pizza-boxes", "shipping-boxes", "mailer-boxes", "square-shipping-boxes"]);
+
+function buildNavSections(section: "templates" | "apparel" | "packaging") {
+  return [
+    {
+      title: "Catalogue",
+      items: [
+        { label: "Category listing", icon: "🗂️", href: "/admin", active: false, count: null as number | null },
+        { label: "Printing", icon: "🎨", href: "/admin/templates", active: section === "templates", count: null as number | null },
+        { label: "Apparel", icon: "👕", href: "/admin/apparel", active: section === "apparel", count: null as number | null },
+        { label: "Packaging", icon: "📦", href: "/admin/packaging", active: section === "packaging", count: null as number | null },
+        { label: "Categories", icon: "📁", href: "#", active: false, count: null as number | null },
+        { label: "Reviews", icon: "💬", href: "#", active: false, count: 3 as number | null },
+      ],
+    },
+    {
+      title: "Commerce",
+      items: [
+        { label: "Orders", icon: "🛒", href: "#", active: false, count: 12 as number | null },
+        { label: "Customers", icon: "👥", href: "/admin/customers", active: false, count: null as number | null },
+        { label: "Analytics", icon: "📊", href: "#", active: false, count: null as number | null },
+      ],
+    },
+    {
+      title: "System",
+      items: [
+        { label: "Settings", icon: "⚙️", href: "#", active: false, count: null as number | null },
+      ],
+    },
+  ];
+}
 
 export default async function GalleryDetailPage({
   params,
@@ -35,6 +42,10 @@ export default async function GalleryDetailPage({
   params: Promise<{ productSlug: string; galleryId: string }>;
 }) {
   const { productSlug, galleryId } = await params;
+  const section = APPAREL_PRODUCT_SLUGS.has(productSlug) ? "apparel" : PACKAGING_PRODUCT_SLUGS.has(productSlug) ? "packaging" : "templates";
+  const navSections = buildNavSections(section);
+  const backHref = section === "apparel" ? "/admin/apparel" : section === "packaging" ? "/admin/packaging" : "/admin/templates";
+  const backLabel = section === "apparel" ? "Apparel" : section === "packaging" ? "Packaging" : "Printing";
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", background: "#f8f9fc" }}>
@@ -118,7 +129,7 @@ export default async function GalleryDetailPage({
           {/* Page header */}
           <div style={{ marginBottom: 28 }}>
             <p style={{ margin: "0 0 4px", fontSize: "0.75rem", fontWeight: 700, color: "#f97316", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              DASHBOARD / ADMIN / TEMPLATES
+              DASHBOARD / ADMIN / {backLabel.toUpperCase()}
             </p>
             <h1 style={{ margin: "0 0 6px", fontSize: "2rem", fontWeight: 800, color: "#111827" }}>
               Design <span style={{ color: "#f97316" }}>Templates</span>
@@ -128,7 +139,7 @@ export default async function GalleryDetailPage({
               {" › "}
               <Link href="/admin" style={{ color: "#9ca3af", textDecoration: "none" }}>Admin</Link>
               {" › "}
-              <Link href="/admin/templates" style={{ color: "#9ca3af", textDecoration: "none" }}>Templates</Link>
+              <Link href={backHref} style={{ color: "#9ca3af", textDecoration: "none" }}>{backLabel}</Link>
               {" › "}
               <span>Gallery</span>
             </p>

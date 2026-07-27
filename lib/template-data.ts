@@ -52,6 +52,8 @@ export type DesignTemplateItem = {
   createdAt: string;
 };
 
+export type SinaliteSelectedOption = { id: number; group: string; name: string };
+
 export type GalleryTemplate = {
   id: string;
   productSlug: string;
@@ -61,7 +63,11 @@ export type GalleryTemplate = {
   createdAt: string;
   price?: string;
   specs?: string[];
+  description?: string;
   visible: boolean;
+  sinaliteId?: string;
+  sinaliteSku?: string;
+  sinaliteOptions?: SinaliteSelectedOption[];
 };
 
 export type PaginatedTemplates = {
@@ -74,7 +80,7 @@ export type PaginatedTemplates = {
 
 // ─── Internal row shapes ──────────────────────────────────────────────────────
 
-type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null; visible?: number | null };
+type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null; visible?: number | null; description?: string | null; sinalite_id?: string | null; sinalite_sku?: string | null; sinalite_options_json?: string | null };
 type DesignRow = { id: string; gallery_id: string; name: string; color_hex: string | null; color_name: string | null; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; front_bg_color: string | null; back_bg_color: string | null; created_at: string };
 type ColorRow  = { id: string; design_id: string; color_hex: string; color_name: string; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; created_at: string };
 
@@ -86,7 +92,7 @@ function s(v: unknown): string | null { return v == null ? null : String(v); }
 function n(v: unknown): number { return Number(v) || 0; }
 
 function toGtRow(r: Row): GtRow {
-  return { id: s(r.id)!, product_slug: s(r.product_slug)!, name: s(r.name)!, preview_image: s(r.preview_image)!, created_at: s(r.created_at)!, price: s(r.price), specs_json: s(r.specs_json), visible: r.visible == null ? 1 : n(r.visible) };
+  return { id: s(r.id)!, product_slug: s(r.product_slug)!, name: s(r.name)!, preview_image: s(r.preview_image)!, created_at: s(r.created_at)!, price: s(r.price), specs_json: s(r.specs_json), visible: r.visible == null ? 1 : n(r.visible), description: s(r.description), sinalite_id: s(r.sinalite_id), sinalite_sku: s(r.sinalite_sku), sinalite_options_json: s(r.sinalite_options_json) };
 }
 
 function toDesignRow(r: Row): DesignRow {
@@ -139,6 +145,10 @@ function assembleTemplates(rows: GtRow[], allDesigns: DesignRow[], allColors: Co
     const t: GalleryTemplate = { id: r.id, productSlug: r.product_slug, name: r.name, previewImage: r.preview_image, createdAt: r.created_at, designs, visible: r.visible !== 0 };
     if (r.price) t.price = r.price;
     if (r.specs_json) { try { t.specs = JSON.parse(r.specs_json) as string[]; } catch { /* ignore */ } }
+    if (r.description) t.description = r.description;
+    if (r.sinalite_id) t.sinaliteId = r.sinalite_id;
+    if (r.sinalite_sku) t.sinaliteSku = r.sinalite_sku;
+    if (r.sinalite_options_json) { try { t.sinaliteOptions = JSON.parse(r.sinalite_options_json) as SinaliteSelectedOption[]; } catch { /* ignore */ } }
     return t;
   });
 }
@@ -156,15 +166,80 @@ async function fetchDesignsAndColors(client: Client, galleryIds: string[]): Prom
 
 // ─── Public API (all async) ───────────────────────────────────────────────────
 
+// Short-lived cache — each call does 3 round-trips to the remote Turso DB
+// (gallery_templates, designs, design_colors), and the homepage/product-listing
+// pages fire this once per product (20+ calls). A brief TTL turns repeated page
+// views into cache hits instead of re-paying that latency every time.
+const GALLERY_TEMPLATES_CACHE_TTL_MS = 20_000;
+const galleryTemplatesCache = new Map<string, { at: number; templates: GalleryTemplate[] }>();
+
+// Exposed so callers that write directly to gallery_templates outside the normal
+// create/update/delete functions here (e.g. the Sinalite live-sync) can invalidate
+// the cache for a slug instead of waiting out the TTL.
+export function invalidateGalleryTemplatesCache(productSlug: string): void {
+  galleryTemplatesCache.delete(`${productSlug}::true`);
+  galleryTemplatesCache.delete(`${productSlug}::false`);
+}
+
+// Fetches visible templates for MANY product slugs in exactly 3 round-trips total
+// (gallery_templates, designs, design_colors — each with a single IN (...) clause),
+// instead of 3 round-trips PER slug. Built for the homepage/listing carousels that
+// need templates across ~20-50 slugs at once; a single slow remote-DB round-trip
+// beats dozens of them even under concurrency limits.
+export async function getGalleryTemplatesForSlugs(productSlugs: string[]): Promise<Record<string, GalleryTemplate[]>> {
+  const uniqueSlugs = Array.from(new Set(productSlugs));
+  const uncached: string[] = [];
+  const result: Record<string, GalleryTemplate[]> = {};
+  for (const slug of uniqueSlugs) {
+    const cached = galleryTemplatesCache.get(`${slug}::false`);
+    if (cached && Date.now() - cached.at < GALLERY_TEMPLATES_CACHE_TTL_MS) {
+      result[slug] = cached.templates;
+    } else {
+      uncached.push(slug);
+    }
+  }
+  if (uncached.length === 0) return result;
+
+  const db = await getDb();
+  const rows = (await db.execute({
+    sql: `SELECT * FROM gallery_templates WHERE product_slug IN (${inList(uncached)}) AND visible != 0 ORDER BY created_at DESC`,
+    args: uncached,
+  })).rows.map(toGtRow);
+
+  const bySlug = new Map<string, GtRow[]>();
+  for (const r of rows) { const arr = bySlug.get(r.product_slug) ?? []; arr.push(r); bySlug.set(r.product_slug, arr); }
+
+  const { designs, colors } = await fetchDesignsAndColors(db, rows.map((r) => r.id));
+
+  for (const slug of uncached) {
+    const slugRows = bySlug.get(slug) ?? [];
+    const templates = assembleTemplates(slugRows, designs, colors);
+    galleryTemplatesCache.set(`${slug}::false`, { at: Date.now(), templates });
+    result[slug] = templates;
+  }
+  return result;
+}
+
 export async function getGalleryTemplates(productSlug: string, includeHidden = false): Promise<GalleryTemplate[]> {
+  const cacheKey = `${productSlug}::${includeHidden}`;
+  const cached = galleryTemplatesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < GALLERY_TEMPLATES_CACHE_TTL_MS) {
+    return cached.templates;
+  }
+
   const db = await getDb();
   const sql = includeHidden
     ? "SELECT * FROM gallery_templates WHERE product_slug = ? ORDER BY created_at DESC"
     : "SELECT * FROM gallery_templates WHERE product_slug = ? AND visible != 0 ORDER BY created_at DESC";
   const rows = (await db.execute({ sql, args: [productSlug] })).rows.map(toGtRow);
-  if (rows.length === 0) return [];
+  if (rows.length === 0) {
+    galleryTemplatesCache.set(cacheKey, { at: Date.now(), templates: [] });
+    return [];
+  }
   const { designs, colors } = await fetchDesignsAndColors(db, rows.map((r) => r.id));
-  return assembleTemplates(rows, designs, colors);
+  const templates = assembleTemplates(rows, designs, colors);
+  galleryTemplatesCache.set(cacheKey, { at: Date.now(), templates });
+  return templates;
 }
 
 export async function getGalleryTemplatesPaginated(productSlug: string, page: number, limit: number, includeHidden = false): Promise<PaginatedTemplates> {
@@ -189,20 +264,26 @@ export async function getGalleryTemplate(id: string): Promise<GalleryTemplate | 
   return assembleTemplates([row], designs, colors)[0];
 }
 
-export async function createGalleryTemplate(productSlug: string, name: string, previewImage: string): Promise<GalleryTemplate> {
+export async function createGalleryTemplate(productSlug: string, name: string, previewImage: string, description?: string, sinalite?: { id: string; sku?: string }): Promise<GalleryTemplate> {
   const db = await getDb();
   const id = uid(), createdAt = new Date().toISOString();
-  await db.execute({ sql: "INSERT INTO gallery_templates (id, product_slug, name, preview_image, created_at) VALUES (?, ?, ?, ?, ?)", args: [id, productSlug, name.trim(), previewImage, createdAt] });
-  return { id, productSlug, name: name.trim(), previewImage, designs: [], createdAt, visible: true };
+  await db.execute({ sql: "INSERT INTO gallery_templates (id, product_slug, name, preview_image, created_at, description, sinalite_id, sinalite_sku) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", args: [id, productSlug, name.trim(), previewImage, createdAt, description?.trim() || null, sinalite?.id ?? null, sinalite?.sku ?? null] });
+  const t: GalleryTemplate = { id, productSlug, name: name.trim(), previewImage, designs: [], createdAt, visible: true };
+  if (description?.trim()) t.description = description.trim();
+  if (sinalite?.id) t.sinaliteId = sinalite.id;
+  if (sinalite?.sku) t.sinaliteSku = sinalite.sku;
+  return t;
 }
 
-export async function updateGalleryTemplate(id: string, updates: { name?: string; previewImage?: string; price?: string; specs?: string[]; visible?: boolean }): Promise<GalleryTemplate | undefined> {
+export async function updateGalleryTemplate(id: string, updates: { name?: string; previewImage?: string; price?: string; specs?: string[]; description?: string; visible?: boolean; sinaliteOptions?: SinaliteSelectedOption[] }): Promise<GalleryTemplate | undefined> {
   const db = await getDb();
   if (updates.name !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET name = ? WHERE id = ?", args: [updates.name.trim(), id] });
   if (updates.previewImage !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET preview_image = ? WHERE id = ?", args: [updates.previewImage, id] });
   if (updates.price !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET price = ? WHERE id = ?", args: [updates.price, id] });
   if (updates.specs !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET specs_json = ? WHERE id = ?", args: [JSON.stringify(updates.specs), id] });
+  if (updates.description !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET description = ? WHERE id = ?", args: [updates.description.trim() || null, id] });
   if (updates.visible !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET visible = ? WHERE id = ?", args: [updates.visible ? 1 : 0, id] });
+  if (updates.sinaliteOptions !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET sinalite_options_json = ? WHERE id = ?", args: [JSON.stringify(updates.sinaliteOptions), id] });
   return getGalleryTemplate(id);
 }
 

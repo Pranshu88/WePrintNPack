@@ -1,4 +1,4 @@
-import type { Category, ColorVariant, Product } from "@/lib/types";
+import type { Category, Product } from "@/lib/types";
 
 export const catalogGroups = [
   {
@@ -107,13 +107,13 @@ export const categories: Category[] = [
 export const LEGACY_SUBPRODUCT_SLUGS: Record<string, string> = {
   "Flyers": "bold-flyers",
   "Postcards": "promotional-postcards",
-  "Brochures": "tri-fold-brochures",
   "Posters": "posters",
   "Banners": "vinyl-banners",
-  "Yard Signs": "yard-signs",
-  "Stickers & Labels": "stickers-and-labels",
+  "Vinyl Banners": "sinalite-vinyl-banners",
+  "Coroplast Signs & Yard Signs": "yard-signs",
+  "Roll Labels / Stickers": "stickers-and-labels",
   "Round Collar T-Shirt": "round-neck-tshirt",
-  "Straight Collar T-Shirt": "collar-tshirt",
+  "Full Sleeve T-Shirt": "collar-tshirt",
 };
 
 export function slugifyLabel(label: string) {
@@ -124,7 +124,7 @@ export function subProductSlug(label: string) {
   return LEGACY_SUBPRODUCT_SLUGS[label] ?? slugifyLabel(label);
 }
 
-type SeedProductTemplate = {
+export type SeedProductTemplate = {
   slug: string;
   name: string;
   category: string;
@@ -136,7 +136,7 @@ type SeedProductTemplate = {
   specs: Array<{ label: string; value: string }>;
 };
 
-const seedCatalog: Record<string, SeedProductTemplate[]> = {
+export const seedCatalog: Record<string, SeedProductTemplate[]> = {
   "print-essentials": [
     {
       slug: "premium-business-cards",
@@ -386,7 +386,7 @@ const seedCatalog: Record<string, SeedProductTemplate[]> = {
   ]
 };
 
-const initialProducts: Product[] = catalogGroups.flatMap((group) =>
+export const initialProducts: Product[] = catalogGroups.flatMap((group) =>
   seedCatalog[group.slug].map((item, index) => ({
     slug: item.slug,
     name: item.name,
@@ -403,50 +403,6 @@ const initialProducts: Product[] = catalogGroups.flatMap((group) =>
     updatedAt: new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString()
   }))
 );
-
-// Store on globalThis so Next.js HMR module reloads don't wipe data
-declare global {
-  // eslint-disable-next-line no-var
-  var __productStore: { items: Product[] } | undefined;
-}
-if (!globalThis.__productStore) {
-  globalThis.__productStore = {
-    items: initialProducts.map((product, index) => {
-      const timestamp = new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString();
-      return { ...product, createdAt: timestamp, updatedAt: timestamp };
-    }),
-  };
-}
-const _ps = globalThis.__productStore;
-
-function restoreSeedProducts() {
-  if (_ps.items.length > 0) return;
-  _ps.items = initialProducts.map((product, index) => {
-    const timestamp = new Date(Date.UTC(2026, 3, 1 + index, 9, 0, 0)).toISOString();
-    return { ...product, createdAt: timestamp, updatedAt: timestamp };
-  });
-}
-
-function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function cloneProduct(product: Product): Product {
-  return {
-    ...product,
-    specs: product.specs.map((spec) => ({ ...spec })),
-    colorVariants: product.colorVariants?.map((v) => ({ ...v })),
-  };
-}
-
-function ensureCategoryName(category: string) {
-  const categoryMatch = categories.find((item) => item.slug === category);
-  return categoryMatch?.name ?? category;
-}
 
 export function getCatalogGroupForCategory(category: string) {
   const categoryMatch = categories.find((item) => item.slug === category);
@@ -465,50 +421,53 @@ export function groupProductsByCatalog(productsList: Product[]) {
     .filter((group) => group.products.length > 0);
 }
 
-function parseSpecs(specs: Array<{ label: string; value: string }> | undefined) {
-  if (!specs || specs.length === 0) {
-    return [];
-  }
+const MARKETING_MATERIAL_SUBPRODUCTS = [
+  "Posters", "Large Format Posters", "Coroplast Signs & Yard Signs", "Coroplast Signs", "PVC Signs", "Foam Board Signs",
+  "Acrylic Signs", "Aluminum Signs", "Window Graphics", "Wall Decals", "Floor Graphics",
+  "Car Magnets", "Banners", "Vinyl Banners", "Pull Up Banners", "X-Frame Banners", "X-Stand Banners", "Backdrops",
+  "Trade Show Displays",
+];
 
-  return specs
-    .map((spec) => ({
-      label: spec.label.trim(),
-      value: spec.value.trim()
-    }))
-    .filter((spec) => spec.label.length > 0 && spec.value.length > 0);
-}
+const PROMOTIONAL_PRODUCTS_SUBPRODUCTS = [
+  "Roll Labels / Stickers", "Roll Labels", "Product Labels", "Food Labels", "Bottle Labels",
+  "Jar Labels", "Square Cut Labels", "Square Cut Labels / Stickers", "Die-Cut Stickers", "Vinyl Stickers", "Clear Stickers",
+  "BOPP Labels", "Waterproof Labels",
+];
 
-function createUniqueSlug(baseSlug: string, ignoreSlug?: string) {
-  const rootSlug = baseSlug || "product";
-  let candidate = rootSlug;
-  let suffix = 1;
+// Only the categories that actually have Sinalite-imported (or otherwise real) gallery
+// templates built — the rest of MARKETING_MATERIAL_SUBPRODUCTS / PROMOTIONAL_PRODUCTS_SUBPRODUCTS
+// were placeholder labels with zero templates behind them, so they're left out of the merged
+// Business Printing picker (they still exist as-is for the Marketing Material / Promotional
+// Products storefront pages, untouched).
+const MARKETING_MATERIAL_WITH_TEMPLATES = [
+  "Posters", "Large Format Posters", "Coroplast Signs & Yard Signs", "Vinyl Banners", "Pull Up Banners", "X-Frame Banners",
+  "Window Graphics", "Wall Decals", "Aluminum Signs", "Floor Graphics", "Car Magnets",
+];
+const PROMOTIONAL_PRODUCTS_WITH_TEMPLATES = [
+  "Roll Labels / Stickers", "Square Cut Labels / Stickers",
+];
 
-  while (_ps.items.some((product) => product.slug === candidate && product.slug !== ignoreSlug)) {
-    candidate = `${rootSlug}-${suffix}`;
-    suffix += 1;
-  }
-
-  return candidate;
-}
+// The remaining Sinalite categories — imported as plain gallery templates with no seed-design
+// tier logic (see scripts/seed-sinalite-remaining-categories.mjs).
+const REMAINING_SINALITE_CATEGORIES = [
+  "Specialty Business Cards", "Brochures", "Greeting Cards", "Booklets", "Presentation Folders",
+  "Magnets", "Wall Calendars", "Plastics", "Clings", "Letterhead", "Envelopes", "Notepads",
+  "Foam Board", "Styrene Signs", "Display Board / POP", "Canvas", "Sintra/Rigid Board",
+  "A-Frame Signs", "Supply Boxes", "H Stands for Signs", "A Frame Stands", "Folded Business Cards",
+  "Tear Cards", "Digital Sheets", "Adhesive Vinyl", "Tent Cards", "Bookmarks", "NCR Forms",
+  "Specialty Post Cards", "Specialty Greeting Cards", "Covid-19 Decals", "Table Covers", "Invitations",
+];
 
 export const CATEGORY_SUBPRODUCT_OPTIONS: Record<string, string[]> = {
   "business-cards": [
-    "Business Cards", "Postcards", "Flyers", "Brochures", "Door Hangers", "Rack Cards",
-    "Presentation Folders", "Letterheads", "Envelopes", "NCR Forms", "Notepads",
-    "Greeting Cards", "Thank You Cards",
+    "Business Cards", "Postcards", "Flyers", "Door Hangers",
+    ...MARKETING_MATERIAL_WITH_TEMPLATES,
+    ...PROMOTIONAL_PRODUCTS_WITH_TEMPLATES,
+    ...REMAINING_SINALITE_CATEGORIES,
   ],
-  "marketing-material": [
-    "Posters", "Yard Signs", "Coroplast Signs", "PVC Signs", "Foam Board Signs",
-    "Acrylic Signs", "Aluminum Signs", "Window Graphics", "Wall Decals", "Floor Graphics",
-    "Car Magnets", "Banners", "Pull-Up Banners", "X-Stand Banners", "Backdrops",
-    "Trade Show Displays",
-  ],
-  "promotional-products": [
-    "Stickers & Labels", "Roll Labels", "Product Labels", "Food Labels", "Bottle Labels",
-    "Jar Labels", "Square Cut Labels", "Die-Cut Stickers", "Vinyl Stickers", "Clear Stickers",
-    "BOPP Labels", "Waterproof Labels",
-  ],
-  "t-shirts": ["Round Collar T-Shirt", "Straight Collar T-Shirt"],
+  "marketing-material": MARKETING_MATERIAL_SUBPRODUCTS,
+  "promotional-products": PROMOTIONAL_PRODUCTS_SUBPRODUCTS,
+  "t-shirts": ["Round Collar T-Shirt", "Full Sleeve T-Shirt"],
 };
 
 export const LISTING_ALLOWED_CATEGORIES = new Set([
@@ -521,14 +480,6 @@ export const LISTING_EXCLUDED_SLUGS = new Set([
   "retractable-banner", "gloss-stickers", "waterproof-labels",
   "die-cut-stickers", "product-label-rolls",
 ]);
-
-export function getListingProducts(category?: string) {
-  return getProducts(category).filter(
-    (p) => LISTING_ALLOWED_CATEGORIES.has(p.category) && !LISTING_EXCLUDED_SLUGS.has(p.slug)
-  );
-}
-
-export const featuredProducts = () => getProducts().slice(0, 3);
 
 export const testimonials = [
   {
@@ -580,139 +531,7 @@ export const adminJobs = [
   { id: "JOB-438", customer: "Harbor Apparel", stage: "Production queued", files: "5 uploads" }
 ];
 
-export function getProducts(category?: string) {
-  restoreSeedProducts();
-
-  if (!category) {
-    return _ps.items.map(cloneProduct);
-  }
-
-  return _ps.items.filter((product) => product.category === category).map(cloneProduct);
-}
-
-export function getProductBySlug(slug: string) {
-  restoreSeedProducts();
-
-  const product = _ps.items.find((item) => item.slug === slug);
-
-  return product ? cloneProduct(product) : undefined;
-}
-
-export function createProduct(input: {
-  slug?: string;
-  name: string;
-  category: string;
-  image: string;
-  description: string;
-  startingPrice: string;
-  colors?: string[];
-  colorVariants?: ColorVariant[];
-  subProducts?: string[];
-  specs: Array<{ label: string; value: string }>;
-}) {
-  const categoryName = ensureCategoryName(input.category);
-  const baseSlug = slugify(input.slug || input.name);
-  const slug = createUniqueSlug(baseSlug);
-  const timestamp = new Date().toISOString();
-  const product: Product = {
-    slug,
-    name: input.name.trim(),
-    category: input.category,
-    categoryName,
-    image: input.image.trim(),
-    description: input.description.trim(),
-    startingPrice: input.startingPrice.trim(),
-    colors: input.colors?.length ? input.colors : undefined,
-    colorVariants: input.colorVariants?.length ? input.colorVariants : undefined,
-    subProducts: input.subProducts?.length ? input.subProducts : undefined,
-    specs: parseSpecs(input.specs),
-    createdAt: timestamp,
-    updatedAt: timestamp
-  };
-
-  _ps.items = [product, ..._ps.items];
-
-  return cloneProduct(product);
-}
-
-export function updateProduct(
-  slug: string,
-  input: Partial<{
-    slug: string;
-    name: string;
-    category: string;
-    image: string;
-    description: string;
-    startingPrice: string;
-    colors: string[];
-    colorVariants: ColorVariant[];
-    subProducts: string[];
-    specs: Array<{ label: string; value: string }>;
-  }>
-) {
-  const index = _ps.items.findIndex((item) => item.slug === slug);
-
-  if (index < 0) {
-    return undefined;
-  }
-
-  const current = _ps.items[index];
-  const nextCategory = input.category ? ensureCategoryName(input.category) : current.categoryName;
-  const requestedSlug = input.slug?.trim() ? slugify(input.slug) : slug;
-
-  if (requestedSlug !== slug && _ps.items.some((product) => product.slug === requestedSlug)) {
-    throw new Error("Slug already exists.");
-  }
-
-  const updated: Product = {
-    ...current,
-    slug: requestedSlug,
-    name: input.name?.trim() || current.name,
-    category: input.category || current.category,
-    categoryName: nextCategory,
-    image: input.image?.trim() || current.image,
-    description: input.description?.trim() || current.description,
-    startingPrice: input.startingPrice?.trim() || current.startingPrice,
-    colors: input.colors !== undefined ? (input.colors.length ? input.colors : undefined) : current.colors,
-    colorVariants: input.colorVariants !== undefined ? (input.colorVariants.length ? input.colorVariants : undefined) : current.colorVariants,
-    subProducts: input.subProducts !== undefined ? (input.subProducts.length ? input.subProducts : undefined) : current.subProducts,
-    specs: input.specs ? parseSpecs(input.specs) : current.specs.map((spec) => ({ ...spec })),
-    updatedAt: new Date().toISOString()
-  };
-
-  _ps.items = [
-    ..._ps.items.slice(0, index),
-    updated,
-    ..._ps.items.slice(index + 1)
-  ];
-
-  return cloneProduct(updated);
-}
-
-export function deleteProduct(slug: string) {
-  const existing = _ps.items.find((item) => item.slug === slug);
-
-  if (!existing) {
-    return false;
-  }
-
-  _ps.items = _ps.items.filter((item) => item.slug !== slug);
-
-  return true;
-}
-
-export function getAdminProductStats() {
-  restoreSeedProducts();
-
-  const latestUpdatedAt = _ps.items
-    .map((product) => product.updatedAt || product.createdAt || "")
-    .filter(Boolean)
-    .sort()
-    .at(-1);
-
-  return {
-    productCount: _ps.items.length,
-    categoryCount: new Set(_ps.items.map((product) => getCatalogGroupForCategory(product.category)?.slug).filter(Boolean)).size,
-    latestUpdatedAt: latestUpdatedAt || null
-  };
-}
+// Product CRUD (getProducts, getProductBySlug, createProduct, updateProduct, deleteProduct,
+// getListingProducts, featuredProducts, getAdminProductStats) lives in @/lib/products — that
+// module touches the database (via @/lib/db, which uses Node's `fs`) and must never be
+// imported from a client component. This file stays import-safe for both server and client.

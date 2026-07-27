@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import { getGalleryTemplate } from "@/lib/template-data";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
@@ -15,7 +16,7 @@ export default async function MarketingMaterialOrderPage({
   const { slug } = await params;
   const { gallery } = await searchParams;
 
-  const parent = getProductBySlug("marketing-material");
+  const parent = await getProductBySlug("marketing-material");
   if (!parent) notFound();
 
   const name = CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"].find((n) => subProductSlug(n) === slug);

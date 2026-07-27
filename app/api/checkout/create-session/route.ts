@@ -5,17 +5,30 @@ import { randomUUID } from "crypto";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-05-27.dahlia" });
 
-type CartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; doubleSided?: boolean };
+type CartItem = {
+  id: string; name: string; qty: number; pricePerUnit: number; total: number; doubleSided?: boolean;
+  sinaliteId?: string; sinaliteOptions?: Record<string, string>;
+  thumb?: string; frontPreview?: string; backPreview?: string;
+  frontFileUrl?: string; backFileUrl?: string;
+};
+type ShippingDetails = {
+  firstName: string; lastName: string; email: string;
+  addr: string; addr2: string; city: string; state: string; zip: string; country: string; phone: string;
+  method: string;
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const { items, customerName, customerEmail, address, customerId } = await req.json() as {
+    const { items, customerName, customerEmail, address, customerId, shipping } = await req.json() as {
       items: CartItem[];
       customerName: string;
       customerEmail: string;
       address: string;
       customerId?: string;
+      shipping?: ShippingDetails;
     };
+
+    console.log("[checkout/create-session] request body:", JSON.stringify({ items, customerName, customerEmail, address, customerId, shipping }, null, 2));
 
     if (!items?.length) return NextResponse.json({ error: "No items" }, { status: 400 });
 
@@ -23,7 +36,7 @@ export async function POST(req: NextRequest) {
 
     const deduped = new Map<string, CartItem>();
     for (const item of items) {
-      const key = item.name;
+      const key = item.id;
       if (deduped.has(key)) {
         const existing = deduped.get(key)!;
         deduped.set(key, { ...existing, qty: existing.qty + item.qty, total: existing.total + item.total });
@@ -33,14 +46,14 @@ export async function POST(req: NextRequest) {
     }
     const cleanItems = Array.from(deduped.values());
 
-    const amountTotal = cleanItems.reduce((s, i) => s + i.total, 0) + 10;
+    const amountTotal = cleanItems.reduce((s, i) => s + i.total, 0);
 
     const orderId = randomUUID();
     const db = await getDb();
     await db.execute({
-      sql: `INSERT INTO orders (id, stripe_session_id, customer_id, customer_name, customer_email, address, items_json, amount_total, status, production_status, created_at)
-            VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', ?)`,
-      args: [orderId, customerId ?? "", customerName, customerEmail, address, JSON.stringify(cleanItems), amountTotal, new Date().toISOString()],
+      sql: `INSERT INTO orders (id, stripe_session_id, customer_id, customer_name, customer_email, address, items_json, amount_total, status, production_status, shipping_json, created_at)
+            VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', ?, ?)`,
+      args: [orderId, customerId ?? "", customerName, customerEmail, address, JSON.stringify(cleanItems), amountTotal, shipping ? JSON.stringify(shipping) : "", new Date().toISOString()],
     });
 
     const session = await stripe.checkout.sessions.create({
@@ -57,19 +70,6 @@ export async function POST(req: NextRequest) {
         },
         quantity: item.qty,
       })),
-      shipping_options: [
-        {
-          shipping_rate_data: {
-            type: "fixed_amount",
-            fixed_amount: { amount: 1000, currency: "cad" },
-            display_name: "Standard Delivery",
-            delivery_estimate: {
-              minimum: { unit: "business_day", value: 2 },
-              maximum: { unit: "business_day", value: 4 },
-            },
-          },
-        },
-      ],
       customer_email: customerEmail || undefined,
       metadata: { order_id: orderId },
       success_url: `${siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,

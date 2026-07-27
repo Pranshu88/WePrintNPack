@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { GalleryTemplate } from "@/lib/template-data";
+import type { GalleryTemplate, SinaliteSelectedOption } from "@/lib/template-data";
 import { categories, LISTING_ALLOWED_CATEGORIES, LEGACY_SUBPRODUCT_SLUGS, slugifyLabel, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import type { Product } from "@/lib/types";
 
@@ -50,7 +50,8 @@ async function loadBcImage(id: string): Promise<string> {
   }
 }
 
-const SPEC_KEYS = ["Size", "Color", "Paper Type", "Finishing", "Quantities"];
+const SPEC_KEYS = ["Size", "Color", "Paper Type", "Finishing", "Corners", "Quantities"];
+const CORNER_OPTIONS = ["Standard", "Rounded"];
 
 function buildFixedSpecEntries(existing: string[]): { key: string; value: string }[] {
   const byKey: Record<string, string> = {};
@@ -85,15 +86,36 @@ function formatPriceValue(raw: string) {
   return /[$+]/.test(trimmed) ? trimmed : `$${trimmed} + tax`;
 }
 
-type Props = { products: Product[]; openAddRef?: React.RefObject<(() => void) | null> };
+type Props = {
+  products: Product[];
+  openAddRef?: React.RefObject<(() => void) | null>;
+  /** When set, locks this section to a single category (used by the standalone Apparel/Packaging pages, and by the Templates page itself for Business Printing). */
+  onlyCategory?: "t-shirts" | "packaging-box" | "business-cards";
+  /** When true, hides that category from the picker (used by the Templates page once the
+   * category has its own dedicated page — e.g. T-Shirts moved to /admin/apparel). */
+  excludeTshirts?: boolean;
+  /** When true, hides Packaging Box from the picker (moved to /admin/packaging). */
+  excludePackaging?: boolean;
+};
 
-export function AdminTemplateSection({ products, openAddRef }: Props) {
+export function AdminTemplateSection({ products, openAddRef, onlyCategory, excludeTshirts, excludePackaging }: Props) {
   const router = useRouter();
-  const [productList] = useState<Product[]>(products);
-  const apparelProducts = productList.filter((p) => LISTING_ALLOWED_CATEGORIES.has(p.category));
+  const apparelProducts = products.filter((p) =>
+    LISTING_ALLOWED_CATEGORIES.has(p.category) &&
+    (onlyCategory
+      ? p.category === onlyCategory
+      : !(excludeTshirts && p.category === "t-shirts") && !(excludePackaging && p.category === "packaging-box"))
+  );
 
   const [selectedSlug, setSelectedSlug] = useState<string>(() => {
-    try { const v = localStorage.getItem("tmpl-selectedSlug"); if (v) return v; } catch { /* ignore */ }
+    if (onlyCategory === "t-shirts") return "t-shirts";
+    if (onlyCategory === "packaging-box") return products.find((p) => p.category === "packaging-box")?.slug ?? "";
+    if (onlyCategory === "business-cards") return products.find((p) => p.category === "business-cards")?.slug ?? "";
+    try {
+      const v = localStorage.getItem("tmpl-selectedSlug");
+      const stalePackaging = excludePackaging && products.find((p) => p.slug === v)?.category === "packaging-box";
+      if (v && v !== "t-shirts" && !stalePackaging) return v;
+    } catch { /* ignore */ }
     const first = apparelProducts[0];
     if (!first) return "";
     return first.category === "t-shirts" ? "t-shirts" : first.slug;
@@ -108,7 +130,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   });
   const [promotionalSubProduct, setPromotionalSubProduct] = useState<string>(() => {
     try { const v = localStorage.getItem("tmpl-promotionalSubProduct"); if (v) return v; } catch { /* ignore */ }
-    return "Stickers & Labels";
+    return "Roll Labels / Stickers";
   });
   const [packagingSubProduct, setPackagingSubProduct] = useState<"pizza-boxes" | "shipping-boxes" | "mailer-boxes" | "square-shipping-boxes">(() => {
     try { const v = localStorage.getItem("tmpl-packagingSubProduct"); if (v === "pizza-boxes" || v === "shipping-boxes" || v === "mailer-boxes" || v === "square-shipping-boxes") return v; } catch { /* ignore */ }
@@ -127,8 +149,8 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   useEffect(() => { try { localStorage.setItem("tmpl-tshirtSubProduct", tshirtSubProduct); } catch { /* ignore */ } }, [tshirtSubProduct]);
 
   const isTshirts = selectedSlug === "t-shirts";
-  const selectedProduct = productList.find((p) => p.slug === selectedSlug);
-  const tshirtProduct = productList.find((p) => p.category === "t-shirts");
+  const selectedProduct = products.find((p) => p.slug === selectedSlug);
+  const tshirtProduct = products.find((p) => p.category === "t-shirts");
   const isBusinessPrinting = selectedProduct?.category === "business-cards";
   const isMarketingMaterial = selectedProduct?.category === "marketing-material";
   const isPackagingBox = selectedProduct?.category === "packaging-box";
@@ -139,11 +161,31 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   const promotionalOptions = CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"];
   const tshirtOptions = CATEGORY_SUBPRODUCT_OPTIONS["t-shirts"];
 
+  // `products` arrives asynchronously from the parent page's own /api/products fetch —
+  // if this component first rendered before that resolved, selectedSlug's initializer
+  // ran against an empty array and locked onto "". Recover once real data shows up.
+  useEffect(() => {
+    if (selectedSlug || products.length === 0) return;
+    if (onlyCategory === "t-shirts") { setSelectedSlug("t-shirts"); return; }
+    if (onlyCategory === "packaging-box" || onlyCategory === "business-cards") {
+      setSelectedSlug(products.find((p) => p.category === onlyCategory)?.slug ?? "");
+      return;
+    }
+    const first = apparelProducts[0];
+    setSelectedSlug(first ? (first.category === "t-shirts" ? "t-shirts" : first.slug) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
   useEffect(() => {
     if (isBusinessPrinting && !businessPrintingOptions.includes(subProduct)) setSubProduct(businessPrintingOptions[0]);
     if (isMarketingMaterial && !marketingOptions.includes(marketingSubProduct)) setMarketingSubProduct(marketingOptions[0]);
     if (isPromotionalProducts && !promotionalOptions.includes(promotionalSubProduct)) setPromotionalSubProduct(promotionalOptions[0]);
     if (isTshirts && !tshirtOptions.includes(tshirtSubProduct)) setTshirtSubProduct(tshirtOptions[0]);
+    // T-Shirts moved to its own page (/admin/apparel) — if a stale "t-shirts" selection was
+    // persisted from before the move, fall back to the first still-available category here.
+    if (excludeTshirts && selectedSlug === "t-shirts") setSelectedSlug(apparelProducts[0]?.slug ?? "");
+    // Packaging Box moved to its own page (/admin/packaging) — same fallback.
+    if (excludePackaging && isPackagingBox) setSelectedSlug(apparelProducts[0]?.slug ?? "");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSlug]);
 
@@ -311,8 +353,8 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   const isFlyers = isBusinessPrinting && subProduct === "Flyers";
   const isBanners      = isMarketingMaterial && marketingSubProduct === "Banners";
   const isPosters      = isMarketingMaterial && marketingSubProduct === "Posters";
-  const isYardSigns    = isMarketingMaterial && marketingSubProduct === "Yard Signs";
-  const isStickers     = isPromotionalProducts && promotionalSubProduct === "Stickers & Labels";
+  const isYardSigns    = isMarketingMaterial && marketingSubProduct === "Coroplast Signs & Yard Signs";
+  const isStickers     = isPromotionalProducts && promotionalSubProduct === "Roll Labels / Stickers";
   const isMailerBoxes         = isPackagingBox && packagingSubProduct === "mailer-boxes";
   const isShippingBoxes       = isPackagingBox && packagingSubProduct === "shipping-boxes";
   const isPizzaBoxes          = isPackagingBox && packagingSubProduct === "pizza-boxes";
@@ -424,13 +466,14 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
   const [addPrice, setAddPrice] = useState("");
   const [addImage, setAddImage] = useState("");
   const [addImageName, setAddImageName] = useState("");
+  const [addDescription, setAddDescription] = useState("");
   const [addSpecs, setAddSpecs] = useState(buildFixedSpecEntries([]));
   const [addErrors, setAddErrors] = useState<Record<string, boolean>>({});
   const addImageRef = useRef<HTMLInputElement>(null);
 
   function openAddPackageModal(target: "bc" | "fly" | "generic") {
     setAddPkgTarget(target);
-    setAddTitle(""); setAddPrice(""); setAddImage(""); setAddImageName("");
+    setAddTitle(""); setAddPrice(""); setAddImage(""); setAddImageName(""); setAddDescription("");
     setAddSpecs(buildFixedSpecEntries([]));
     setAddErrors({});
     setAddPkgOpen(true);
@@ -475,7 +518,7 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
         await fetch(`/api/products/${effectiveSlug}/templates/${data.template.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ price, specs }),
+          body: JSON.stringify({ price, specs, description: addDescription.trim() }),
         });
         setAddPkgOpen(false);
         flash("Gallery template added.");
@@ -761,37 +804,41 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
 
       {/* Product selector */}
       <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid #f3f4f6" }}>
-        <label style={{ fontWeight: 700, fontSize: "0.875rem", color: "#374151", display: "block", marginBottom: "0.5rem" }}>
-          Select category
-        </label>
-        {apparelProducts.length === 0 ? (
-          <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>No products found. Add products in the Product Listing.</p>
-        ) : (
-          <select
-            value={selectedSlug}
-            onChange={(e) => { setSelectedSlug(e.target.value); setPackagingSubProduct("pizza-boxes"); }}
-            style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
-          >
-            {(() => {
-              const opts: { value: string; label: string }[] = [];
-              let tshirtsAdded = false;
-              for (const p of apparelProducts) {
-                if (p.category === "t-shirts") {
-                  if (!tshirtsAdded) { opts.push({ value: "t-shirts", label: "T-Shirts" }); tshirtsAdded = true; }
-                } else if (p.category === "flyers" || p.slug === "bold-flyers") {
-                  // Flyers managed via Business Printing → Flyers sub-tab
-                } else {
-                  opts.push({ value: p.slug, label: `${p.name} (${categories.find(c => c.slug === p.category)?.name ?? p.category})` });
-                }
-              }
-              return opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>);
-            })()}
-          </select>
+        {!onlyCategory && (
+          <>
+            <label style={{ fontWeight: 700, fontSize: "0.875rem", color: "#374151", display: "block", marginBottom: "0.5rem" }}>
+              Select category
+            </label>
+            {apparelProducts.length === 0 ? (
+              <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>No products found. Add products in the Product Listing.</p>
+            ) : (
+              <select
+                value={selectedSlug}
+                onChange={(e) => { setSelectedSlug(e.target.value); setPackagingSubProduct("pizza-boxes"); }}
+                style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
+              >
+                {(() => {
+                  const opts: { value: string; label: string }[] = [];
+                  let tshirtsAdded = false;
+                  for (const p of apparelProducts) {
+                    if (p.category === "t-shirts") {
+                      if (!tshirtsAdded) { opts.push({ value: "t-shirts", label: "T-Shirts" }); tshirtsAdded = true; }
+                    } else if (p.category === "flyers" || p.slug === "bold-flyers") {
+                      // Flyers managed via Business Printing → Flyers sub-tab
+                    } else {
+                      opts.push({ value: p.slug, label: `${p.name} (${categories.find(c => c.slug === p.category)?.name ?? p.category})` });
+                    }
+                  }
+                  return opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>);
+                })()}
+              </select>
+            )}
+          </>
         )}
         {isBusinessPrinting && (
           <div style={{ marginTop: "1rem" }}>
             <label style={{ fontWeight: 700, fontSize: "0.875rem", color: "#374151", display: "block", marginBottom: "0.5rem" }}>
-              Select Product
+              Select Category
             </label>
             <select
               value={subProduct}
@@ -871,85 +918,172 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
       )}
 
       {/* Business Cards pricing cards */}
-      {isBusinessCards ? (
+      {isBusinessCards ? (() => {
+        // Every Sinalite-imported gallery row (any sinaliteId) is shown with its real
+        // name/price/specs from the DB — the old localStorage-only virtual placeholders
+        // for the original 3 tiers are skipped in favor of the full imported catalogue.
+        const sinaliteBcRows = galleryList
+          .filter((g): g is GalleryTemplate => !!g.sinaliteId)
+          .sort((a, b) => Number(a.sinaliteId) - Number(b.sinaliteId));
+        const sinaliteBcRowIds = new Set(sinaliteBcRows.map((g) => g.id));
+        const extraPackages = bcPackages.filter((pkg) => !["bc-standard", "bc-premium", "bc-luxury"].includes(pkg.id));
+
+        return (
         <div style={{ padding: "1.25rem 1.5rem" }}>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
-            <button
-              onClick={() => openAddPackageModal("bc")}
-              style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
-            >
-              + Add Gallery Template
-            </button>
-          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.25rem" }}>
-            {bcPackages.map((pkg) => (
+            {sinaliteBcRows.map((g) => (
+              <BusinessCardPricingCard
+                key={g.id}
+                title={g.name}
+                price={g.price || "$0 + tax"}
+                specs={g.specs ?? []}
+                image={g.previewImage}
+                description={g.description ?? ""}
+                sinaliteId={g.sinaliteId}
+                sinaliteOptions={g.sinaliteOptions}
+                onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
+                onEdit={(updated) => {
+                  void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                  }).then(() => loadTemplates()).catch(() => {});
+                }}
+                onDelete={() => void deleteGallery(g.id)}
+              />
+            ))}
+            {extraPackages.map((pkg) => (
               <BusinessCardPricingCard
                 key={pkg.id}
                 title={pkg.title}
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   setBcPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
-                  // pkg.id is only a virtual id (e.g. "bc-premium") until a design has been
-                  // added, at which point a real gallery_templates row exists under a
-                  // different id, matched here by name — otherwise this PATCH 404s
-                  // harmlessly and price/specs/image stay in localStorage/IndexedDB until
-                  // that row exists (see ensureRealGalleryId, which syncs them in then).
                   const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
                   void fetch(`/api/products/premium-business-cards/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image }),
-                  }).catch(() => {});
+                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, description: updated.description }),
+                  }).then(() => loadTemplates()).catch(() => {});
                 }}
                 onDelete={() => setBcPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
+            {galleryList
+              .filter((g) => !sinaliteBcRowIds.has(g.id) && !bcPackages.some((p) => p.title === g.name))
+              .map((g) => (
+                <BusinessCardPricingCard
+                  key={g.id}
+                  title={g.name}
+                  price={g.price || "$0 + tax"}
+                  specs={g.specs ?? []}
+                  image={g.previewImage}
+                  description={g.description ?? ""}
+                  sinaliteId={g.sinaliteId}
+                  sinaliteOptions={g.sinaliteOptions}
+                  onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
+                  onEdit={(updated) => {
+                    void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                    }).then(() => loadTemplates()).catch(() => {});
+                  }}
+                  onDelete={() => void deleteGallery(g.id)}
+                />
+              ))}
           </div>
         </div>
-      ) : isFlyers ? (
+        );
+      })() : isFlyers ? (() => {
+        // The 2 default tiers (Express/Prime Flyers) are now backed by real Sinalite-imported
+        // gallery rows (sinalite ids 37, 38) — always shown with their real name/price/specs from
+        // the DB, so the old localStorage-only virtual placeholders for these 2 are skipped.
+        const SINALITE_FLYER_TIER_IDS = ["37", "38"];
+        const sinaliteFlyerRows = SINALITE_FLYER_TIER_IDS
+          .map((id) => galleryList.find((g) => g.sinaliteId === id))
+          .filter((g): g is GalleryTemplate => !!g);
+        const sinaliteFlyerRowIds = new Set(sinaliteFlyerRows.map((g) => g.id));
+        const extraPackages = flyPackages.filter((pkg) => !["fly-standard", "fly-premium"].includes(pkg.id));
+
+        return (
         <div style={{ padding: "1.25rem 1.5rem" }}>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
-            <button
-              onClick={() => openAddPackageModal("fly")}
-              style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
-            >
-              + Add Gallery Template
-            </button>
-          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.25rem" }}>
-            {flyPackages.map((pkg) => (
+            {sinaliteFlyerRows.map((g) => (
+              <BusinessCardPricingCard
+                key={g.id}
+                title={g.name}
+                price={g.price || "$0 + tax"}
+                specs={g.specs ?? []}
+                image={g.previewImage}
+                description={g.description ?? ""}
+                sinaliteId={g.sinaliteId}
+                sinaliteOptions={g.sinaliteOptions}
+                onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${g.id}`)}
+                onEdit={(updated) => {
+                  void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                  }).then(() => loadTemplates()).catch(() => {});
+                }}
+                onDelete={() => void deleteGallery(g.id)}
+              />
+            ))}
+            {extraPackages.map((pkg) => (
               <BusinessCardPricingCard
                 key={pkg.id}
                 title={pkg.title}
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   setFlyPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
-                  // pkg.id is only a virtual id (e.g. "fly-premium") until a design has been
-                  // added, at which point a real gallery_templates row exists under a
-                  // different id, matched here by name — otherwise this PATCH 404s
-                  // harmlessly and price/specs/image stay in localStorage/IndexedDB until
-                  // that row exists (see ensureRealGalleryId, which syncs them in then).
                   const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
                   void fetch(`/api/products/bold-flyers/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image }),
-                  }).catch(() => {});
+                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, description: updated.description }),
+                  }).then(() => loadTemplates()).catch(() => {});
                 }}
                 onDelete={() => setFlyPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
+            {galleryList
+              .filter((g) => !sinaliteFlyerRowIds.has(g.id) && !flyPackages.some((p) => p.title === g.name))
+              .map((g) => (
+                <BusinessCardPricingCard
+                  key={g.id}
+                  title={g.name}
+                  price={g.price || "$0 + tax"}
+                  specs={g.specs ?? []}
+                  image={g.previewImage}
+                  description={g.description ?? ""}
+                  sinaliteId={g.sinaliteId}
+                  sinaliteOptions={g.sinaliteOptions}
+                  onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${g.id}`)}
+                  onEdit={(updated) => {
+                    void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                    }).then(() => loadTemplates()).catch(() => {});
+                  }}
+                  onDelete={() => void deleteGallery(g.id)}
+                />
+              ))}
           </div>
         </div>
-      ) : isStickers ? (
+        );
+      })() : isStickers ? (
         <div style={{ padding: "1.25rem 1.5rem" }}>
           {loading ? (
             <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Loading…</p>
@@ -968,11 +1102,19 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                     price={price}
                     specs={specs}
                     image={image}
+                    description={g.description ?? ""}
+                    sinaliteId={g.sinaliteId}
+                    sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/stickers-and-labels/${g.id}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setStickerImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setStickerMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
+                      void fetch(`/api/products/stickers-and-labels/templates/${g.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                      }).then(() => loadTemplates()).catch(() => {});
                     }}
                     onDelete={() => void deleteGallery(g.id)}
                   />
@@ -1000,11 +1142,19 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                     price={price}
                     specs={specs}
                     image={image}
+                    description={g.description ?? ""}
+                    sinaliteId={g.sinaliteId}
+                    sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/yard-signs/${g.id}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setYardSignImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setYardSignMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
+                      void fetch(`/api/products/yard-signs/templates/${g.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                      }).then(() => loadTemplates()).catch(() => {});
                     }}
                     onDelete={() => void deleteGallery(g.id)}
                   />
@@ -1032,11 +1182,19 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                     price={price}
                     specs={specs}
                     image={image}
+                    description={g.description ?? ""}
+                    sinaliteId={g.sinaliteId}
+                    sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/posters/${g.id}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setPosterImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setPosterMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
+                      void fetch(`/api/products/posters/templates/${g.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                      }).then(() => loadTemplates()).catch(() => {});
                     }}
                     onDelete={() => void deleteGallery(g.id)}
                   />
@@ -1144,11 +1302,19 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                     price={price}
                     specs={specs}
                     image={image}
+                    description={g.description ?? ""}
+                    sinaliteId={g.sinaliteId}
+                    sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/vinyl-banners/${g.id}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setBannerImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setBannerMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
+                      void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                      }).then(() => loadTemplates()).catch(() => {});
                     }}
                     onDelete={() => void deleteGallery(g.id)}
                   />
@@ -1161,14 +1327,6 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
         /* Gallery grid */
         apparelProducts.length > 0 && (
           <div style={{ padding: "1.25rem 1.5rem" }}>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
-              <button
-                onClick={() => isTshirts ? openAddModal() : openAddPackageModal("generic")}
-                style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
-              >
-                + Add Gallery Template
-              </button>
-            </div>
             {loading ? (
               <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Loading…</p>
             ) : galleryList.length === 0 ? (
@@ -1186,12 +1344,15 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                         price={g.price || "$0 + tax"}
                         specs={g.specs ?? []}
                         image={g.previewImage}
+                        description={g.description ?? ""}
+                        sinaliteId={g.sinaliteId}
+                        sinaliteOptions={g.sinaliteOptions}
                         onBrowseDesigns={() => router.push(`/admin/templates/${effectiveSlug}/${g.id}`)}
                         onEdit={(updated) => {
                           void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs }),
+                            body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
                           }).then(() => loadTemplates());
                         }}
                         onDelete={() => void deleteGallery(g.id)}
@@ -1350,6 +1511,15 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
               <input value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="e.g. $79 + tax" style={{ padding: "0.55rem 0.85rem", border: `1.5px solid ${addErrors.price ? "#ef4444" : "#d1d5db"}`, borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
               {addErrors.price && <span style={{ color: "#ef4444", fontSize: "0.75rem", fontWeight: 500 }}>Price is required.</span>}
             </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
+              Description
+              <textarea
+                value={addDescription}
+                onChange={(e) => setAddDescription(e.target.value)}
+                rows={6}
+                style={{ padding: "0.55rem 0.85rem", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none", minHeight: 140, resize: "vertical", fontFamily: "inherit" }}
+              />
+            </label>
             <div style={{ marginBottom: 18 }}>
               <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: "0.35rem" }}>Image</span>
               {addImage && (
@@ -1395,6 +1565,15 @@ export function AdminTemplateSection({ products, openAddRef }: Props) {
                               style={{ flex: 1, maxWidth: 150, padding: "0.45rem 0.75rem", border: `1.5px solid ${hasError ? "#ef4444" : "#d1d5db"}`, borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
                             />
                           </>
+                        ) : spec.key === "Corners" ? (
+                          <select
+                            value={spec.value}
+                            onChange={(e) => setAddSpecs((s) => s.map((v, j) => j === i ? { ...v, value: e.target.value } : v))}
+                            style={{ flex: 1, padding: "0.45rem 0.75rem", border: `1.5px solid ${hasError ? "#ef4444" : "#d1d5db"}`, borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none", background: "#fff" }}
+                          >
+                            <option value="">Select...</option>
+                            {CORNER_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                          </select>
                         ) : (
                           <input
                             value={spec.value}
@@ -1644,26 +1823,53 @@ function ColorSwatchPicker({ value, onChange }: { value: string; onChange: (next
   );
 }
 
-type BcEditPayload = { title: string; price: string; specs: string[]; image: string };
+type BcEditPayload = { title: string; price: string; specs: string[]; image: string; description: string; sinaliteOptions?: SinaliteSelectedOption[] };
+
+type SinaliteOptionFetched = { id: number; group: string; name: string; hidden: number };
 
 function BusinessCardPricingCard({
-  title, price, specs, image, onBrowseDesigns, onEdit, onDelete,
+  title, price, specs, image, description, sinaliteId, sinaliteOptions, onBrowseDesigns, onEdit, onDelete,
 }: {
-  title: string; price: string; specs: string[]; image: string;
+  title: string; price: string; specs: string[]; image: string; description?: string;
+  sinaliteId?: string; sinaliteOptions?: SinaliteSelectedOption[];
   onBrowseDesigns: () => void;
   onEdit: (updated: BcEditPayload) => void;
   onDelete: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [popup, setPopup] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [eTitle, setETitle] = useState("");
   const [ePrice, setEPrice] = useState("");
   const [eSpecs, setESpecs] = useState<{ key: string; value: string }[]>([]);
   const [eImage, setEImage] = useState("");
   const [eImageName, setEImageName] = useState("");
+  const [eDescription, setEDescription] = useState("");
   const eImageRef = useRef<HTMLInputElement>(null);
+  const [optGroups, setOptGroups] = useState<Record<string, SinaliteOptionFetched[]>>({});
+  const [optLoading, setOptLoading] = useState(false);
+  const [optError, setOptError] = useState<string | null>(null);
+  const [optLoaded, setOptLoaded] = useState(false);
+
+  function loadSinaliteOptions() {
+    if (!sinaliteId || optLoaded) return;
+    setOptLoading(true);
+    setOptError(null);
+    fetch(`/api/sinalite/products/${sinaliteId}/options`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { options?: SinaliteOptionFetched[]; error?: string }) => {
+        if (d.error) { setOptError(d.error); return; }
+        const groups: Record<string, SinaliteOptionFetched[]> = {};
+        for (const o of (d.options ?? []).filter((o) => o.hidden === 0)) {
+          const key = o.group.toLowerCase();
+          (groups[key] ??= []).push(o);
+        }
+        setOptGroups(groups);
+        setOptLoaded(true);
+      })
+      .catch(() => setOptError("Failed to load options"))
+      .finally(() => setOptLoading(false));
+  }
 
   function openEdit() {
     setETitle(title);
@@ -1671,7 +1877,9 @@ function BusinessCardPricingCard({
     setESpecs(buildFixedSpecEntries(specs));
     setEImage(image);
     setEImageName("");
+    setEDescription(description ?? "");
     setEditOpen(true);
+    loadSinaliteOptions();
   }
 
   async function handleImageChange(e: ChangeEvent<HTMLInputElement>) {
@@ -1682,7 +1890,18 @@ function BusinessCardPricingCard({
   }
 
   function saveEdit() {
-    onEdit({ title: eTitle.trim() || title, price: formatPriceValue(ePrice) || price, specs: eSpecs.filter((s) => s.value.trim()).map(formatSpecEntry), image: eImage });
+    // No admin selection step — every fetched (non-hidden) Sinalite option is offered as-is.
+    const chosenOptions: SinaliteSelectedOption[] = Object.values(optGroups)
+      .flat()
+      .map((o) => ({ id: o.id, group: o.group, name: o.name }));
+    onEdit({
+      title: eTitle.trim() || title,
+      price: formatPriceValue(ePrice) || price,
+      specs: eSpecs.filter((s) => s.value.trim()).map(formatSpecEntry),
+      image: eImage,
+      description: eDescription.trim(),
+      ...(sinaliteId ? { sinaliteOptions: chosenOptions } : {}),
+    });
     setEditOpen(false);
   }
 
@@ -1700,14 +1919,7 @@ function BusinessCardPricingCard({
       >
         <div style={{ padding: "28px 18px 16px", position: "relative" }}>
           <button
-            onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
-            style={{ position: "absolute", top: 12, left: 12, zIndex: 2, width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontSize: "0.78rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-            aria-label="Delete"
-          >
-            🗑
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setPopup(true); }}
+            onClick={(e) => { e.stopPropagation(); setPopup(true); loadSinaliteOptions(); }}
             style={{ position: "absolute", top: 12, right: 12, zIndex: 2, width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #6366f1", background: "#eef2ff", color: "#6366f1", fontSize: "0.78rem", fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             i
@@ -1725,8 +1937,7 @@ function BusinessCardPricingCard({
           </div>
         </div>
         <div style={{ padding: "4px 18px 20px" }}>
-          <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{title}</p>
-          <p style={{ margin: "0 0 14px", fontSize: "0.88rem", fontWeight: 700, color: "#f97316" }}>{price}</p>
+          <p style={{ margin: "0 0 14px", fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{title}</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onBrowseDesigns} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #06b6d4", background: "#ecfeff", color: "#0891b2", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>Designs</button>
             <button onClick={openEdit} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #d1d5db", background: "#fff", color: "#374151", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Edit</button>
@@ -1740,25 +1951,35 @@ function BusinessCardPricingCard({
           style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
           onClick={() => setPopup(false)}
         >
-          <div style={{ background: "#fff", borderRadius: 18, width: "min(400px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.2)", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ height: 5, background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)" }} />
-            <div style={{ padding: "20px 22px" }}>
+          <div style={{ background: "#fff", borderRadius: 18, width: "min(400px,100%)", maxHeight: "85vh", boxShadow: "0 24px 60px rgba(0,0,0,0.2)", overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ height: 5, background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", flexShrink: 0 }} />
+            <div style={{ padding: "20px 22px 0", flexShrink: 0 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 800, color: "#111827" }}>{title}</h3>
-                  <p style={{ margin: "3px 0 0", fontSize: "0.95rem", fontWeight: 700, color: "#f97316" }}>{price}</p>
-                </div>
+                <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 800, color: "#111827" }}>{title}</h3>
                 <button onClick={() => setPopup(false)} style={{ width: 30, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "1rem", color: "#6b7280" }}>✕</button>
               </div>
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-                {specs.map((spec) => (
+            </div>
+            <ul style={{ margin: 0, padding: "0 22px 20px", listStyle: "none", display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
+              {sinaliteId ? (
+                optLoading ? (
+                  <li style={{ fontSize: "0.85rem", color: "#9ca3af", padding: "4px 12px" }}>Loading Sinalite options…</li>
+                ) : (
+                  Object.values(optGroups).flat().map((o) => (
+                    <li key={`${o.group}-${o.id}`} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: "0.85rem", color: "#374151", padding: "8px 12px", borderRadius: 10, background: "#fafafa", border: "1px solid #f0f0f0" }}>
+                      <span style={{ color: "#f97316", fontWeight: 700, flexShrink: 0 }}>✓</span>
+                      {o.group}: {o.name}
+                    </li>
+                  ))
+                )
+              ) : (
+                specs.map((spec) => (
                   <li key={spec} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: "0.85rem", color: "#374151", padding: "8px 12px", borderRadius: 10, background: "#fafafa", border: "1px solid #f0f0f0" }}>
                     <span style={{ color: "#f97316", fontWeight: 700, flexShrink: 0 }}>✓</span>
                     {spec}
                   </li>
-                ))}
-              </ul>
-            </div>
+                ))
+              )}
+            </ul>
           </div>
         </div>
       )}
@@ -1776,13 +1997,26 @@ function BusinessCardPricingCard({
                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 800, color: "#111827" }}>Edit Card</h3>
                 <button onClick={() => setEditOpen(false)} style={{ width: 30, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "1rem", color: "#6b7280" }}>✕</button>
               </div>
+              {!sinaliteId && (
+                <>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
+                    Title
+                    <input value={eTitle} onChange={(e) => setETitle(e.target.value)} style={{ padding: "0.55rem 0.85rem", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
+                    Price
+                    <input value={ePrice} onChange={(e) => setEPrice(e.target.value)} style={{ padding: "0.55rem 0.85rem", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
+                  </label>
+                </>
+              )}
               <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
-                Title
-                <input value={eTitle} onChange={(e) => setETitle(e.target.value)} style={{ padding: "0.55rem 0.85rem", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: 14 }}>
-                Price
-                <input value={ePrice} onChange={(e) => setEPrice(e.target.value)} style={{ padding: "0.55rem 0.85rem", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none" }} />
+                Description
+                <textarea
+                  value={eDescription}
+                  onChange={(e) => setEDescription(e.target.value)}
+                  rows={6}
+                  style={{ padding: "0.55rem 0.85rem", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: "0.875rem", color: "#111827", outline: "none", minHeight: 140, resize: "vertical", fontFamily: "inherit" }}
+                />
               </label>
               <div style={{ marginBottom: 18 }}>
                 <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: "0.35rem" }}>Image</span>
@@ -1801,6 +2035,7 @@ function BusinessCardPricingCard({
                   {eImageName && <span style={{ fontSize: "0.75rem", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eImageName}</span>}
                 </div>
               </div>
+              {!sinaliteId && (
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#374151" }}>Specs</span>
@@ -1826,6 +2061,15 @@ function BusinessCardPricingCard({
                             style={{ flex: 1, maxWidth: 150, padding: "0.45rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none" }}
                           />
                         </>
+                      ) : spec.key === "Corners" ? (
+                        <select
+                          value={spec.value}
+                          onChange={(e) => setESpecs((s) => s.map((v, j) => j === i ? { ...v, value: e.target.value } : v))}
+                          style={{ flex: 1, padding: "0.45rem 0.75rem", border: "1.5px solid #d1d5db", borderRadius: 7, fontSize: "0.82rem", color: "#111827", outline: "none", background: "#fff" }}
+                        >
+                          <option value="">Select...</option>
+                          {CORNER_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
                       ) : (
                         <input
                           value={spec.value}
@@ -1846,6 +2090,38 @@ function BusinessCardPricingCard({
                   ))}
                 </div>
               </div>
+              )}
+              {sinaliteId && (
+                <div style={{ marginBottom: 20 }}>
+                  <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: "0.5rem" }}>
+                    Sinalite Options
+                  </span>
+                  {optLoading ? (
+                    <p style={{ margin: 0, fontSize: "0.8rem", color: "#9ca3af" }}>Loading options…</p>
+                  ) : optError ? (
+                    <p style={{ margin: 0, fontSize: "0.8rem", color: "#dc2626" }}>{optError}</p>
+                  ) : Object.keys(optGroups).length === 0 ? (
+                    <p style={{ margin: 0, fontSize: "0.8rem", color: "#9ca3af" }}>No options found.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {Object.entries(optGroups).map(([groupKey, opts]) => (
+                        <div key={groupKey}>
+                          <span style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "#6b7280", textTransform: "capitalize", marginBottom: 6 }}>
+                            {groupKey}
+                          </span>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.6rem" }}>
+                            {opts.map((o) => (
+                              <span key={o.id} style={{ fontSize: "0.8rem", color: "#374151", background: "#f3f4f6", borderRadius: 6, padding: "0.2rem 0.55rem" }}>
+                                {o.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   onClick={saveEdit}
@@ -1865,9 +2141,6 @@ function BusinessCardPricingCard({
         </div>
       )}
 
-      {confirmDelete && (
-        <DeleteConfirmPopup onConfirm={() => { setConfirmDelete(false); onDelete(); }} onCancel={() => setConfirmDelete(false)} />
-      )}
     </>
   );
 }

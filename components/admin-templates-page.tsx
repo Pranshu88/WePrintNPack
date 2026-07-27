@@ -66,7 +66,9 @@ export function AdminTemplatesPage() {
       title: "Catalogue",
       items: [
         { label: "Category listing", icon: "🗂️", href: "/admin", active: pathname === "/admin", count: null },
-        { label: "Templates", icon: "🎨", href: "/admin/templates", active: pathname === "/admin/templates", count: null },
+        { label: "Printing", icon: "🎨", href: "/admin/templates", active: pathname === "/admin/templates", count: null },
+        { label: "Apparel", icon: "👕", href: "/admin/apparel", active: pathname === "/admin/apparel", count: null },
+        { label: "Packaging", icon: "📦", href: "/admin/packaging", active: pathname === "/admin/packaging", count: null },
         { label: "Reviews", icon: "💬", href: "/admin/reviews", active: pathname === "/admin/reviews", count: null },
       ],
     },
@@ -147,7 +149,7 @@ export function AdminTemplatesPage() {
                 <Link href="/" style={{ color: "#9ca3af", textDecoration: "none" }}>Home</Link>
                 {" › "}
                 <Link href="/admin" style={{ color: "#9ca3af", textDecoration: "none" }}>Admin</Link>
-                {" › "}Templates
+                {" › "}Printing
               </p>
               <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
                 Manage gallery templates and design options for each product.
@@ -158,7 +160,7 @@ export function AdminTemplatesPage() {
           {loading ? (
             <div style={{ padding: "2rem", color: "#9ca3af", fontSize: "0.9rem" }}>Loading products…</div>
           ) : (
-            <AdminTemplateSection products={products} openAddRef={openAddRef} />
+            <AdminTemplateSection products={products} openAddRef={openAddRef} onlyCategory="business-cards" />
           )}
         </main>
       </div>

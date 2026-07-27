@@ -113,7 +113,7 @@ export default function PackagingBoxPage() {
           id: pkg.id,
           name: saved?.title ?? pkg.title,
           price: saved?.price ?? pkg.price,
-          image: img || "",
+          image: img || "/images/cardingprint.jpg",
           link: `/products/packaging-box/${pkg.subSlug}`,
           dielineSlug: pkg.dielineSlug,
         });

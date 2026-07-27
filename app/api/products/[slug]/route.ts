@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { deleteProduct, getProductBySlug, updateProduct } from "@/lib/data";
+import { deleteProduct, getProductBySlug, updateProduct } from "@/lib/products";
 import type { ColorVariant } from "@/lib/types";
 
 function parseSpecs(value: unknown) {
@@ -50,7 +50,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const product = await getProductBySlug(slug);
 
   if (!product) {
     return NextResponse.json({ error: "Product not found." }, { status: 404 });
@@ -94,7 +94,7 @@ export async function PATCH(
 
     const subProducts = parseSubProducts(body.subProducts);
 
-    const product = updateProduct(slug, {
+    const product = await updateProduct(slug, {
       slug: readString(body, "slug"),
       name,
       category,
@@ -129,7 +129,7 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
-  const deleted = deleteProduct(slug);
+  const deleted = await deleteProduct(slug);
 
   if (!deleted) {
     return NextResponse.json({ error: "Product not found." }, { status: 404 });

@@ -1,3 +1,7 @@
+@keyframes wp-spin {
+  to { transform: rotate(360deg); }
+}
+
 :root {
   --bg: #f4efe7;
   --surface: #fffaf4;
@@ -697,6 +701,125 @@ button {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.product-hero {
+  display: flex;
+  align-items: stretch;
+  gap: 2rem;
+  background: #f3f4f6;
+  border: 2px solid #111827;
+  border-radius: 24px;
+  padding: 2.5rem;
+  margin-bottom: 2.5rem;
+  overflow: hidden;
+}
+
+.product-hero-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.product-hero-img {
+  position: relative;
+  flex-shrink: 0;
+  width: 380px;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+@media (max-width: 860px) {
+  .product-hero { flex-direction: column; }
+  .product-hero-img { width: 100%; height: 220px; }
+}
+
+.product-hero-breadcrumb {
+  margin: 0 0 1.25rem;
+  font-size: 0.95rem;
+  color: #6b7280;
+}
+.product-hero-breadcrumb a {
+  color: inherit;
+  text-decoration: none;
+}
+.product-hero-breadcrumb a:hover { text-decoration: underline; }
+.product-hero-breadcrumb span { color: #111827; }
+
+.page-section h1.product-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0 0 1rem;
+  font-size: clamp(1.15rem, 1.8vw, 1.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: #111827;
+}
+
+.product-hero-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #7c3aed;
+  font-size: 1.5rem;
+}
+
+.product-hero-desc {
+  max-width: 60ch;
+  color: #6b7280;
+  font-size: 1.05rem;
+  margin: 0 0 1.75rem;
+}
+
+.product-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 0.9rem 1.25rem;
+  box-shadow: 0 2px 8px rgba(17,24,39,0.05);
+}
+
+.product-search-go {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #111827;
+}
+
+.product-search-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.product-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 1rem;
+  color: inherit;
+  font-family: inherit;
+}
+
+.product-search-input::placeholder {
+  color: var(--muted);
+}
+
+.product-search-empty {
+  color: var(--muted);
+  padding: 2rem 0;
+  text-align: center;
 }
 
 .product-meta {

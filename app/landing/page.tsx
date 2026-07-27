@@ -5,7 +5,6 @@ import Image from "next/image";
 import LandingContactForm from "@/components/landing-form";
 import PopularProductsCarousel from "@/components/popular-products-carousel";
 import { LISTING_ALLOWED_CATEGORIES, LISTING_EXCLUDED_SLUGS } from "@/lib/data";
-import { getProductLink } from "@/lib/product-link";
 import AuthModal from "@/components/auth-modal";
 import { WelcomePopup } from "@/components/welcome-popup";
 import { PolicyModal } from "@/components/policy-modal";
@@ -394,32 +393,36 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── BROWSE BY CATEGORY ─────────────────────────────── */}
-      <section className="lp-sec lp-products" id="lp-products">
+      {/* ── PRINT & PACKAGING ──────────────────────────────── */}
+      <section className="lp-sec lp-pp" id="lp-pp">
         <div className="lp-wrap">
           <div className="lp-sec-head lp-centered lp-anim">
-            <h2>BROWSE BY CATEGORY</h2>
+            <h2>PRINT &amp; PACKAGING</h2>
             <div className="lp-underline-bar" />
           </div>
-          <div className="lp-cat-grid">
-            {categoryProducts.map((p, idx) => {
-              const catHref =
-                p.category === "business-cards" ? "/products/business-cards" :
-                p.category === "t-shirts"       ? "/products/t-shirts"       :
-                getProductLink(p);
-              return (
-              <a key={p.slug} href={catHref} className={`lp-cat-card lp-anim lp-anim-d${Math.min(idx + 1, 6)}`}>
-                <div className="lp-prod-img">
-                  <Image src={p.image} alt={p.name} fill sizes="(max-width:640px) 50vw, 200px" style={{ objectFit: "cover" }} />
-                </div>
-                <div className="lp-cat-info">
-                  <span className="lp-cat-name">{p.name}</span>
-                  <p className="lp-cat-desc">{p.description}</p>
-                  <span className="lp-cat-link">Shop Now →</span>
-                </div>
-              </a>
-              );
-            })}
+          <div className="lp-pp-grid">
+            <a href="/products" className="lp-pp-card lp-pp-card--green lp-anim lp-anim-d1">
+              <div className="lp-pp-head">
+                <span className="lp-pp-title">Design &amp; Print</span>
+                <span className="lp-pp-arrow">
+                  <Image src="/images/ic_arrow.png" alt="" width={48} height={48} />
+                </span>
+              </div>
+              <div className="lp-pp-img-wrap">
+                <Image src="/images/ic_print1.png" alt="Design & Print" fill sizes="(max-width:860px) 100vw, 50vw" style={{ objectFit: "cover" }} />
+              </div>
+            </a>
+            <a href="/products/packaging-box" className="lp-pp-card lp-pp-card--blue lp-anim lp-anim-d2">
+              <div className="lp-pp-head">
+                <span className="lp-pp-title">Dieline Template<br />Maker</span>
+                <span className="lp-pp-arrow">
+                  <Image src="/images/ic_arrow.png" alt="" width={48} height={48} />
+                </span>
+              </div>
+              <div className="lp-pp-img-wrap">
+                <Image src="/images/ic_design1.png" alt="Dieline Template Maker" fill sizes="(max-width:860px) 100vw, 50vw" style={{ objectFit: "cover" }} />
+              </div>
+            </a>
           </div>
         </div>
       </section>

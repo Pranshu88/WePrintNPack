@@ -9,12 +9,14 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "node ./scripts/seed-templates.mjs",
+    "seed:sinalite-bc": "node --env-file=.env.local ./scripts/seed-sinalite-business-cards.mjs",
     "postinstall": "node -e \"if(!process.env.VERCEL){require('child_process').execSync('npm rebuild better-sqlite3 --build-from-source',{stdio:'inherit'})}\""
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
     "@stripe/stripe-js": "^9.7.0",
     "@types/nodemailer": "^8.0.0",
+    "@vercel/blob": "^2.6.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.11.0",
     "next": "^15.5.18",

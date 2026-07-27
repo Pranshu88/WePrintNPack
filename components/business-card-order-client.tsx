@@ -9,6 +9,16 @@ import DesignEditorShell from "./design-editor-shell";
 const LENS_SIZE = 140;
 const ZOOM_FACTOR = 2.5;
 
+// Sinalite "size" option values look like "8.5 x 5.5" (width x height, inches) —
+// parsed so the Design Editor's canvas/ruler labels can match whatever size the
+// customer actually picked in Configure Your Order, instead of a fixed default.
+function parseSinaliteSizeToInches(sizeName: string | undefined): { width: number; height: number } | undefined {
+  if (!sizeName) return undefined;
+  const m = sizeName.match(/^\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*$/i);
+  if (!m) return undefined;
+  return { width: parseFloat(m[1]), height: parseFloat(m[2]) };
+}
+
 // Price overrides for non-BC gallery templates (mirrors PRICE_FALLBACKS in popular-products-carousel)
 const GALLERY_PRICE_MAP: Record<string, { price: string; priceNote: string }> = {
   "Vinyl Banner":            { price: "From $109", priceNote: "+ tax" },
@@ -87,6 +97,21 @@ const BC_PACKAGE_DATA: Record<string, { dbKey: string; title: string; price: str
     ],
   },
 };
+
+// The 3 BC tiers are now backed by Sinalite-imported gallery rows (ids 1/2/7) whose display
+// `name` is the real Sinalite product name, not the fixed label — so BC_PACKAGE_DATA has to be
+// looked up by sinaliteId first, falling back to a literal name match for any other gallery.
+const SINALITE_ID_TO_BC_NAME: Record<string, string> = {
+  "1": "Business Cards", "2": "Premium Business Cards", "7": "Luxury Business Cards",
+  "37": "Express Flyers", "38": "Prime Flyers",
+  "97": "Business Yard Sign", "98": "Elite Yard Sign",
+  "65": "Large Posters", "66": "Small Posters",
+};
+function getBcPackageData(gallery: GalleryTemplate | null): (typeof BC_PACKAGE_DATA)[string] | null {
+  if (!gallery) return null;
+  const byId = gallery.sinaliteId ? SINALITE_ID_TO_BC_NAME[gallery.sinaliteId] : undefined;
+  return BC_PACKAGE_DATA[byId ?? gallery.name] ?? null;
+}
 
 // Gallery template specs are stored as "Label: value" strings (set via the admin
 // Add/Edit Gallery Template modal's Size/Color/Paper Type/Finishing/Quantities fields).
@@ -167,6 +192,14 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   const [allDesigns, setAllDesigns] = useState<DesignTemplateItem[]>([]);
   const [loadingGallery, setLoadingGallery] = useState(true);
   const [bcImage, setBcImage] = useState("");
+  const [selectedSinaliteOptions, setSelectedSinaliteOptions] = useState<Record<string, string>>({});
+  const [sinalitePrice, setSinalitePrice] = useState<{ price: number; productOptions: Record<string, string> } | null>(null);
+  const [sinalitePriceLoading, setSinalitePriceLoading] = useState(false);
+  // Fallback for Sinalite-linked galleries whose options were never saved to the DB
+  // (gallery.sinaliteOptions empty) — fetched live from the same endpoint the admin
+  // panel uses, so every Sinalite product works without a manual admin save step.
+  const [liveSinaliteOptions, setLiveSinaliteOptions] = useState<{ id: number; group: string; name: string }[]>([]);
+  const [liveSinaliteOptionsLoading, setLiveSinaliteOptionsLoading] = useState(false);
 
   // browse designs modal state
   const [designSearch, setDesignSearch] = useState("");
@@ -212,7 +245,7 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   // Load the correct BC package photo from IndexedDB once gallery is known
   useEffect(() => {
     if (!gallery) return;
-    const bcData = BC_PACKAGE_DATA[gallery.name];
+    const bcData = getBcPackageData(gallery);
     if (!bcData) return;
     void loadBcImage(bcData.dbKey).then((img) => { if (img) setBcImage(img); });
   }, [gallery]);
@@ -255,19 +288,97 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   }
 
   // When a BC package gallery is selected, override static product data with package-specific data
-  const bcData = gallery ? BC_PACKAGE_DATA[gallery.name] ?? null : null;
-  const galleryPrice = gallery ? GALLERY_PRICE_MAP[gallery.name] ?? null : null;
+  const bcData = getBcPackageData(gallery);
+  const mappedGalleryName = gallery?.sinaliteId ? SINALITE_ID_TO_BC_NAME[gallery.sinaliteId] : undefined;
+  const galleryPrice = gallery ? GALLERY_PRICE_MAP[mappedGalleryName ?? gallery.name] ?? null : null;
   const adminPrice = gallery?.price ? gallery.price.replace(/\s*\+\s*tax/i, "").trim() : null;
-  const displayTitle = bcData?.title ?? (gallery?.name && !bcData ? gallery.name : null) ?? productNameOverride ?? product.name;
+  const displayTitle = bcData?.title ?? mappedGalleryName ?? (gallery?.name && !bcData ? gallery.name : null) ?? productNameOverride ?? product.name;
+  // The on-page heading always shows the real Sinalite template name (e.g. "Business cards
+  // 14pt (Profit Maximizer)") once a Sinalite-linked gallery is selected — everywhere else
+  // (breadcrumb, editor, price lookups) still uses the friendly branded displayTitle.
+  const displayHeading = gallery?.sinaliteId ? gallery.name : displayTitle;
   const displayPrice = bcData?.price ?? galleryPrice?.price ?? adminPrice ?? product.startingPrice;
   const displayPriceNote = bcData?.priceNote ?? galleryPrice?.priceNote ?? (adminPrice ? "+ tax · per set" : "per set · No setup fee");
   const displayPriceNum = parseFloat(displayPrice.replace(/[^0-9.]/g, "")) || undefined;
   const displaySpecs = parseGallerySpecs(gallery?.specs);
+  const displayDescription = gallery?.description || product.description;
   const displayImage = bcImage || gallery?.previewImage || product.image || gallery?.designs[0]?.frontImage;
+  // Prefer options saved on the gallery (admin-curated); fall back to a live fetch
+  // straight from Sinalite for galleries that were never edited/saved in admin.
+  const effectiveSinaliteOptions = gallery?.sinaliteOptions?.length ? gallery.sinaliteOptions : liveSinaliteOptions;
+  const sinaliteOptionGroups = ((): Record<string, { id: number; label: string; name: string }[]> => {
+    const groups: Record<string, { id: number; label: string; name: string }[]> = {};
+    for (const o of effectiveSinaliteOptions) {
+      const key = o.group.toLowerCase();
+      (groups[key] ??= []).push({ id: o.id, label: o.group, name: o.name });
+    }
+    return groups;
+  })();
+  useEffect(() => {
+    setLiveSinaliteOptions([]);
+    if (!gallery?.sinaliteId || gallery.sinaliteOptions?.length) return;
+    let cancelled = false;
+    setLiveSinaliteOptionsLoading(true);
+    fetch(`/api/sinalite/products/${gallery.sinaliteId}/options`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { options?: { id: number; group: string; name: string; hidden: number }[]; error?: string }) => {
+        if (cancelled || d.error) return;
+        setLiveSinaliteOptions((d.options ?? []).filter((o) => o.hidden === 0));
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLiveSinaliteOptionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [gallery?.id, gallery?.sinaliteId, gallery?.sinaliteOptions?.length]);
+  useEffect(() => {
+    if (!effectiveSinaliteOptions.length) return;
+    setSelectedSinaliteOptions((prev) => {
+      const next = { ...prev };
+      for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
+        if (!next[key] && opts[0]) next[key] = opts[0].name;
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gallery?.id, effectiveSinaliteOptions.length]);
+
+  // Recalculate live Sinalite pricing whenever the customer changes a configuration option.
+  // Debounced — Sinalite's price endpoint is a heavy per-call cost calculation, so firing one
+  // request per click (e.g. clicking through 4-5 options quickly) can overload it and time out.
+  useEffect(() => {
+    if (!gallery?.sinaliteId || Object.keys(sinaliteOptionGroups).length === 0) { setSinalitePrice(null); return; }
+    const optionIds: number[] = [];
+    for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
+      const chosenName = selectedSinaliteOptions[key];
+      const match = opts.find((o) => o.name === chosenName) ?? opts[0];
+      if (match) optionIds.push(match.id);
+    }
+    if (optionIds.length === 0) { setSinalitePrice(null); return; }
+    let cancelled = false;
+    setSinalitePriceLoading(true);
+    const timer = setTimeout(() => {
+      fetch(`/api/sinalite/products/${gallery.sinaliteId}/price`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionIds }),
+      })
+        .then((r) => r.json())
+        .then((d: { price?: number; productOptions?: Record<string, string>; error?: string }) => {
+          if (cancelled || d.error || d.price == null) return;
+          setSinalitePrice({ price: d.price, productOptions: d.productOptions ?? {} });
+        })
+        .catch(() => { if (!cancelled) setSinalitePrice(null); })
+        .finally(() => { if (!cancelled) setSinalitePriceLoading(false); });
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gallery?.sinaliteId, selectedSinaliteOptions]);
+
   const materialColors = parseMaterialColors(gallery?.specs);
 
   const editorProductType = ((): React.ComponentProps<typeof DesignEditorShell>["productType"] => {
-    const gn = gallery?.name ?? "";
+    // Prefer the sinaliteId-mapped tier name (e.g. "Express Flyers") over the raw display
+    // name, since Sinalite-imported galleries carry their real product name in `gallery.name`.
+    const gn = mappedGalleryName ?? gallery?.name ?? "";
     const s  = product.slug;
 
     // Check gallery name first — it's more specific than the product slug
@@ -307,6 +418,9 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
         productName={displayTitle}
         pricePerUnit={displayPriceNum}
         materialColors={materialColors.length > 0 ? materialColors : undefined}
+        sinaliteId={gallery?.sinaliteId}
+        sinaliteOptions={effectiveSinaliteOptions}
+        customDimsInches={parseSinaliteSizeToInches(selectedSinaliteOptions["size"])}
         onClose={() => setEditorOpen(false)}
       />
     );
@@ -377,22 +491,26 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
             {/* Title + description */}
             <div style={{ paddingBottom: "1.25rem" }}>
               <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-                {displayTitle}
+                {displayHeading}
               </h1>
-              <p style={{ margin: 0, fontSize: "0.95rem", color: "#6b7280", lineHeight: 1.6 }}>{product.description}</p>
+              {displayDescription && (
+                <p style={{ margin: 0, fontSize: "0.95rem", color: "#6b7280", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{displayDescription}</p>
+              )}
             </div>
 
-            {/* Price */}
-            <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0" }}>
-              <p style={{ margin: "0 0 6px", fontSize: "0.8rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Starting from</p>
-              <div style={{ fontSize: "2.25rem", fontWeight: 800, letterSpacing: "-0.03em", background: "linear-gradient(90deg,#7c3aed,#db2777,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", lineHeight: 1 }}>
-                {displayPrice}
+            {/* Price — hidden for Sinalite-linked products; pricing will come from Sinalite's own API in a later phase */}
+            {!gallery?.sinaliteId && (
+              <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0" }}>
+                <p style={{ margin: "0 0 6px", fontSize: "0.8rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Starting from</p>
+                <div style={{ fontSize: "2.25rem", fontWeight: 800, letterSpacing: "-0.03em", background: "linear-gradient(90deg,#7c3aed,#db2777,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", lineHeight: 1 }}>
+                  {displayPrice}
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "#9ca3af", marginTop: "5px" }}>{displayPriceNote}</div>
               </div>
-              <div style={{ fontSize: "0.875rem", color: "#9ca3af", marginTop: "5px" }}>{displayPriceNote}</div>
-            </div>
+            )}
 
-            {/* Specs */}
-            {displaySpecs.length > 0 && (
+            {/* Specs — dropped for Sinalite-linked products; replaced by Configure Your Order below */}
+            {!gallery?.sinaliteId && displaySpecs.length > 0 && (
               <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
                 {displaySpecs.map((s) => (
                   <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.875rem" }}>
@@ -419,6 +537,97 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Configure your order — loading state while options are still being fetched
+                (either the gallery itself, or the live Sinalite options fallback) */}
+            {gallery?.sinaliteId && Object.keys(sinaliteOptionGroups).length === 0 && (loadingGallery || liveSinaliteOptionsLoading) && (
+              <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0", display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                <span style={{
+                  width: 16, height: 16, borderRadius: "50%",
+                  border: "2px solid #e5e7eb", borderTopColor: "#7c3aed",
+                  animation: "wp-spin 0.7s linear infinite", flexShrink: 0,
+                }} />
+                <span style={{ fontSize: "0.85rem", color: "#6b7280", fontWeight: 600 }}>Loading order options…</span>
+              </div>
+            )}
+
+            {/* Configure your order — from admin-selected Sinalite options */}
+            {gallery?.sinaliteId && Object.keys(sinaliteOptionGroups).length > 0 && (
+              <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0", display: "flex", flexDirection: "column", gap: "1.1rem" }}>
+                <p style={{ margin: 0, fontSize: "0.8rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>
+                  Configure your order
+                </p>
+                {Object.entries(sinaliteOptionGroups).map(([key, opts]) => {
+                  const groupLabel = key === "qty" ? "Quantity" : (opts[0]?.label ?? key).replace(/\b\w/g, (c) => c.toUpperCase());
+                  if (key === "qty") {
+                    return (
+                      <div key={key}>
+                        <p style={{ margin: "0 0 0.4rem", fontSize: "0.85rem", fontWeight: 700, color: "#374151" }}>{groupLabel}</p>
+                        <select
+                          value={selectedSinaliteOptions[key] ?? ""}
+                          onChange={(e) => setSelectedSinaliteOptions((prev) => ({ ...prev, [key]: e.target.value }))}
+                          style={{ width: "100%", padding: "0.65rem 0.85rem", border: "1.5px solid #e5e7eb", borderRadius: "10px", fontSize: "0.9rem", color: "#111827", background: "#fff" }}
+                        >
+                          {opts.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
+                        </select>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={key}>
+                      <p style={{ margin: "0 0 0.4rem", fontSize: "0.85rem", fontWeight: 700, color: "#374151" }}>{groupLabel}</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                        {opts.map((o) => {
+                          const active = selectedSinaliteOptions[key] === o.name;
+                          return (
+                            <button
+                              key={o.name}
+                              type="button"
+                              onClick={() => setSelectedSinaliteOptions((prev) => ({ ...prev, [key]: o.name }))}
+                              style={{
+                                padding: "0.5rem 0.9rem", borderRadius: "9px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer",
+                                border: active ? "1.5px solid transparent" : "1.5px solid #e5e7eb",
+                                background: active ? "linear-gradient(135deg,#7c3aed,#db2777,#f97316)" : "#fff",
+                                color: active ? "#fff" : "#374151",
+                              }}
+                            >
+                              {o.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Live Sinalite price — recalculated whenever a configuration option changes */}
+            {gallery?.sinaliteId && (sinalitePrice || sinalitePriceLoading) && (
+              <div style={{ border: "1px solid #fecaca", background: "#fff7f7", borderRadius: "12px", padding: "1.25rem", margin: "1.25rem 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <span style={{ fontSize: "0.9rem", color: "#6b7280" }}>Your Price</span>
+                  <span style={{ fontSize: "2rem", fontWeight: 800, color: "#111827" }}>
+                    {sinalitePriceLoading ? "…" : `$${sinalitePrice?.price.toFixed(2)}`}
+                  </span>
+                </div>
+                {sinalitePrice && Object.keys(sinalitePrice.productOptions).length > 0 && (
+                  <>
+                    <p style={{ margin: "1rem 0 0.6rem", fontSize: "0.75rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", borderTop: "1px solid #fde2e2", paddingTop: "0.9rem" }}>
+                      Configuration Summary
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      {Object.entries(sinalitePrice.productOptions).map(([label, value]) => (
+                        <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem" }}>
+                          <span style={{ color: "#9ca3af" }}>{label}</span>
+                          <span style={{ fontWeight: 700, color: "#111827" }}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -514,7 +723,7 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: "1.25rem" }}>
                 {pagedDesigns.map((d) => (
-                  <DesignCard key={d.id} design={d} price={displayPrice} galleryName={gallery?.name} onSelect={() => selectDesign(d)} />
+                  <DesignCard key={d.id} design={d} price={displayPrice} galleryName={mappedGalleryName ?? gallery?.name} onSelect={() => selectDesign(d)} />
                 ))}
               </div>
             )}
@@ -806,6 +1015,7 @@ function DesignCard({ design, price, galleryName, onSelect }: { design: DesignTe
   const [hovered, setHovered] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const dotColor = design.frontBgColor && design.frontBgColor !== "#ffffff" ? design.frontBgColor : "#111827";
+  const previewDims = galleryToDims(galleryName);
 
   useEffect(() => {
     // If a pre-rendered overlay PNG exists, use frontImage + frontOverlay directly.
@@ -849,22 +1059,22 @@ function DesignCard({ design, price, galleryName, onSelect }: { design: DesignTe
     >
       {/* Image area */}
       <div style={{ background: "#f4f4f6", padding: "0.85rem 0.75rem 0.75rem", position: "relative" }}>
-        <div style={{ position: "relative", borderRadius: "8px", overflow: "hidden", boxShadow: "0 4px 18px rgba(0,0,0,0.2)" }}>
+        <div style={{ position: "relative", borderRadius: "8px", overflow: "hidden", boxShadow: "0 4px 18px rgba(0,0,0,0.2)", aspectRatio: `${previewDims.CW} / ${previewDims.CH}` }}>
           {previewSrc ? (
             <img
               src={previewSrc}
               alt={design.name}
-              style={{ width: "100%", height: "auto", display: "block", transition: "transform 0.3s ease", transform: hovered ? "scale(1.03)" : "scale(1)" }}
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.3s ease", transform: hovered ? "scale(1.03)" : "scale(1)" }}
             />
           ) : (
             <>
               <img
                 src={design.frontImage}
                 alt={design.name}
-                style={{ width: "100%", height: "auto", display: "block", transition: "transform 0.3s ease", transform: hovered ? "scale(1.03)" : "scale(1)" }}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.3s ease", transform: hovered ? "scale(1.03)" : "scale(1)" }}
               />
               {design.frontOverlay && (
-                <img src={design.frontOverlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />
+                <img src={design.frontOverlay} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
               )}
             </>
           )}

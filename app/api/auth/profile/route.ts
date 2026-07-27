@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   const row = result.rows[0];
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  let parsedAddress = { houseNo: "", flat: "", city: "", state: "" };
+  let parsedAddress = { houseNo: "", flat: "", city: "", state: "", postalCode: "", country: "CA" };
   try { parsedAddress = { ...parsedAddress, ...JSON.parse((row.address as string) || "{}") }; } catch { /* ignore */ }
 
   return NextResponse.json({
@@ -28,12 +28,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const body = await req.json() as { id?: string; phone?: string; houseNo?: string; flat?: string; city?: string; state?: string };
-  const { id, phone = "", houseNo = "", flat = "", city = "", state = "" } = body;
+  const body = await req.json() as { id?: string; phone?: string; houseNo?: string; flat?: string; city?: string; state?: string; postalCode?: string; country?: string };
+  const { id, phone = "", houseNo = "", flat = "", city = "", state = "", postalCode = "", country = "CA" } = body;
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
   const db = await getDb();
-  const addressJson = JSON.stringify({ houseNo, flat, city, state });
+  const addressJson = JSON.stringify({ houseNo, flat, city, state, postalCode, country });
   await db.execute({
     sql: "UPDATE customers SET phone = ?, address = ? WHERE id = ?",
     args: [phone, addressJson, id],

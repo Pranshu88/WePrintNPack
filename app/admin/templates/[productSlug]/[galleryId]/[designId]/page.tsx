@@ -9,13 +9,17 @@ export default async function DesignColorsPage({
   params: Promise<{ productSlug: string; galleryId: string; designId: string }>;
 }) {
   const { productSlug, galleryId, designId } = await params;
+  const isApparel = productSlug === "t-shirts" || productSlug === "round-neck-tshirt" || productSlug === "collar-tshirt";
+  const isPackaging = ["packaging-box", "pizza-boxes", "shipping-boxes", "mailer-boxes", "square-shipping-boxes"].includes(productSlug);
 
   const navSections = [
     {
       title: "Catalogue",
       items: [
         { label: "Category listing", icon: "🗂️", href: "/admin", active: false },
-        { label: "Templates", icon: "🎨", href: "/admin/templates", active: true },
+        { label: "Printing", icon: "🎨", href: "/admin/templates", active: !isApparel && !isPackaging },
+        { label: "Apparel", icon: "👕", href: "/admin/apparel", active: isApparel },
+        { label: "Packaging", icon: "📦", href: "/admin/packaging", active: isPackaging },
         { label: "Categories", icon: "📁", href: "#", active: false },
         { label: "Reviews", icon: "💬", href: "#", active: false },
       ],
@@ -85,7 +89,7 @@ export default async function DesignColorsPage({
         <header style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "12px 28px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: "0.72rem", color: "#9ca3af", fontWeight: 500 }}>
-              Home &rsaquo; Admin &rsaquo; Templates &rsaquo; Gallery &rsaquo; Design Colors
+              Home &rsaquo; Admin &rsaquo; {isApparel ? "Apparel" : isPackaging ? "Packaging" : "Printing"} &rsaquo; Gallery &rsaquo; Design Colors
             </div>
             <div style={{ fontSize: "1.25rem", fontWeight: 800, color: "#111827", marginTop: 1 }}>
               Color <span style={{ color: "#7c3aed" }}>Variants</span>

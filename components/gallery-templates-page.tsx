@@ -66,6 +66,8 @@ type Props = {
   productBasePath?: string;
   categoryLabel?: string;
   allowedNames?: string[];
+  /** Match/dedupe by Sinalite product id instead of by name (display name can be anything). Takes priority over allowedNames when set. */
+  allowedSinaliteIds?: string[];
 };
 
 export default function GalleryTemplatePage({
@@ -74,6 +76,7 @@ export default function GalleryTemplatePage({
   productBasePath = "/products/dress-shirts",
   categoryLabel = "Dress Shirts",
   allowedNames,
+  allowedSinaliteIds,
 }: Props) {
   const [templates, setTemplates] = useState<GalleryTemplate[]>([]);
   const [total, setTotal] = useState(0);
@@ -107,7 +110,18 @@ export default function GalleryTemplatePage({
         .then((r) => r.json())
         .then((data: PaginatedResponse) => {
           let list = data.templates ?? [];
-          if (allowedNames && allowedNames.length > 0) {
+          if (allowedSinaliteIds && allowedSinaliteIds.length > 0) {
+            const seen = new Set<string>();
+            const deduped: typeof list = [];
+            for (const id of allowedSinaliteIds) {
+              const match = list.find((t) => t.sinaliteId === id);
+              if (match && !seen.has(match.id)) {
+                seen.add(match.id);
+                deduped.push(match);
+              }
+            }
+            list = deduped;
+          } else if (allowedNames && allowedNames.length > 0) {
             // Keep only the first (most-recent) template per allowed name
             const seen = new Set<string>();
             const deduped: typeof list = [];

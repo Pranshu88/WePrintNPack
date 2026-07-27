@@ -1452,29 +1452,88 @@ export async function POST(
       await addDesign(templateId, { name: d.name, frontImage: d.fn(), frontBgColor: "#ffffff", backBgColor: "#ffffff" });
       added++;
     }
-  } else if (slug === "bold-flyers") {
+  } else if (
+    slug === "bold-flyers" &&
+    (gallery.sinaliteId === "37" || gallery.sinaliteId === "38" || gallery.name === "Express Flyers" || gallery.name === "Prime Flyers")
+  ) {
+    // sinaliteId "37"/"38" are the first 2 Sinalite "Flyers" category products (arr[0..1]),
+    // repurposed to carry the Express/Prime Flyers seed-design set regardless of display name.
     for (const d of FLYER_SEED_DESIGNS) {
       if (remainingSlots(FLYER_SEED_DESIGNS.length) <= 0) break;
       if (existingNames.has(d.name)) continue;
       await addDesign(templateId, { name: d.name, frontImage: d.fn(), frontBgColor: d.bg, backBgColor: "#ffffff" });
       added++;
     }
-  } else if (slug === "posters") {
+  } else if (slug === "bold-flyers") {
+    // Any other Sinalite-imported flyer gets no seed designs.
+  } else if (
+    slug === "posters" &&
+    (gallery.sinaliteId === "65" || gallery.sinaliteId === "66" || gallery.name === "Large Posters" || gallery.name === "Small Posters")
+  ) {
+    // sinaliteId "65"/"66" are the first 2 Sinalite "Posters" category products (arr[0..1]),
+    // repurposed to carry the Large/Small Posters seed-design set regardless of display name.
     for (const d of POSTER_SEED_DESIGNS) {
       if (remainingSlots(POSTER_SEED_DESIGNS.length) <= 0) break;
       if (existingNames.has(d.name)) continue;
       await addDesign(templateId, { name: d.name, frontImage: d.fn(), frontBgColor: d.bg, backBgColor: "#ffffff" });
       added++;
     }
-  } else if (slug === "yard-signs") {
+  } else if (slug === "posters") {
+    // Any other Sinalite-imported poster gets no seed designs.
+  } else if (slug === "pull-up-banners" && gallery.sinaliteId === "103") {
+    // The first Sinalite "Pull Up Banners" category product reuses the same seed-design set as
+    // "Premium Roll-Up Banner" under Banners (slug "vinyl-banners").
+    for (const d of ROLLUP_STD_DESIGNS) {
+      if (remainingSlots(ROLLUP_STD_DESIGNS.length) <= 0) break;
+      if (existingNames.has(d.name)) continue;
+      await addDesign(templateId, { name: d.name, frontImage: d.fn(), frontBgColor: "#ffffff", backBgColor: "#ffffff" });
+      added++;
+    }
+  } else if (slug === "pull-up-banners") {
+    // Any other Sinalite-imported pull up banner gets no seed designs.
+  } else if (slug === "sinalite-vinyl-banners" && gallery.sinaliteId === "101") {
+    // The first Sinalite "Vinyl Banners" category product reuses the same seed-design set as
+    // "Vinyl Banner" under Banners (slug "vinyl-banners").
+    for (const d of VINYL_BANNER_DESIGNS) {
+      if (remainingSlots(VINYL_BANNER_DESIGNS.length) <= 0) break;
+      if (existingNames.has(d.name)) continue;
+      await addDesign(templateId, { name: d.name, frontImage: d.fn(), frontBgColor: "#ffffff", backBgColor: "#ffffff" });
+      added++;
+    }
+  } else if (slug === "sinalite-vinyl-banners") {
+    // Any other Sinalite-imported vinyl banner gets no seed designs.
+  } else if (slug === "large-format-posters" && gallery.sinaliteId === "105") {
+    // The single Sinalite "Large Format Posters" product reuses the same seed-design set as
+    // Posters arr[0] ("Large Posters").
+    for (const d of POSTER_SEED_DESIGNS) {
+      if (remainingSlots(POSTER_SEED_DESIGNS.length) <= 0) break;
+      if (existingNames.has(d.name)) continue;
+      await addDesign(templateId, { name: d.name, frontImage: d.fn(), frontBgColor: d.bg, backBgColor: "#ffffff" });
+      added++;
+    }
+  } else if (
+    slug === "yard-signs" &&
+    (gallery.sinaliteId === "97" || gallery.sinaliteId === "98" || gallery.name === "Business Yard Sign" || gallery.name === "Elite Yard Sign")
+  ) {
+    // sinaliteId "97"/"98" are the first 2 Sinalite "Coroplast Signs & Yard Signs" category
+    // products (arr[0..1]), repurposed to carry the Business/Elite Yard Sign seed-design set
+    // regardless of display name.
     for (const d of YARDSIGN_SEED_DESIGNS) {
       if (remainingSlots(YARDSIGN_SEED_DESIGNS.length) <= 0) break;
       if (existingNames.has(d.name)) continue;
       await addDesign(templateId, { name: d.name, frontImage: d.fn(d.p, d.a), frontBgColor: d.bg, backBgColor: "#ffffff" });
       added++;
     }
-  } else if (slug === "stickers-and-labels") {
-    const designs = galleryNameLower.includes("sticker") ? DIE_CUT_STICKER_PREBAKED : PRODUCT_LABEL_PREBAKED;
+  } else if (slug === "yard-signs") {
+    // Any other Sinalite-imported yard sign gets no seed designs.
+  } else if (
+    slug === "stickers-and-labels" &&
+    (gallery.sinaliteId === "7028" || gallery.name === "Product Labels" || gallery.name === "Die-Cut Stickers")
+  ) {
+    // sinaliteId "7028" is the first Sinalite "Roll Labels / Stickers" category product
+    // (arr[0]), repurposed to carry the Product Labels seed-design set regardless of display
+    // name. Any other gallery here still falls back to name-based sticker/label detection.
+    const designs = galleryNameLower.includes("sticker") && gallery.sinaliteId !== "7028" ? DIE_CUT_STICKER_PREBAKED : PRODUCT_LABEL_PREBAKED;
     for (const d of designs) {
       if (remainingSlots(designs.length) <= 0) break;
       if (existingNames.has(d.name)) continue;
@@ -1488,9 +1547,32 @@ export async function POST(
       });
       added++;
     }
-  } else if (gallery.name === "Business Cards" || gallery.name === "Premium Business Cards" || gallery.name === "Luxury Business Cards") {
-    const prebaked = gallery.name === "Business Cards" ? BUSINESS_CARDS_SEED
-      : gallery.name === "Premium Business Cards" ? PREMIUM_BC_SEED
+  } else if (slug === "stickers-and-labels") {
+    // Any other Sinalite-imported roll label / sticker gets no seed designs.
+  } else if (slug === "square-cut-labels-stickers" && gallery.sinaliteId === "96") {
+    // The single Sinalite "Square Cut Labels / Stickers" product reuses the same seed-design
+    // set as "Die-Cut Stickers" under Roll Labels / Stickers (slug "stickers-and-labels").
+    for (const d of DIE_CUT_STICKER_PREBAKED) {
+      if (remainingSlots(DIE_CUT_STICKER_PREBAKED.length) <= 0) break;
+      if (existingNames.has(d.name)) continue;
+      await addDesign(templateId, {
+        name: d.name,
+        frontImage: d.image,
+        frontBgColor: d.bg,
+        backBgColor: "#ffffff",
+        frontAdminItems: d.frontAdminItems ? JSON.parse(d.frontAdminItems) : undefined,
+        backAdminItems: d.backAdminItems ? JSON.parse(d.backAdminItems) : undefined,
+      });
+      added++;
+    }
+  } else if (
+    gallery.sinaliteId === "1" || gallery.sinaliteId === "2" || gallery.sinaliteId === "7" ||
+    gallery.name === "Business Cards" || gallery.name === "Premium Business Cards" || gallery.name === "Luxury Business Cards"
+  ) {
+    // sinaliteId "1"/"2"/"7" are the first 3 Sinalite "Business Cards" category products (arr[0..2]),
+    // repurposed to carry these 3 hand-built seed-design sets regardless of their display name.
+    const prebaked = (gallery.sinaliteId === "1" || gallery.name === "Business Cards") ? BUSINESS_CARDS_SEED
+      : (gallery.sinaliteId === "2" || gallery.name === "Premium Business Cards") ? PREMIUM_BC_SEED
       : LUXURY_BC_SEED;
     for (const d of prebaked) {
       if (remainingSlots(prebaked.length) <= 0) break;

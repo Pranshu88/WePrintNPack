@@ -1,10 +1,27 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import type { Product } from "@/lib/types";
 import { getProductLink } from "@/lib/product-link";
 import { subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+
+// Runs `items` through `fn` with at most `limit` in flight at once. Firing 50+
+// requests to the remote DB in one Promise.all burst exhausts local ephemeral
+// ports (EADDRNOTAVAIL) — capping concurrency keeps the speed win without that.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 const BTN_COLORS = [
   "#111827", "#ec4899", "#0d9488", "#f97316", "#16a34a",
@@ -29,13 +46,6 @@ const PRICE_FALLBACKS: Record<string, string> = {
   "Product Labels":          "$139 + tax",
 };
 
-const PACKAGING_BOX_DEFAULTS = [
-  { id: "pb-standard",  title: "Pizza Box",           price: "$150 + tax", metaKey: "pizzabox-packages-meta", subSlug: "pizza-boxes",           dielineSlug: "pizza-boxes" },
-  { id: "mb-standard",  title: "Mailer Box",          price: "$200 + tax", metaKey: "mb-packages-meta",       subSlug: "mailer-boxes",           dielineSlug: "mailer-boxes" },
-  { id: "sb-standard",  title: "Shipping Box",        price: "$220 + tax", metaKey: "sb-packages-meta",       subSlug: "shipping-boxes",         dielineSlug: "shipping-boxes" },
-  { id: "ssb-standard", title: "Square Shipping Box", price: "$230 + tax", metaKey: "ssb-packages-meta",      subSlug: "square-shipping-boxes",  dielineSlug: "square-shipping-boxes" },
-];
-
 type CarouselItem = {
   id: string;
   name: string;
@@ -43,6 +53,7 @@ type CarouselItem = {
   image: string;
   link: string;
   dielineSlug?: string;
+  category?: string;
 };
 
 function openBcDB(): Promise<IDBDatabase> {
@@ -98,7 +109,21 @@ function restoreScroll() {
   } catch { /* ignore */ }
 }
 
-export default function PopularProductsCarousel({ products }: { products: Product[] }) {
+export default function PopularProductsCarousel({
+  products,
+  layout = "carousel",
+  query = "",
+  activeCategory = "All",
+  onCategoryCounts,
+  onVisibleCount,
+}: {
+  products: Product[];
+  layout?: "carousel" | "grid";
+  query?: string;
+  activeCategory?: string;
+  onCategoryCounts?: (counts: Record<string, number>) => void;
+  onVisibleCount?: (n: number) => void;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
@@ -137,121 +162,107 @@ export default function PopularProductsCarousel({ products }: { products: Produc
     };
 
     async function loadAll() {
-      const allItems: CarouselItem[] = [];
       const handledSlugs = new Set<string>();
 
-      // Every gallery template that actually exists for a given product slug, whether or
-      // not that slug has its own Product record (ad-hoc sub-products like Door Hangers
-      // only exist as a template-table entry, not a Product).
-      async function fetchInto(slug: string, image: string, startingPrice: string, linkBase: string) {
+      // Every distinct slug we'll need templates for, gathered up front so they can
+      // all be fetched in ONE request instead of one network round-trip per slug
+      // (previously 20-50+ separate calls to the remote DB — the dominant cost of
+      // this whole component).
+      type SlugJob = { slug: string; image: string; startingPrice: string; linkBase: string; categoryLabel?: string; directLinkPrefix?: string };
+      const jobs: SlugJob[] = [];
+      function planSlug(slug: string, image: string, startingPrice: string, linkBase: string, categoryLabel?: string, directLinkPrefix?: string) {
         if (handledSlugs.has(slug)) return;
         handledSlugs.add(slug);
-
-        let meta: Record<string, { price: string }> = {};
-        const metaKey = META_KEYS[slug];
-        if (metaKey) {
-          try { const raw = localStorage.getItem(metaKey); if (raw) meta = JSON.parse(raw) as Record<string, { price: string }>; } catch { /* ignore */ }
-        }
-
-        try {
-          const res = await fetch(`/api/products/${slug}/templates`, { cache: "no-store" });
-          const data = (await res.json()) as { templates?: { id: string; name: string; previewImage: string; price?: string }[] };
-          for (const t of (data.templates ?? [])) {
-            const idbImg = await loadBcImage(t.id);
-            const rawPrice = meta[t.id]?.price ?? t.price?.trim();
-            const price = rawPrice
-              ? (/[$+]/.test(rawPrice) ? rawPrice : `$${rawPrice} + tax`)
-              : (PRICE_FALLBACKS[t.name] ?? `Starting at ${startingPrice}`);
-            allItems.push({
-              id: t.id,
-              name: t.name,
-              price,
-              image: idbImg || t.previewImage || image,
-              link: `${linkBase}/${slug}?gallery=${t.id}`,
-            });
-          }
-        } catch { /* skip on error */ }
+        jobs.push({ slug, image, startingPrice, linkBase, categoryLabel, directLinkPrefix });
       }
 
       for (const product of products) {
-        if (product.category === "packaging-box") {
-          for (const pkg of PACKAGING_BOX_DEFAULTS) {
-            let meta: Record<string, { title?: string; price?: string }> = {};
-            try { const raw = localStorage.getItem(pkg.metaKey); if (raw) meta = JSON.parse(raw) as Record<string, { title?: string; price?: string }>; } catch { /* ignore */ }
-            const saved = meta[pkg.id];
-            const img = await loadBcImage(pkg.id);
-            allItems.push({
-              id: pkg.id,
-              name: saved?.title ?? pkg.title,
-              price: saved?.price ?? pkg.price,
-              image: img || product.image,
-              link: `/products/packaging-box/${pkg.subSlug}`,
-              dielineSlug: pkg.dielineSlug,
-            });
+        if (product.category === "packaging-box") continue; // shown under Dieline Template Maker, not here
+        if (product.category === "business-cards") {
+          planSlug(product.slug, product.image, product.startingPrice, "/products/business-cards", "Business Cards");
+        } else if (product.category === "flyers") {
+          planSlug(product.slug, product.image, product.startingPrice, "/products/business-cards", "Flyers");
+        } else if (product.category === "marketing-material") {
+          for (const name of CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"]) {
+            planSlug(subProductSlug(name), product.image, product.startingPrice, "/products/marketing-material", name);
           }
-          continue;
+        } else if (product.category === "promotional-products") {
+          for (const name of CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"]) {
+            planSlug(subProductSlug(name), product.image, product.startingPrice, "/products/promotional-products", name);
+          }
+        } else {
+          // getProductLink already returns this product's full URL (format varies by
+          // category — some append /templates, some don't) — use it verbatim rather
+          // than trying to force it through the generic linkBase + "/" + slug pattern.
+          planSlug(product.slug, product.image, product.startingPrice, "", undefined, getProductLink(product));
         }
+      }
+      const bcProduct = products.find((p) => p.category === "business-cards");
+      if (bcProduct) {
+        for (const name of CATEGORY_SUBPRODUCT_OPTIONS["business-cards"]) {
+          planSlug(subProductSlug(name), bcProduct.image, bcProduct.startingPrice, "/products/business-cards", name);
+        }
+      }
 
+      let templatesBySlug: Record<string, { id: string; name: string; previewImage: string; price?: string }[]> = {};
+      try {
+        const res = await fetch(`/api/products/templates-batch?slugs=${jobs.map((j) => encodeURIComponent(j.slug)).join(",")}`, { cache: "no-store" });
+        const data = (await res.json()) as { templatesBySlug?: typeof templatesBySlug };
+        templatesBySlug = data.templatesBySlug ?? {};
+      } catch { /* leave empty — items just won't populate for this load */ }
+
+      async function itemsForJob(job: SlugJob): Promise<CarouselItem[]> {
+        let meta: Record<string, { price: string }> = {};
+        const metaKey = META_KEYS[job.slug];
+        if (metaKey) {
+          try { const raw = localStorage.getItem(metaKey); if (raw) meta = JSON.parse(raw) as Record<string, { price: string }>; } catch { /* ignore */ }
+        }
+        const templates = templatesBySlug[job.slug] ?? [];
+        const items: CarouselItem[] = [];
+        for (const t of templates) {
+          const idbImg = await loadBcImage(t.id);
+          const rawPrice = meta[t.id]?.price ?? t.price?.trim();
+          const price = rawPrice
+            ? (/[$+]/.test(rawPrice) ? rawPrice : `$${rawPrice} + tax`)
+            : (PRICE_FALLBACKS[t.name] ?? `Starting at ${job.startingPrice}`);
+          items.push({
+            id: t.id,
+            name: t.name,
+            price,
+            image: idbImg || t.previewImage || job.image,
+            link: `${job.linkBase}/${job.slug}?gallery=${t.id}`,
+            category: job.categoryLabel,
+          });
+        }
+        return items;
+      }
+
+      const jobResults = await Promise.all(jobs.map(itemsForJob));
+      const allItems: CarouselItem[] = [];
+      for (const product of products) {
         if (product.category === "business-cards" || product.category === "flyers") {
-          await fetchInto(product.slug, product.image, product.startingPrice, "/products/business-cards");
+          const jobIdx = jobs.findIndex((j) => j.slug === product.slug);
+          const dbItems = jobIdx >= 0 ? jobResults[jobIdx] : [];
+          allItems.push(...dbItems);
 
           // Legacy browser-only packages added before this product had real DB templates —
           // only shown if a same-named DB template doesn't already cover them.
-          const dbNames = new Set(allItems.filter((i) => i.link.startsWith(`/products/business-cards/${product.slug}`)).map((i) => i.name));
+          const dbNames = new Set(dbItems.map((i) => i.name));
           const legacyKey = product.category === "business-cards" ? "bc-packages-list" : "fly-packages-list";
           for (const pkg of loadPackagesList(legacyKey, [])) {
             if (dbNames.has(pkg.title)) continue;
             const img = await loadBcImage(pkg.id);
             allItems.push({ id: pkg.id, name: pkg.title, price: pkg.price, image: img || product.image, link: `/products/business-cards/${product.slug}` });
           }
-          continue;
-        }
-
-        if (product.category === "marketing-material") {
-          for (const name of CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"]) {
-            await fetchInto(subProductSlug(name), product.image, product.startingPrice, "/products/marketing-material");
-          }
-          continue;
-        }
-
-        if (product.category === "promotional-products") {
-          for (const name of CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"]) {
-            await fetchInto(subProductSlug(name), product.image, product.startingPrice, "/products/promotional-products");
-          }
-          continue;
-        }
-
-        // Everything else (T-Shirts, Dress Shirts, Hoodies, Brochures, Postcards, Banners…) —
-        // fetch its own gallery templates directly.
-        if (handledSlugs.has(product.slug)) continue;
-        handledSlugs.add(product.slug);
-        try {
-          const res = await fetch(`/api/products/${product.slug}/templates`, { cache: "no-store" });
-          const data = (await res.json()) as { templates?: { id: string; name: string; previewImage: string; price?: string }[] };
-          for (const t of (data.templates ?? [])) {
-            const rawPrice = t.price?.trim();
-            const price = rawPrice
-              ? (/[$+]/.test(rawPrice) ? rawPrice : `$${rawPrice} + tax`)
-              : `Starting at ${product.startingPrice}`;
-            allItems.push({
-              id: t.id,
-              name: t.name,
-              price,
-              image: t.previewImage || product.image,
-              link: `${getProductLink(product)}?gallery=${t.id}`,
-            });
-          }
-        } catch { /* skip on error */ }
-      }
-
-      // Ad-hoc Business Printing sub-products (Door Hangers, Rack Cards, Letterheads…) that
-      // have no Product record of their own — canonical list in CATEGORY_SUBPRODUCT_OPTIONS.
-      const bcProduct = products.find((p) => p.category === "business-cards");
-      if (bcProduct) {
-        for (const name of CATEGORY_SUBPRODUCT_OPTIONS["business-cards"]) {
-          await fetchInto(subProductSlug(name), bcProduct.image, bcProduct.startingPrice, "/products/business-cards");
         }
       }
+      // Remaining jobs (marketing-material/promotional-products/business-cards subproducts,
+      // and "everything else" top-level products) don't need the legacy-package merge step.
+      const bcAndFlyerSlugs = new Set(products.filter((p) => p.category === "business-cards" || p.category === "flyers").map((p) => p.slug));
+      jobs.forEach((job, i) => {
+        if (bcAndFlyerSlugs.has(job.slug)) return;
+        allItems.push(...jobResults[i]);
+      });
 
       _memCache = allItems;
       setItems(allItems);
@@ -264,6 +275,31 @@ export default function PopularProductsCarousel({ products }: { products: Produc
   const scroll = (dir: "left" | "right") => {
     scrollRef.current?.scrollBy({ left: dir === "right" ? 360 : -360, behavior: "smooth" });
   };
+
+  useEffect(() => {
+    if (!onCategoryCounts || items.length === 0) return;
+    const counts: Record<string, number> = {};
+    for (const item of items) {
+      if (!item.category) continue;
+      counts[item.category] = (counts[item.category] ?? 0) + 1;
+    }
+    onCategoryCounts(counts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  const visibleItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter((item) => {
+      if (activeCategory !== "All" && item.category !== activeCategory) return false;
+      if (q && !item.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [items, query, activeCategory]);
+
+  useEffect(() => {
+    onVisibleCount?.(visibleItems.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems.length]);
 
   if (items.length === 0) return (
     <div className="lp-pop-carousel">
@@ -282,22 +318,28 @@ export default function PopularProductsCarousel({ products }: { products: Produc
     </div>
   );
 
+  if (layout === "grid" && visibleItems.length === 0) {
+    return <p className="product-search-empty">No products match your search.</p>;
+  }
+
   return (
     <div className="lp-pop-carousel">
-      <button
-        className={`lp-pop-arrow lp-pop-arrow-left${canLeft ? " lp-pop-arrow-visible" : ""}`}
-        onClick={() => scroll("left")}
-        aria-label="Scroll left"
-        aria-hidden={!canLeft}
-        tabIndex={canLeft ? 0 : -1}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-      </button>
+      {layout === "carousel" && (
+        <button
+          className={`lp-pop-arrow lp-pop-arrow-left${canLeft ? " lp-pop-arrow-visible" : ""}`}
+          onClick={() => scroll("left")}
+          aria-label="Scroll left"
+          aria-hidden={!canLeft}
+          tabIndex={canLeft ? 0 : -1}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+      )}
 
-      <div className="lp-pop-row" ref={scrollRef}>
-        {items.map((item, i) => {
+      <div className={`lp-pop-row${layout === "grid" ? " lp-pop-grid" : ""}`} ref={scrollRef}>
+        {visibleItems.map((item, i) => {
           const isPizzaBox = item.id === "pb-standard";
           const isSquareShipping = item.id === "ssb-standard";
           const hasHoverMenu = isPizzaBox || isSquareShipping;
@@ -387,33 +429,54 @@ export default function PopularProductsCarousel({ products }: { products: Produc
                 )}
               </div>
               <div className="lp-pop-info">
-                <span className="lp-pop-name">{item.name}</span>
-                <span className="lp-pop-price">{item.price}</span>
-                <Link
-                  href={item.link}
-                  className="lp-pop-btn"
-                  style={{ background: BTN_COLORS[i % BTN_COLORS.length] }}
-                  onClick={saveScroll}
-                >
-                  Shop Now
-                </Link>
+                {layout === "grid" ? (
+                  <>
+                    {item.category && (
+                      <span style={{ display: "inline-block", padding: "0.2rem 0.6rem", borderRadius: 999, background: "#f3f4f6", color: "#374151", fontSize: "0.72rem", fontWeight: 600, marginBottom: "0.5rem", alignSelf: "flex-start" }}>
+                        {item.category}
+                      </span>
+                    )}
+                    <span className="lp-pop-name">{item.name}</span>
+                    <Link
+                      href={item.link}
+                      onClick={saveScroll}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", color: "#dc2626", fontWeight: 600, fontSize: "0.85rem", textDecoration: "none", marginTop: "0.6rem" }}
+                    >
+                      View Details →
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <span className="lp-pop-name">{item.name}</span>
+                    <Link
+                      href={item.link}
+                      className="lp-pop-btn"
+                      style={{ background: BTN_COLORS[i % BTN_COLORS.length] }}
+                      onClick={saveScroll}
+                    >
+                      Shop Now
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      <button
-        className={`lp-pop-arrow lp-pop-arrow-right${canRight ? " lp-pop-arrow-visible" : ""}`}
-        onClick={() => scroll("right")}
-        aria-label="Scroll right"
-        aria-hidden={!canRight}
-        tabIndex={canRight ? 0 : -1}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M9 18l6-6-6-6" />
-        </svg>
-      </button>
+      {layout === "carousel" && (
+        <button
+          className={`lp-pop-arrow lp-pop-arrow-right${canRight ? " lp-pop-arrow-visible" : ""}`}
+          onClick={() => scroll("right")}
+          aria-label="Scroll right"
+          aria-hidden={!canRight}
+          tabIndex={canRight ? 0 : -1}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

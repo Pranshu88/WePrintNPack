@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import GalleryTemplatePage from "@/components/gallery-templates-page";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export default async function MarketingMaterialTemplatesPage({
 }) {
   const { slug } = await params;
 
-  const parent = getProductBySlug("marketing-material");
+  const parent = await getProductBySlug("marketing-material");
   if (!parent) notFound();
 
   const name = CATEGORY_SUBPRODUCT_OPTIONS["marketing-material"].find((n) => subProductSlug(n) === slug);

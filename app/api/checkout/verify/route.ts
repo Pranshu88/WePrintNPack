@@ -2,8 +2,61 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import getDb from "@/lib/db";
 import { randomUUID } from "crypto";
+import { createSinaliteOrder, type SinaliteOrderItem } from "@/lib/sinalite";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-05-27.dahlia" });
+
+type OrderCartItem = {
+  name: string; sinaliteId?: string; sinaliteOptions?: Record<string, string>;
+  doubleSided?: boolean; thumb?: string; frontPreview?: string; backPreview?: string;
+  frontFileUrl?: string; backFileUrl?: string;
+};
+type ShippingDetails = {
+  firstName: string; lastName: string; email: string;
+  addr: string; addr2: string; city: string; state: string; zip: string; country: string; phone: string;
+  method: string;
+};
+
+// Places the print order with Sinalite the first time a Stripe session flips to
+// paid — guarded by sinalite_order_ref so a page refresh never double-submits.
+async function placeSinaliteOrderOnce(db: Awaited<ReturnType<typeof getDb>>, orderId: string) {
+  const result = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+  const row = result.rows[0];
+  if (!row || (row.sinalite_order_ref as string)) return;
+
+  const cartItems = JSON.parse((row.items_json as string) || "[]") as OrderCartItem[];
+  const shippable = cartItems.filter((i) => i.sinaliteId);
+  if (!shippable.length) return;
+
+  let shipping: ShippingDetails | null = null;
+  try { shipping = JSON.parse((row.shipping_json as string) || "null"); } catch { /* ignore */ }
+  if (!shipping) return;
+
+  const items: SinaliteOrderItem[] = shippable.map((i) => ({
+    productId: Number(i.sinaliteId),
+    options: i.sinaliteOptions ?? {},
+    files: [
+      { type: "front", url: i.frontFileUrl || "https://weprintnpack.ca/" },
+      ...(i.doubleSided ? [{ type: "back" as const, url: i.backFileUrl || "https://weprintnpack.ca/" }] : []),
+    ],
+  }));
+
+  console.log("[checkout/verify] placing Sinalite order for", orderId, "with body:", JSON.stringify({ items, shipping }, null, 2));
+
+  try {
+    const { raw } = await createSinaliteOrder(
+      items,
+      shipping,
+      `Order ${orderId} — ${row.customer_name as string}`
+    );
+    await db.execute({
+      sql: "UPDATE orders SET sinalite_order_ref = ? WHERE id = ?",
+      args: [JSON.stringify(raw), orderId],
+    });
+  } catch (err) {
+    console.error("Sinalite order creation failed for order", orderId, err);
+  }
+}
 
 export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("session_id");
@@ -22,6 +75,7 @@ export async function GET(req: NextRequest) {
           sql: "UPDATE orders SET status = 'paid', stripe_session_id = ? WHERE id = ? AND status = 'pending_payment'",
           args: [sessionId, orderId],
         });
+        await placeSinaliteOrderOnce(db, orderId);
       } else {
         const existing = await db.execute({
           sql: "SELECT id FROM orders WHERE stripe_session_id = ?",

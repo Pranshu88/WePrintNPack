@@ -108,7 +108,9 @@ export function AdminReviewsPage() {
       title: "Catalogue",
       items: [
         { label: "Category listing", icon: "🗂️", href: "/admin", active: pathname === "/admin" },
-        { label: "Templates", icon: "🎨", href: "/admin/templates", active: pathname === "/admin/templates" },
+        { label: "Printing", icon: "🎨", href: "/admin/templates", active: pathname === "/admin/templates" },
+        { label: "Apparel", icon: "👕", href: "/admin/apparel", active: pathname === "/admin/apparel" },
+        { label: "Packaging", icon: "📦", href: "/admin/packaging", active: pathname === "/admin/packaging" },
         { label: "Reviews", icon: "⭐", href: "/admin/reviews", active: pathname === "/admin/reviews", count: pendingCount || null },
       ],
     },

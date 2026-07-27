@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug, categories, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { categories, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
 export const dynamic = "force-dynamic";
@@ -19,13 +20,13 @@ export default async function BusinessCardDetailPage({
   const { gallery } = await searchParams;
 
   // Real, standalone products (Business Cards, Flyers, Brochures, Postcards…)
-  let product = getProductBySlug(slug);
+  let product = await getProductBySlug(slug);
   if (product && !PRINT_ESSENTIALS_CATEGORIES.has(product.category)) product = undefined;
 
   // Ad-hoc sub-products (Door Hangers, Rack Cards, Letterheads…) with no Product of their
   // own — validated against the canonical list in CATEGORY_SUBPRODUCT_OPTIONS.
   if (!product) {
-    const parent = getProductBySlug("premium-business-cards");
+    const parent = await getProductBySlug("premium-business-cards");
     const name = CATEGORY_SUBPRODUCT_OPTIONS["business-cards"].find((n) => subProductSlug(n) === slug);
     if (parent && name) product = { ...parent, slug, name };
   }

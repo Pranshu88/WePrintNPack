@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { getProducts } from "@/lib/data";
+import { getProducts } from "@/lib/products";
 import { getGalleryTemplates } from "@/lib/template-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function TShirtsPage() {
-  const tshirtProducts = getProducts("t-shirts");
+  const tshirtProducts = await getProducts("t-shirts");
 
   type TileData = { id: string; name: string; price: string; image: string; link: string };
   const tiles: TileData[] = [];

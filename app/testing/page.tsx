@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getProducts, groupProductsByCatalog } from "@/lib/data";
+import { groupProductsByCatalog } from "@/lib/data";
+import { getProducts } from "@/lib/products";
 import CatalogProductTile from "@/components/catalog-product-tile";
 import styles from "../page.module.css";
 
@@ -39,8 +40,8 @@ const heroPanels: HeroPanel[] = [
   },
 ];
 
-export default function HomePage() {
-  const catalogSections = groupProductsByCatalog(getProducts());
+export default async function HomePage() {
+  const catalogSections = groupProductsByCatalog(await getProducts());
 
   return (
     <div className={styles.homePage}>

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import PackagingBoxEditorWrapper from "./editor-wrapper";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export default async function PackagingBoxSlugPage({
   const name = SUB_NAMES[slug];
   if (!name) notFound();
 
-  const parent = getProductBySlug("packaging-box");
+  const parent = await getProductBySlug("packaging-box");
   if (!parent) notFound();
 
   return <PackagingBoxEditorWrapper product={{ ...parent, name }} />;

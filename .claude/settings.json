@@ -85,7 +85,11 @@
       "Bash(xargs kill -9)",
       "WebFetch(domain:liveapi.sinalite.com)",
       "Bash(sips -g pixelWidth -g pixelHeight /Users/apple/Documents/WebPrint/public/images/applogo.jpeg)",
-      "Bash(git fsck *)"
+      "Bash(git fsck *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000)",
+      "Bash(python3 -c \"import datetime; print\\(datetime.datetime.fromtimestamp\\(1785173220013/1000\\)\\)\")",
+      "Bash(git check-ignore *)",
+      "Bash(vercel project *)"
     ],
     "additionalDirectories": [
       "/Users/apple/Documents/WebPrint/app/dieline",

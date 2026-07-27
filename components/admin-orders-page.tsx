@@ -252,7 +252,9 @@ export function AdminOrdersPage() {
       title: "Catalogue",
       items: [
         { label: "Category listing", icon: "🗂️", href: "/admin", active: pathname === "/admin", count: null },
-        { label: "Templates", icon: "🎨", href: "/admin/templates", active: pathname === "/admin/templates", count: null },
+        { label: "Printing", icon: "🎨", href: "/admin/templates", active: pathname === "/admin/templates", count: null },
+        { label: "Apparel", icon: "👕", href: "/admin/apparel", active: pathname === "/admin/apparel", count: null },
+        { label: "Packaging", icon: "📦", href: "/admin/packaging", active: pathname === "/admin/packaging", count: null },
         { label: "Reviews", icon: "💬", href: "/admin/reviews", active: pathname === "/admin/reviews", count: null },
       ],
     },

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import ShirtOrderClient from "@/components/shirt-order-client";
 import type { ShirtProduct } from "@/lib/shirt-data";
 
@@ -70,7 +70,7 @@ const CATEGORY_TECHNOLOGIES: Record<string, string[]> = {
 
 const DEFAULT_TECHNOLOGIES = ["Full Color Printing", "Embroidery"];
 
-function adaptProduct(product: NonNullable<ReturnType<typeof getProductBySlug>>): ShirtProduct {
+function adaptProduct(product: NonNullable<Awaited<ReturnType<typeof getProductBySlug>>>): ShirtProduct {
   const price = parsePrice(product.startingPrice);
   const categoryColors = CATEGORY_COLORS[product.category] ?? DEFAULT_COLORS;
   const colors = product.colors?.length
@@ -109,7 +109,7 @@ export default async function ProductDetailsPage({
 }) {
   const { slug } = await params;
   const { gallery } = await searchParams;
-  const product = getProductBySlug(slug);
+  const product = await getProductBySlug(slug);
 
   if (!product) {
     notFound();

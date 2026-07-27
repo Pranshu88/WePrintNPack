@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import type { ShirtProduct, ShirtColor } from "@/lib/shirt-data";
-import type { GalleryTemplate, DesignTemplateItem, DesignColorVariant, SerializableItem } from "@/lib/template-data";
+import type { GalleryTemplate, DesignTemplateItem, DesignColorVariant, SerializableItem, SinaliteSelectedOption } from "@/lib/template-data";
 import AuthModal from "@/components/auth-modal";
+import { COUNTRIES, regionsForCountry, regionCode, fullAddressLine } from "@/lib/shipping-regions";
 
 // ─── Canvas config ────────────────────────────────────────────────────────────
 const SHIRT_DIMS         = { CW: 460, CH: 560, PX: 100, PY: 100, PW: 260, PH: 300 };
@@ -1087,6 +1088,97 @@ async function generateSidePreviewPNG(
   return canvas.toDataURL("image/png");
 }
 
+// Print-ready export: the plain design plus a bleed line (solid blue, outer edge),
+// a cut line (dashed red, at the trim edge) and a safe-area guide (dashed green,
+// inset from the trim line) — this is the file sent to Sinalite, not just the flat design.
+async function generatePrintReadyPNG(
+  side: "front" | "back",
+  sidesData: Record<"front" | "back", { items: unknown[]; template: { baseImage: string } | null }>,
+  bgColorsData: Record<"front" | "back", string>,
+  bgSvgData: Record<"front" | "back", string>,
+  dims: { CW: number; CH: number; PX: number; PY: number },
+  trimWidthIn: number,
+  trimHeightIn: number,
+  scale = 2,
+): Promise<string> {
+  const bleedIn = 0.125;
+  const safeIn = 0.125;
+  const pxPerInchX = dims.CW / trimWidthIn;
+  const pxPerInchY = dims.CH / trimHeightIn;
+  const bleedPxX = bleedIn * pxPerInchX;
+  const bleedPxY = bleedIn * pxPerInchY;
+  const safePxX = safeIn * pxPerInchX;
+  const safePxY = safeIn * pxPerInchY;
+
+  const designDataUrl = await generateSidePreviewPNG(side, sidesData, bgColorsData, bgSvgData, dims, scale);
+  const designImg = await loadImg(designDataUrl);
+
+  const outW = (dims.CW + 2 * bleedPxX) * scale;
+  const outH = (dims.CH + 2 * bleedPxY) * scale;
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d")!;
+
+  // Fill the bleed margin with a flat colour averaged from each edge of the
+  // design (not a single stretched pixel row, which picked up sharp diagonal
+  // stripes/shapes right at the edge and rendered them as odd solid bars) —
+  // then draw the design exactly as shown/saved in the editor, at its true
+  // (trim) size and position, with no stretching or shape-duplication that
+  // would push content past the trim/safety lines.
+  const bx = bleedPxX * scale, by = bleedPxY * scale;
+  const dw = dims.CW * scale, dh = dims.CH * scale;
+
+  const sampleCanvas = document.createElement("canvas");
+  sampleCanvas.width = 1;
+  sampleCanvas.height = 1;
+  const sampleCtx = sampleCanvas.getContext("2d")!;
+  function averageColor(sx: number, sy: number, sw: number, sh: number): string {
+    sampleCtx.clearRect(0, 0, 1, 1);
+    sampleCtx.drawImage(designImg, sx, sy, sw, sh, 0, 0, 1, 1);
+    const [r, g, b, a] = sampleCtx.getImageData(0, 0, 1, 1).data;
+    return `rgba(${r},${g},${b},${a / 255})`;
+  }
+  const edgeBand = Math.max(2, Math.round(Math.min(dw, dh) * 0.04));
+  const topColor = averageColor(0, 0, dw, edgeBand);
+  const bottomColor = averageColor(0, dh - edgeBand, dw, edgeBand);
+  const leftColor = averageColor(0, 0, edgeBand, dh);
+  const rightColor = averageColor(dw - edgeBand, 0, edgeBand, dh);
+
+  ctx.fillStyle = topColor;
+  ctx.fillRect(0, 0, outW, by);
+  ctx.fillStyle = bottomColor;
+  ctx.fillRect(0, by + dh, outW, by);
+  ctx.fillStyle = leftColor;
+  ctx.fillRect(0, by, bx, dh);
+  ctx.fillStyle = rightColor;
+  ctx.fillRect(bx + dw, by, bx, dh);
+
+  ctx.drawImage(designImg, bx, by, dw, dh);
+
+  // Bleed line — solid blue, at the outer (bleed) edge
+  const bleedLineW = Math.max(2, 2 * scale);
+  ctx.strokeStyle = "#2563eb";
+  ctx.lineWidth = bleedLineW;
+  ctx.setLineDash([]);
+  ctx.strokeRect(bleedLineW / 2, bleedLineW / 2, outW - bleedLineW, outH - bleedLineW);
+
+  // Cut line — dashed red, at the true trim edge (between the bleed line and the safe-area line)
+  ctx.strokeStyle = "#dc2626";
+  ctx.lineWidth = Math.max(1.5, 1.5 * scale);
+  ctx.setLineDash([6 * scale, 5 * scale]);
+  ctx.strokeRect(bx, by, dims.CW * scale, dims.CH * scale);
+
+  // Safe-area line — dashed green, inset from the trim edge
+  ctx.strokeStyle = "#22c55e";
+  ctx.lineWidth = Math.max(1.5, 1.5 * scale);
+  ctx.setLineDash([6 * scale, 5 * scale]);
+  const safeX = bx + safePxX * scale, safeY = by + safePxY * scale;
+  ctx.strokeRect(safeX, safeY, outW - 2 * safeX, outH - 2 * safeY);
+
+  return canvas.toDataURL("image/png");
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TextItem = {
   id: string;
@@ -1175,6 +1267,10 @@ type Props = {
   // Overrides the fixed category dims below with a custom physical size (used for
   // admin-created custom gallery templates that declared their own Width/Length).
   customDimsInches?: { width: number; height: number };
+  // When set, the Quantity + Terms & Conditions cards are replaced with the same
+  // "Configure Your Order" + live Sinalite price panel used on the order page.
+  sinaliteId?: string;
+  sinaliteOptions?: SinaliteSelectedOption[];
 };
 
 // ─── SidebarIcon ──────────────────────────────────────────────────────────────
@@ -1369,6 +1465,8 @@ export default function DesignEditorShell({
   productName,
   pricePerUnit,
   customDimsInches,
+  sinaliteId,
+  sinaliteOptions,
 }: Props) {
   type AuthCustomer = { id: string; firstName: string; lastName: string; email: string };
   const isBusinessCard  = productType === "business-card";
@@ -1452,6 +1550,65 @@ export default function DesignEditorShell({
   const [finalStepsOpen, setFinalStepsOpen] = useState(false);
   const [selectedQty, setSelectedQty] = useState(0);
   const [designApproved, setDesignApproved] = useState(false);
+
+  // Sinalite live configuration + pricing — replaces the plain Quantity input and Terms &
+  // Conditions cards for Sinalite-linked galleries, mirroring the order page's panel.
+  const [selectedSinaliteOptions, setSelectedSinaliteOptions] = useState<Record<string, string>>({});
+  const [sinalitePrice, setSinalitePrice] = useState<{ price: number; productOptions: Record<string, string> } | null>(null);
+  const [sinalitePriceLoading, setSinalitePriceLoading] = useState(false);
+
+  const sinaliteOptionGroups = ((): Record<string, { id: number; label: string; name: string }[]> => {
+    const groups: Record<string, { id: number; label: string; name: string }[]> = {};
+    for (const o of sinaliteOptions ?? []) {
+      const key = o.group.toLowerCase();
+      (groups[key] ??= []).push({ id: o.id, label: o.group, name: o.name });
+    }
+    return groups;
+  })();
+
+  useEffect(() => {
+    if (!sinaliteOptions?.length) return;
+    setSelectedSinaliteOptions((prev) => {
+      const next = { ...prev };
+      for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
+        if (!next[key] && opts[0]) next[key] = opts[0].name;
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sinaliteId]);
+
+  useEffect(() => {
+    if (!sinaliteId || Object.keys(sinaliteOptionGroups).length === 0) { setSinalitePrice(null); return; }
+    const optionIds: number[] = [];
+    for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
+      const chosenName = selectedSinaliteOptions[key];
+      const match = opts.find((o) => o.name === chosenName) ?? opts[0];
+      if (match) optionIds.push(match.id);
+    }
+    if (optionIds.length === 0) { setSinalitePrice(null); return; }
+    let cancelled = false;
+    setSinalitePriceLoading(true);
+    const timer = setTimeout(() => {
+      fetch(`/api/sinalite/products/${sinaliteId}/price`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionIds }),
+      })
+        .then((r) => r.json())
+        .then((d: { price?: number; productOptions?: Record<string, string>; error?: string }) => {
+          if (cancelled || d.error || d.price == null) return;
+          setSinalitePrice({ price: d.price, productOptions: d.productOptions ?? {} });
+        })
+        .catch(() => { if (!cancelled) setSinalitePrice(null); })
+        .finally(() => { if (!cancelled) setSinalitePriceLoading(false); });
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sinaliteId, selectedSinaliteOptions]);
+  // For Sinalite-linked products, quantity comes from the Configure Your Order dropdown
+  // instead of the plain Quantity input.
+  const effectiveQty = sinaliteId ? (parseInt(selectedSinaliteOptions["qty"] ?? "", 10) || 0) : selectedQty;
   const finalCardRef = useRef<HTMLDivElement>(null);
   const finalRotRef  = useRef(0);
   const [finalRotY, setFinalRotY] = useState(0);
@@ -1460,16 +1617,22 @@ export default function DesignEditorShell({
   const [authForCartOpen, setAuthForCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean };
+  type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; sinaliteId?: string; sinaliteOptions?: Record<string, string>; frontFileUrl?: string; backFileUrl?: string };
   const [existingCartItems, setExistingCartItems] = useState<SavedCartItem[]>([]);
-  const [checkoutForm, setCheckoutForm] = useState({ houseNo: "", flat: "", city: "", state: "", phone: "" });
+  const [checkoutForm, setCheckoutForm] = useState({ houseNo: "", flat: "", city: "", state: "", postalCode: "", country: "CA", phone: "" });
   const [checkoutError, setCheckoutError] = useState("");
   const [stripeLoading, setStripeLoading] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [addressLoading, setAddressLoading] = useState(false);
   const [addressEditOpen, setAddressEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ houseNo: "", flat: "", city: "", state: "", phone: "" });
+  const [editForm, setEditForm] = useState({ houseNo: "", flat: "", city: "", state: "", postalCode: "", country: "CA", phone: "" });
   const [editFormError, setEditFormError] = useState("");
+  const [shippingOptions, setShippingOptions] = useState<{ carrier: string; service: string; price: number; days: number }[]>([]);
+  const [selectedShippingIdx, setSelectedShippingIdx] = useState<number | null>(null);
+  const [shippingLoading, setShippingLoading] = useState(false);
+  const [shippingError, setShippingError] = useState("");
+  const [hasSavedAddress, setHasSavedAddress] = useState(false);
+  const autoFetchedRef = useRef(false);
   const [radiusPanelOpen, setRadiusPanelOpen] = useState(false);
   const [draftRadii, setDraftRadii] = useState({ tl: 0, tr: 0, br: 0, bl: 0 });
 
@@ -1481,23 +1644,95 @@ export default function DesignEditorShell({
     } catch { /* ignore */ }
   }, []);
 
-  // Fetch saved address for a user and pre-fill checkout form
+  // Loads this customer's most recently saved address (if any) — a customer can
+  // have multiple saved addresses; the latest one pre-fills checkout.
   async function fetchAndPrefillAddress(userId: string) {
     setAddressLoading(true);
     try {
-      const res = await fetch(`/api/auth/profile?id=${encodeURIComponent(userId)}`, { cache: "no-store" });
+      const res = await fetch(`/api/auth/addresses?id=${encodeURIComponent(userId)}`, { cache: "no-store" });
       if (res.ok) {
-        const data = await res.json() as { phone: string; address: { houseNo: string; flat: string; city: string; state: string } };
-        setCheckoutForm({
-          phone:   data.phone ?? "",
-          houseNo: data.address?.houseNo ?? "",
-          flat:    data.address?.flat ?? "",
-          city:    data.address?.city ?? "",
-          state:   data.address?.state ?? "",
-        });
+        const data = await res.json() as { addresses?: { houseNo: string; flat: string; city: string; state: string; postalCode: string; country: string; phone: string }[] };
+        const latest = data.addresses?.[0];
+        if (latest) {
+          setCheckoutForm({
+            houseNo: latest.houseNo, flat: latest.flat, city: latest.city, state: latest.state,
+            postalCode: latest.postalCode, country: latest.country || "CA", phone: latest.phone,
+          });
+          setHasSavedAddress(true);
+        }
       }
     } catch { /* ignore */ } finally {
       setAddressLoading(false);
+    }
+  }
+
+  // Once a saved address and the cart items are both ready, auto-fetch shipping
+  // options once — no need to click "Get Shipping Options" again next visit.
+  useEffect(() => {
+    if (autoFetchedRef.current) return;
+    if (!hasSavedAddress) return;
+    const { flat, city, state, postalCode, country } = checkoutForm;
+    if (!flat.trim() || !city.trim() || !state.trim() || !postalCode.trim() || !country.trim()) return;
+    autoFetchedRef.current = true;
+    void fetchShippingOptions(state, postalCode, country);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasSavedAddress, checkoutForm, existingCartItems.length]);
+
+  // Maps the customer's chosen Sinalite options (group label -> option id) for the current
+  // item — persisted onto cart items so a later shipping estimate can rebuild the request.
+  function buildSinaliteChosenOptions(): Record<string, string> {
+    const options: Record<string, string> = {};
+    for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
+      const chosenName = selectedSinaliteOptions[key];
+      const match = opts.find((o) => o.name === chosenName) ?? opts[0];
+      if (match) options[match.label] = String(match.id);
+    }
+    return options;
+  }
+
+  // Fetch live carrier rates from Sinalite for every Sinalite-linked item being
+  // checked out — the current design plus any previously saved cart items.
+  async function fetchShippingOptions(state: string, postalCode: string, country: string) {
+    const currentOptions = sinaliteId ? buildSinaliteChosenOptions() : {};
+    const shippingItems = [
+      ...(sinaliteId && Object.keys(currentOptions).length > 0
+        ? [{ productId: Number(sinaliteId), options: currentOptions }]
+        : []),
+      ...existingCartItems
+        .filter((i) => i.sinaliteId && i.sinaliteOptions)
+        .map((i) => ({ productId: Number(i.sinaliteId), options: i.sinaliteOptions! })),
+    ];
+    if (!shippingItems.length) { setShippingOptions([]); setSelectedShippingIdx(null); return; }
+    setShippingLoading(true);
+    setShippingError("");
+    try {
+      const res = await fetch("/api/sinalite/shipping-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: shippingItems,
+          state: regionCode(state), zip: postalCode, country,
+        }),
+      });
+      const data = await res.json() as { options?: { carrier: string; service: string; price: number; days: number }[]; error?: string };
+      if (data.error) { setShippingError(data.error); setShippingOptions([]); setSelectedShippingIdx(null); return; }
+      const fetched = data.options ?? [];
+      setShippingOptions(fetched);
+      setSelectedShippingIdx(fetched.length ? 0 : null);
+      if (fetched.length > 0 && cartUser) {
+        const { houseNo, flat, city, phone } = checkoutForm;
+        fetch("/api/auth/addresses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customerId: cartUser.id, houseNo, flat, city, state, postalCode, country, phone }),
+        }).catch(() => { /* ignore */ });
+      }
+    } catch {
+      setShippingError("Failed to fetch shipping options.");
+      setShippingOptions([]);
+      setSelectedShippingIdx(null);
+    } finally {
+      setShippingLoading(false);
     }
   }
   const [tplColors, setTplColors] = useState<Record<string, string>>({});
@@ -1690,9 +1925,22 @@ export default function DesignEditorShell({
         );
         return matches ? ({ ...it, photoPlaceholder: true } as CanvasItem) : it;
       });
-    const frontItems = frontExisting.length > 0
+    const printAreaW = dimsOverride?.PW ?? PRINT_W;
+    const printAreaH = dimsOverride?.PH ?? PRINT_H;
+    // Only text items are clamped to the safety area — running past it means the text gets
+    // trimmed. Image items (e.g. full-bleed cover photos) are meant to extend to/past the
+    // canvas edge and often use negative x/y intentionally; leave them untouched.
+    const clampToPrintArea = (items: CanvasItem[]): CanvasItem[] =>
+      items.map((it) => {
+        if (it.kind !== "text") return it;
+        const w = it.w ?? 0;
+        const maxX = Math.max(0, printAreaW - w);
+        const maxY = Math.max(0, printAreaH - (it.size ?? 0));
+        return { ...it, x: Math.min(Math.max(it.x, 0), maxX), y: Math.min(Math.max(it.y, 0), maxY) };
+      });
+    const frontItems = clampToPrintArea(frontExisting.length > 0
       ? reapplyPlaceholderFlag(frontExisting, frontPlaceholders)
-      : [...(pf?.graphicItems ?? []), ...(pf?.textItems ?? [])].map(scaleItem);
+      : [...(pf?.graphicItems ?? []), ...(pf?.textItems ?? [])].map(scaleItem));
     if (isFlatArt) {
       setBgColors({ front: frontBgCol, back: backImageUrl ? backBgCol : "#ffffff" });
     }
@@ -1708,9 +1956,9 @@ export default function DesignEditorShell({
       },
       back: backImageUrl ? {
         items: (() => {
-          const rawBackItems = backExisting.length > 0
+          const rawBackItems = clampToPrintArea(backExisting.length > 0
             ? reapplyPlaceholderFlag(backExisting, backPlaceholders)
-            : [...(pb?.graphicItems ?? []), ...(pb?.textItems ?? [])].map(scaleItem);
+            : [...(pb?.graphicItems ?? []), ...(pb?.textItems ?? [])].map(scaleItem));
           return rawBackItems.length > 0
             ? rawBackItems as CanvasItem[]
             : frontItems.filter((it) => it.kind === "text").map((it) => ({ ...it, id: uid() })) as CanvasItem[];
@@ -3340,6 +3588,13 @@ export default function DesignEditorShell({
               </span>
               <span style={{
                 display: "inline-flex", alignItems: "center", padding: "9px 24px",
+                borderRadius: 999, border: "2.5px solid #dc2626", background: "#fef2f2",
+                color: "#b91c1c", fontSize: "1.3rem", fontWeight: 700, whiteSpace: "nowrap",
+              }}>
+                Cut Line
+              </span>
+              <span style={{
+                display: "inline-flex", alignItems: "center", padding: "9px 24px",
                 borderRadius: 999, border: "2.5px solid #3b82f6", background: "#eff6ff",
                 color: "#1d4ed8", fontSize: "1.3rem", fontWeight: 700, whiteSpace: "nowrap",
               }}>
@@ -3495,13 +3750,24 @@ export default function DesignEditorShell({
                 }
               }}
             >
-              {/* Safety area inner line — 5px from canvas edge */}
+              {/* Cut line — between the bleed edge (canvas edge) and the safety area line, 6px from canvas edge */}
               <div style={{
                 position: "absolute",
-                top:    -(PRINT_Y - 5),
-                bottom: -(CANVAS_H - PRINT_Y - PRINT_H - 5),
-                left:   -(PRINT_X - 5),
-                right:  -(CANVAS_W - PRINT_X - PRINT_W - 5),
+                top:    -(PRINT_Y - 6),
+                bottom: -(CANVAS_H - PRINT_Y - PRINT_H - 6),
+                left:   -(PRINT_X - 6),
+                right:  -(CANVAS_W - PRINT_X - PRINT_W - 6),
+                border: "1px dashed #dc2626",
+                borderRadius: "0px", pointerEvents: "none",
+              }} />
+
+              {/* Safety area inner line — 12px from canvas edge */}
+              <div style={{
+                position: "absolute",
+                top:    -(PRINT_Y - 12),
+                bottom: -(CANVAS_H - PRINT_Y - PRINT_H - 12),
+                left:   -(PRINT_X - 12),
+                right:  -(CANVAS_W - PRINT_X - PRINT_W - 12),
                 border: "1px dashed #22c55e",
                 borderRadius: "0px", pointerEvents: "none",
               }} />
@@ -4469,90 +4735,172 @@ export default function DesignEditorShell({
               </p>
             </div>
 
-            {/* Quantity card */}
-            <div style={{
-              background: "#fff", borderRadius: 16, padding: "24px 24px 20px",
-              boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 20,
-              border: "1.5px solid #e5e7eb",
-            }}>
-              <label htmlFor="qty-input" style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
-                Quantity
-              </label>
-              <input
-                id="qty-input"
-                type="number"
-                min={1}
-                placeholder="e.g. 100"
-                value={selectedQty === 0 ? "" : selectedQty}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  setSelectedQty(isNaN(v) || v < 1 ? 0 : v);
-                }}
-                style={{
-                  width: "100%", padding: "14px 16px",
-                  border: "2px solid #e5e7eb", borderRadius: 12,
-                  fontSize: "0.95rem", fontWeight: 700, color: "#111827",
-                  background: "#fff", outline: "none",
-                  boxSizing: "border-box",
-                  transition: "border-color 0.15s",
-                }}
-                onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
-                onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
-              />
+            {/* Quantity card + Terms & Conditions — replaced by Configure Your Order + live
+                Sinalite price for Sinalite-linked galleries */}
+            {!sinaliteId && (
+              <>
+                <div style={{
+                  background: "#fff", borderRadius: 16, padding: "24px 24px 20px",
+                  boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 20,
+                  border: "1.5px solid #e5e7eb",
+                }}>
+                  <label htmlFor="qty-input" style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+                    Quantity
+                  </label>
+                  <input
+                    id="qty-input"
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 100"
+                    value={selectedQty === 0 ? "" : selectedQty}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      setSelectedQty(isNaN(v) || v < 1 ? 0 : v);
+                    }}
+                    style={{
+                      width: "100%", padding: "14px 16px",
+                      border: "2px solid #e5e7eb", borderRadius: 12,
+                      fontSize: "0.95rem", fontWeight: 700, color: "#111827",
+                      background: "#fff", outline: "none",
+                      boxSizing: "border-box",
+                      transition: "border-color 0.15s",
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
+                    onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
+                  />
 
-              {/* Price calculation */}
-              {pricePerUnit !== undefined && selectedQty >= 1 && (() => {
-                const hasBack = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
-                const backPpu = hasBack ? pricePerUnit * 0.7 : 0;
-                const totalPpu = pricePerUnit + backPpu;
-                return (
-                  <div style={{ marginTop: 14, padding: "12px 16px", background: "linear-gradient(135deg, #faf5ff, #fdf2f8)", borderRadius: 10, border: "1.5px solid #e9d5ff" }}>
-                    {hasBack && (
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                        <span style={{ fontSize: "0.78rem", color: "#9ca3af" }}>Front: ${pricePerUnit.toFixed(2)} + Back: ${backPpu.toFixed(2)}</span>
-                        <span style={{ fontSize: "0.78rem", color: "#9ca3af" }}>${totalPpu.toFixed(2)}/unit</span>
+                  {/* Price calculation */}
+                  {pricePerUnit !== undefined && selectedQty >= 1 && (() => {
+                    const hasBack = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
+                    const backPpu = hasBack ? pricePerUnit * 0.7 : 0;
+                    const totalPpu = pricePerUnit + backPpu;
+                    return (
+                      <div style={{ marginTop: 14, padding: "12px 16px", background: "linear-gradient(135deg, #faf5ff, #fdf2f8)", borderRadius: 10, border: "1.5px solid #e9d5ff" }}>
+                        {hasBack && (
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: "0.78rem", color: "#9ca3af" }}>Front: ${pricePerUnit.toFixed(2)} + Back: ${backPpu.toFixed(2)}</span>
+                            <span style={{ fontSize: "0.78rem", color: "#9ca3af" }}>${totalPpu.toFixed(2)}/unit</span>
+                          </div>
+                        )}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: "0.82rem", color: "#6b7280", fontWeight: 600 }}>
+                            ${totalPpu.toFixed(2)} × {selectedQty}
+                          </span>
+                          <span style={{ fontSize: "1.1rem", fontWeight: 800, background: "linear-gradient(90deg,#7c3aed,#db2777)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+                            ${(totalPpu * selectedQty).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
-                    )}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: "0.82rem", color: "#6b7280", fontWeight: 600 }}>
-                        ${totalPpu.toFixed(2)} × {selectedQty}
-                      </span>
-                      <span style={{ fontSize: "1.1rem", fontWeight: 800, background: "linear-gradient(90deg,#7c3aed,#db2777)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
-                        ${(totalPpu * selectedQty).toFixed(2)}
+                    );
+                  })()}
+                </div>
+
+                <div style={{
+                  background: "#fff", borderRadius: 16, padding: "18px 22px",
+                  boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+                  border: "1.5px solid #e5e7eb",
+                  marginBottom: 16,
+                }}>
+                  <p style={{ margin: "0 0 10px", fontSize: "0.76rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                    Terms &amp; Conditions
+                  </p>
+                  <ul style={{ margin: 0, padding: "0 0 0 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+                    {[
+                      "Prices are subject to final artwork and production review.",
+                      "Taxes are extra.",
+                      "Production starts after payment and final artwork approval.",
+                      "No cancellation or refund once order is sent to production.",
+                      "Slight colour variation may occur between screen and final print.",
+                      "Customer is responsible for proofreading before approval.",
+                      "Turnaround time may vary by product and shipping.",
+                      "Free basic design includes minor layout only, not full branding.",
+                    ].map((point) => (
+                      <li key={point} style={{ fontSize: "0.8rem", color: "#6b7280", lineHeight: 1.5 }}>
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            )}
+
+            {/* Configure Your Order + live Sinalite price */}
+            {sinaliteId && Object.keys(sinaliteOptionGroups).length > 0 && (
+              <div style={{
+                background: "#fff", borderRadius: 16, padding: "24px",
+                boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 20,
+                border: "1.5px solid #e5e7eb",
+              }}>
+                <p style={{ margin: "0 0 1rem", fontSize: "0.78rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Configure Your Order
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
+                  {Object.entries(sinaliteOptionGroups).map(([key, opts]) => {
+                    const groupLabel = key === "qty" ? "Quantity" : (opts[0]?.label ?? key).replace(/\b\w/g, (c) => c.toUpperCase());
+                    if (key === "qty") {
+                      return (
+                        <div key={key}>
+                          <p style={{ margin: "0 0 0.4rem", fontSize: "0.85rem", fontWeight: 700, color: "#374151" }}>{groupLabel}</p>
+                          <select
+                            value={selectedSinaliteOptions[key] ?? ""}
+                            onChange={(e) => setSelectedSinaliteOptions((prev) => ({ ...prev, [key]: e.target.value }))}
+                            style={{ width: "100%", padding: "0.65rem 0.85rem", border: "1.5px solid #e5e7eb", borderRadius: "10px", fontSize: "0.9rem", color: "#111827", background: "#fff" }}
+                          >
+                            {opts.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
+                          </select>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={key}>
+                        <p style={{ margin: "0 0 0.4rem", fontSize: "0.85rem", fontWeight: 700, color: "#374151" }}>{groupLabel}</p>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                          {opts.map((o) => {
+                            const active = selectedSinaliteOptions[key] === o.name;
+                            return (
+                              <button
+                                key={o.name}
+                                type="button"
+                                onClick={() => setSelectedSinaliteOptions((prev) => ({ ...prev, [key]: o.name }))}
+                                style={{
+                                  padding: "0.5rem 0.9rem", borderRadius: "9px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer",
+                                  border: active ? "1.5px solid transparent" : "1.5px solid #e5e7eb",
+                                  background: active ? "linear-gradient(135deg,#7c3aed,#db2777,#f97316)" : "#fff",
+                                  color: active ? "#fff" : "#374151",
+                                }}
+                              >
+                                {o.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {(sinalitePrice || sinalitePriceLoading) && (
+                  <div style={{ marginTop: "1.25rem", padding: "1rem", background: "linear-gradient(135deg, #faf5ff, #fdf2f8)", borderRadius: 10, border: "1.5px solid #e9d5ff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <span style={{ fontSize: "0.85rem", color: "#6b7280", fontWeight: 600 }}>Your Price</span>
+                      <span style={{ fontSize: "1.4rem", fontWeight: 800, background: "linear-gradient(90deg,#7c3aed,#db2777)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+                        {sinalitePriceLoading ? "…" : `$${sinalitePrice?.price.toFixed(2)}`}
                       </span>
                     </div>
+                    {sinalitePrice && Object.keys(sinalitePrice.productOptions).length > 0 && (
+                      <div style={{ marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid #e9d5ff", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                        {Object.entries(sinalitePrice.productOptions).map(([label, value]) => (
+                          <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem" }}>
+                            <span style={{ color: "#9ca3af" }}>{label}</span>
+                            <span style={{ fontWeight: 700, color: "#374151" }}>{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                );
-              })()}
-            </div>
-
-            {/* Terms & Conditions */}
-            <div style={{
-              background: "#fff", borderRadius: 16, padding: "18px 22px",
-              boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
-              border: "1.5px solid #e5e7eb",
-              marginBottom: 16,
-            }}>
-              <p style={{ margin: "0 0 10px", fontSize: "0.76rem", fontWeight: 800, color: "#374151", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                Terms &amp; Conditions
-              </p>
-              <ul style={{ margin: 0, padding: "0 0 0 16px", display: "flex", flexDirection: "column", gap: 6 }}>
-                {[
-                  "Prices are subject to final artwork and production review.",
-                  "Taxes are extra.",
-                  "Production starts after payment and final artwork approval.",
-                  "No cancellation or refund once order is sent to production.",
-                  "Slight colour variation may occur between screen and final print.",
-                  "Customer is responsible for proofreading before approval.",
-                  "Turnaround time may vary by product and shipping.",
-                  "Free basic design includes minor layout only, not full branding.",
-                ].map((point) => (
-                  <li key={point} style={{ fontSize: "0.8rem", color: "#6b7280", lineHeight: 1.5 }}>
-                    {point}
-                  </li>
-                ))}
-              </ul>
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Approval checkbox card */}
             <div style={{
@@ -4589,23 +4937,25 @@ export default function DesignEditorShell({
 
             {/* Add to Cart button */}
             <button
-              disabled={!designApproved || selectedQty < 1}
+              disabled={!designApproved || effectiveQty < 1}
               onClick={() => {
-                if (!designApproved || selectedQty < 1) return;
+                if (!designApproved || effectiveQty < 1) return;
                 const cartId = Date.now().toString();
                 pendingCartIdRef.current = cartId;
                 // Save base item immediately so checkout/auth can open without waiting
                 try {
                   const existing = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<Record<string, unknown>>;
                   const hasBackCart = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
-                  const effectivePpu = (pricePerUnit ?? 0) + (hasBackCart ? (pricePerUnit ?? 0) * 0.7 : 0);
+                  const total = sinaliteId ? (sinalitePrice?.price ?? 0) : ((pricePerUnit ?? 0) + (hasBackCart ? (pricePerUnit ?? 0) * 0.7 : 0)) * effectiveQty;
+                  const effectivePpu = sinaliteId ? (effectiveQty > 0 ? total / effectiveQty : 0) : (pricePerUnit ?? 0) + (hasBackCart ? (pricePerUnit ?? 0) * 0.7 : 0);
                   existing.push({
                     id: cartId,
                     name: productName ?? "Custom Print",
-                    qty: selectedQty,
+                    qty: effectiveQty,
                     pricePerUnit: effectivePpu,
-                    total: effectivePpu * selectedQty,
+                    total,
                     doubleSided: !!sides.back.template,
+                    ...(sinaliteId ? { sinaliteId, sinaliteOptions: buildSinaliteChosenOptions() } : {}),
                   });
                   localStorage.setItem("wp_cart", JSON.stringify(existing));
                   localStorage.setItem("wp_cart_count", String(existing.length));
@@ -4644,12 +4994,40 @@ export default function DesignEditorShell({
                       toJpeg(fp, 1200, 1200, 0.88),  // frontPreview: native-ish res, crisp in admin
                       toJpeg(bp, 1200, 1200, 0.88),
                     ]);
-                    const cart = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<{ id: string; thumb?: string; frontPreview?: string; backPreview?: string }>;
+
+                    // For Sinalite-linked items, also generate + upload print-ready files
+                    // (design + bleed cut-line + safe-area guide) — these URLs are what
+                    // actually get sent to Sinalite's order API, not the placeholder.
+                    let frontFileUrl: string | undefined;
+                    let backFileUrl: string | undefined;
+                    if (sinaliteId && isBusinessCard) {
+                      try {
+                        const uploadFile = async (dataUrl: string, filename: string) => {
+                          const r = await fetch("/api/upload", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ dataUrl, filename }),
+                          });
+                          const d = await r.json() as { url?: string };
+                          return d.url;
+                        };
+                        const printFront = await generatePrintReadyPNG("front", sides as Parameters<typeof generateSidePreviewPNG>[1], bgColors, bgSvg, dims, 3.5, 2, 2);
+                        frontFileUrl = await uploadFile(printFront, `${cartId}-front.png`);
+                        if (sides.back.template) {
+                          const printBack = await generatePrintReadyPNG("back", sides as Parameters<typeof generateSidePreviewPNG>[1], bgColors, bgSvg, dims, 3.5, 2, 2);
+                          backFileUrl = await uploadFile(printBack, `${cartId}-back.png`);
+                        }
+                      } catch { /* ignore — order confirmation falls back to placeholder */ }
+                    }
+
+                    const cart = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<{ id: string; thumb?: string; frontPreview?: string; backPreview?: string; frontFileUrl?: string; backFileUrl?: string }>;
                     const entry = cart.find(i => i.id === cartId);
                     if (entry) {
                       if (thumb) entry.thumb = thumb;
                       if (frontPreview) entry.frontPreview = frontPreview;
                       if (backPreview) entry.backPreview = backPreview;
+                      if (frontFileUrl) entry.frontFileUrl = frontFileUrl;
+                      if (backFileUrl) entry.backFileUrl = backFileUrl;
                       localStorage.setItem("wp_cart", JSON.stringify(cart));
                     }
                   } catch { /* ignore */ }
@@ -4671,26 +5049,26 @@ export default function DesignEditorShell({
               }}
               style={{
                 width: "100%", padding: "16px",
-                background: designApproved && selectedQty >= 1
+                background: designApproved && effectiveQty >= 1
                   ? "linear-gradient(135deg,#7c3aed,#db2777)"
                   : "#e5e7eb",
                 border: "none", borderRadius: 14,
-                cursor: designApproved && selectedQty >= 1 ? "pointer" : "not-allowed",
-                color: designApproved && selectedQty >= 1 ? "#fff" : "#9ca3af",
+                cursor: designApproved && effectiveQty >= 1 ? "pointer" : "not-allowed",
+                color: designApproved && effectiveQty >= 1 ? "#fff" : "#9ca3af",
                 fontSize: "1rem", fontWeight: 800, letterSpacing: "0.02em",
-                boxShadow: designApproved && selectedQty >= 1 ? "0 6px 20px rgba(124,58,237,0.4)" : "none",
+                boxShadow: designApproved && effectiveQty >= 1 ? "0 6px 20px rgba(124,58,237,0.4)" : "none",
                 transition: "all 0.2s",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               }}
             >
-              {designApproved && selectedQty >= 1
+              {designApproved && effectiveQty >= 1
                 ? <><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Add to Cart</>
                 : !designApproved
                   ? "Please approve your design to continue"
                   : "Enter a quantity to continue"}
             </button>
 
-            {(!designApproved || selectedQty < 1) && (
+            {(!designApproved || effectiveQty < 1) && (
               <p style={{ textAlign: "center", marginTop: 10, fontSize: "0.78rem", color: "#9ca3af" }}>
                 {!designApproved
                   ? "Check the box above to enable the continue button"
@@ -4776,7 +5154,7 @@ export default function DesignEditorShell({
             <h2 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800, color: "#111827" }}>Order Placed!</h2>
             <p style={{ margin: 0, color: "#6b7280", textAlign: "center", maxWidth: 340 }}>
               Thank you, <strong>{cartUser?.firstName}</strong>! Your order for{" "}
-              <strong>{selectedQty} {productName ?? "cards"}</strong> has been received.
+              <strong>{effectiveQty} {productName ?? "cards"}</strong> has been received.
               We&apos;ll be in touch soon.
             </p>
             <button onClick={() => { setCheckoutOpen(false); setFinalStepsOpen(false); }} style={{
@@ -4825,33 +5203,22 @@ export default function DesignEditorShell({
                   <p style={{ margin: "0 0 14px", fontSize: "0.82rem", color: "#6b7280" }}>
                     Custom Design{sides.back.template ? " · Double-sided" : ""}
                   </p>
-                  {/* Quantity stepper */}
-                  <div style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                    <button
-                      onClick={() => setSelectedQty(q => Math.max(1, q - 1))}
-                      style={{
-                        width: 36, height: 36, border: "none", background: "#f9fafb",
-                        cursor: "pointer", fontSize: "1.2rem", color: "#374151",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontWeight: 700,
-                      }}
-                    >−</button>
-                    <span style={{
-                      minWidth: 44, textAlign: "center", fontSize: "0.95rem",
-                      fontWeight: 700, color: "#111827", padding: "0 8px",
-                      borderLeft: "1.5px solid #e5e7eb", borderRight: "1.5px solid #e5e7eb",
-                      lineHeight: "36px",
-                    }}>{selectedQty}</span>
-                    <button
-                      onClick={() => setSelectedQty(q => q + 1)}
-                      style={{
-                        width: 36, height: 36, border: "none", background: "#f9fafb",
-                        cursor: "pointer", fontSize: "1.2rem", color: "#374151",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontWeight: 700,
-                      }}
-                    >+</button>
-                  </div>
+                  <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
+                    Qty: <span style={{ fontWeight: 700, color: "#111827" }}>{effectiveQty}</span>
+                  </p>
+                  {(() => {
+                    const hasBackItem = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
+                    const itemTotal = sinaliteId
+                      ? (sinalitePrice?.price ?? 0)
+                      : pricePerUnit !== undefined
+                        ? (pricePerUnit + (hasBackItem ? pricePerUnit * 0.7 : 0)) * effectiveQty
+                        : 0;
+                    return itemTotal > 0 ? (
+                      <p style={{ margin: "4px 0 0", fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>
+                        ${itemTotal.toFixed(2)}
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 {/* Delete current item — show confirmation, don't navigate back */}
@@ -4899,35 +5266,14 @@ export default function DesignEditorShell({
                         <p style={{ margin: "0 0 14px", fontSize: "0.82rem", color: "#6b7280" }}>
                           Custom Design{item.doubleSided ? " · Double-sided" : ""}
                         </p>
-                        <div style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                          <button
-                            onClick={() => {
-                              const updated = existingCartItems.map(i =>
-                                i.id === item.id
-                                  ? { ...i, qty: Math.max(1, i.qty - 1), total: i.pricePerUnit * Math.max(1, i.qty - 1) }
-                                  : i
-                              );
-                              setExistingCartItems(updated);
-                              try { localStorage.setItem("wp_cart", JSON.stringify(updated)); } catch { /* ignore */ }
-                            }}
-                            style={{ width: 36, height: 36, border: "none", background: "#f9fafb", cursor: "pointer", fontSize: "1.2rem", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
-                          >−</button>
-                          <span style={{ minWidth: 44, textAlign: "center", fontSize: "0.95rem", fontWeight: 700, color: "#111827", padding: "0 8px", borderLeft: "1.5px solid #e5e7eb", borderRight: "1.5px solid #e5e7eb", lineHeight: "36px" }}>
-                            {item.qty}
-                          </span>
-                          <button
-                            onClick={() => {
-                              const updated = existingCartItems.map(i =>
-                                i.id === item.id
-                                  ? { ...i, qty: i.qty + 1, total: i.pricePerUnit * (i.qty + 1) }
-                                  : i
-                              );
-                              setExistingCartItems(updated);
-                              try { localStorage.setItem("wp_cart", JSON.stringify(updated)); } catch { /* ignore */ }
-                            }}
-                            style={{ width: 36, height: 36, border: "none", background: "#f9fafb", cursor: "pointer", fontSize: "1.2rem", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
-                          >+</button>
-                        </div>
+                        <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
+                          Qty: <span style={{ fontWeight: 700, color: "#111827" }}>{item.qty}</span>
+                        </p>
+                        {item.total > 0 && (
+                          <p style={{ margin: "4px 0 0", fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>
+                            ${item.total.toFixed(2)}
+                          </p>
+                        )}
                       </div>
 
                       {/* Delete */}
@@ -4952,10 +5298,8 @@ export default function DesignEditorShell({
             {/* RIGHT — Order Summary */}
             {(() => {
               const hasAddress = !addressLoading &&
-                checkoutForm.houseNo.trim() !== "" &&
-                checkoutForm.flat.trim() !== "" &&
-                checkoutForm.city.trim() !== "" &&
-                checkoutForm.state.trim() !== "";
+                (checkoutForm.flat.trim() !== "" || checkoutForm.city.trim() !== "");
+              const addressLine = fullAddressLine(checkoutForm);
               const openAddressPopup = () => {
                 setEditForm({ ...checkoutForm });
                 setEditFormError("");
@@ -4971,12 +5315,17 @@ export default function DesignEditorShell({
 
                   {/* Summary rows */}
                   {(() => {
-                    const currentTotal = pricePerUnit !== undefined ? pricePerUnit * selectedQty : 0;
+                    const hasBackSummary = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
+                    const currentTotal = sinaliteId
+                      ? (sinalitePrice?.price ?? 0)
+                      : pricePerUnit !== undefined
+                        ? (pricePerUnit + (hasBackSummary ? pricePerUnit * 0.7 : 0)) * effectiveQty
+                        : 0;
                     const existingTotal = existingCartItems.reduce((s, i) => s + i.total, 0);
                     const subtotal = currentTotal + existingTotal;
                     const totalItemCount = 1 + existingCartItems.length;
-                    const delivery = 10;
-                    const total = subtotal + delivery;
+                    const shippingCost = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
+                    const total = subtotal + shippingCost;
                     return (
                       <>
                         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
@@ -4986,10 +5335,12 @@ export default function DesignEditorShell({
                               {subtotal > 0 ? `$${subtotal.toFixed(2)}` : "—"}
                             </span>
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", color: "#6b7280" }}>
-                            <span>Delivery Charges</span>
-                            <span style={{ color: "#111827", fontWeight: 600 }}>USD ${delivery.toFixed(2)}</span>
-                          </div>
+                          {shippingCost > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", color: "#6b7280" }}>
+                              <span>Shipping ({shippingOptions[selectedShippingIdx!]?.service})</span>
+                              <span style={{ color: "#111827", fontWeight: 600 }}>${shippingCost.toFixed(2)}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ borderTop: "1.5px solid #f0f2f5", paddingTop: 14, marginBottom: 20 }}>
@@ -4999,10 +5350,9 @@ export default function DesignEditorShell({
                               {subtotal > 0 ? `$${total.toFixed(2)}` : "Contact for quote"}
                             </span>
                           </div>
-                          <p style={{ margin: "8px 0 0", fontSize: "0.78rem", color: "#6b7280" }}>
-                            Quantity: <strong style={{ color: "#111827" }}>{selectedQty} {selectedQty === 1 ? "copy" : "copies"}</strong>
-                            {sides.back.template && <span style={{ color: "#7c3aed", marginLeft: 8 }}>· Double-sided included</span>}
-                          </p>
+                          {sides.back.template && (
+                            <p style={{ margin: "8px 0 0", fontSize: "0.78rem", color: "#7c3aed" }}>Double-sided included</p>
+                          )}
                         </div>
                       </>
                     );
@@ -5024,67 +5374,269 @@ export default function DesignEditorShell({
                       </div>
                     </div>
 
-                    {/* Address row */}
-                    <div style={{
-                      border: "1.5px solid #e5e7eb", borderRadius: 10,
-                      padding: "11px 14px", display: "flex", alignItems: "center",
-                      justifyContent: "space-between", gap: 10, background: "#fafafa",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        {hasAddress ? (
-                          <span style={{ fontSize: "0.85rem", color: "#111827", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {checkoutForm.houseNo}, {checkoutForm.flat}, {checkoutForm.city}, {checkoutForm.state}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: "0.85rem", color: "#9ca3af" }}>Select delivery address</span>
-                        )}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        <button
-                          onClick={openAddressPopup}
-                          style={{
-                            padding: "6px 14px", borderRadius: 7, cursor: "pointer",
-                            border: "1.5px solid #7c3aed", background: "#fff",
-                            color: "#7c3aed", fontWeight: 700, fontSize: "0.78rem",
-                          }}
-                        >{hasAddress ? "Edit" : "Add"}</button>
-                        <button
-                          onClick={openAddressPopup}
-                          style={{
-                            width: 28, height: 28, border: "1.5px solid #e5e7eb",
-                            borderRadius: 7, background: "#fff", cursor: "pointer",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            color: "#374151",
-                          }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-                        </button>
-                      </div>
-                    </div>
+                    {!addressEditOpen ? (
+                      <>
+                        {/* Address row */}
+                        <div style={{
+                          border: "1.5px solid #e5e7eb", borderRadius: 10,
+                          padding: "11px 14px", display: "flex", alignItems: "center",
+                          justifyContent: "space-between", gap: 10, background: "#fafafa",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            {hasAddress ? (
+                              <span style={{ fontSize: "0.85rem", color: "#111827", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {addressLine}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: "0.85rem", color: "#9ca3af" }}>Select delivery address</span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            <button
+                              onClick={openAddressPopup}
+                              style={{
+                                padding: "6px 14px", borderRadius: 7, cursor: "pointer",
+                                border: "1.5px solid #7c3aed", background: "#fff",
+                                color: "#7c3aed", fontWeight: 700, fontSize: "0.78rem",
+                              }}
+                            >{hasAddress ? "Edit" : "Add"}</button>
+                            <button
+                              onClick={openAddressPopup}
+                              style={{
+                                width: 28, height: 28, border: "1.5px solid #e5e7eb",
+                                borderRadius: 7, background: "#fff", cursor: "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                color: "#374151",
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                            </button>
+                          </div>
+                        </div>
 
-                    {/* Phone shown below address if saved */}
-                    {hasAddress && checkoutForm.phone && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 2 }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l.85-.85a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.73 17z"/></svg>
-                        <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>{checkoutForm.phone}</span>
+                        {/* Phone shown below address if saved */}
+                        {hasAddress && checkoutForm.phone && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 2 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l.85-.85a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.73 17z"/></svg>
+                            <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>{checkoutForm.phone}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Inline shipping address form — replaces the popup */
+                      <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 18, background: "#fafafa", display: "flex", flexDirection: "column", gap: 14 }}>
+                        <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                          Shipping Address
+                        </span>
+
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                            Street Address <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="123 Main Street"
+                            value={editForm.flat}
+                            onChange={(e) => setEditForm((p) => ({ ...p, flat: e.target.value }))}
+                            style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                            Address Line 2
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Suite, unit, floor, etc."
+                            value={editForm.houseNo}
+                            onChange={(e) => setEditForm((p) => ({ ...p, houseNo: e.target.value }))}
+                            style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                          />
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              City <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Toronto"
+                              value={editForm.city}
+                              onChange={(e) => setEditForm((p) => ({ ...p, city: e.target.value }))}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              Province / State <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <select
+                              value={editForm.state}
+                              onChange={(e) => setEditForm((p) => ({ ...p, state: e.target.value }))}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: editForm.state ? "#111827" : "#9ca3af", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            >
+                              <option value="">Select region</option>
+                              {regionsForCountry(editForm.country).map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              Postal / ZIP Code <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="M5V 1A1"
+                              value={editForm.postalCode}
+                              onChange={(e) => setEditForm((p) => ({ ...p, postalCode: e.target.value }))}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              Country <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <select
+                              value={editForm.country}
+                              onChange={(e) => setEditForm((p) => {
+                                const nextRegions = regionsForCountry(e.target.value);
+                                return { ...p, country: e.target.value, state: nextRegions.includes(p.state) ? p.state : "" };
+                              })}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            >
+                              {COUNTRIES.map((c) => (
+                                <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                            Phone Number <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <input
+                            type="tel"
+                            placeholder="e.g. +1 902 489 6081"
+                            value={editForm.phone}
+                            onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))}
+                            style={{ width: "100%", padding: "11px 13px", border: `1.5px solid ${editFormError && !editForm.phone ? "#dc2626" : "#e5e7eb"}`, borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                          />
+                        </div>
+
+                        {editFormError && (
+                          <p style={{ margin: 0, fontSize: "0.78rem", color: "#dc2626", fontWeight: 600 }}>{editFormError}</p>
+                        )}
+
+                        <div style={{ display: "flex", gap: 10 }}>
+                          <button
+                            onClick={() => setAddressEditOpen(false)}
+                            style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: 10, cursor: "pointer", background: "#fff", color: "#374151", fontWeight: 700, fontSize: "0.88rem" }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            disabled={shippingLoading}
+                            onClick={async () => {
+                              const { houseNo, flat, city, state, postalCode, country, phone } = editForm;
+                              if (!phone.trim()) { setEditFormError("Phone number is required."); return; }
+                              if (!flat.trim() || !city.trim() || !state.trim() || !postalCode.trim() || !country.trim()) {
+                                setEditFormError("Please fill in all required address fields."); return;
+                              }
+                              setEditFormError("");
+                              setCheckoutForm({ houseNo, flat, city, state, postalCode, country, phone });
+                              if (cartUser) {
+                                fetch("/api/auth/profile", {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state, postalCode, country }),
+                                }).catch(() => { /* ignore */ });
+                              }
+                              await fetchShippingOptions(state, postalCode, country);
+                              setAddressEditOpen(false);
+                            }}
+                            style={{
+                              flex: 2, padding: "12px",
+                              background: "linear-gradient(135deg,#7c3aed,#db2777)",
+                              border: "none", borderRadius: 10,
+                              cursor: shippingLoading ? "not-allowed" : "pointer",
+                              color: "#fff", fontWeight: 800, fontSize: "0.88rem",
+                              opacity: shippingLoading ? 0.75 : 1,
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                            }}
+                          >
+                            {shippingLoading && (
+                              <span style={{
+                                width: 14, height: 14, borderRadius: "50%",
+                                border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff",
+                                animation: "wp-spin 0.7s linear infinite",
+                              }} />
+                            )}
+                            {shippingLoading ? "Getting Shipping Options…" : "Get Shipping Options"}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Fast delivery badge */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    background: "#f9f5ff", borderRadius: 10, padding: "12px 14px",
-                    marginBottom: 20,
-                  }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                    <div style={{ flex: 1 }}>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: "0.85rem", color: "#111827" }}>Fast &amp; Reliable Delivery</p>
-                      <p style={{ margin: 0, fontSize: "0.75rem", color: "#6b7280" }}>We deliver your products safely to your doorstep</p>
+                  {/* Shipment Details — live carrier rates from Sinalite */}
+                  {(shippingLoading || shippingOptions.length > 0 || shippingError) && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                        <span style={{ fontWeight: 800, fontSize: "0.95rem", color: "#111827" }}>Shipment Details</span>
+                      </div>
+                      <p style={{ margin: "0 0 12px", fontSize: "0.78rem", color: "#6b7280" }}>Select a shipping method for your order.</p>
+
+                      {shippingLoading && (
+                        <p style={{ margin: 0, fontSize: "0.85rem", color: "#9ca3af" }}>Loading shipping options…</p>
+                      )}
+                      {shippingError && (
+                        <p style={{ margin: 0, fontSize: "0.82rem", color: "#dc2626", fontWeight: 600 }}>{shippingError}</p>
+                      )}
+                      {!shippingLoading && shippingOptions.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          {shippingOptions.map((opt, i) => {
+                            const selected = selectedShippingIdx === i;
+                            return (
+                              <button
+                                key={`${opt.carrier}-${opt.service}-${i}`}
+                                onClick={() => setSelectedShippingIdx(i)}
+                                style={{
+                                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                                  border: `1.5px solid ${selected ? "#7c3aed" : "#e5e7eb"}`,
+                                  borderRadius: 10, padding: "12px 14px", background: "#fff",
+                                  cursor: "pointer", width: "100%", textAlign: "left",
+                                }}
+                              >
+                                <div>
+                                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.88rem", color: "#111827" }}>{opt.carrier}</p>
+                                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#6b7280" }}>{opt.service}</p>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                  <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#111827" }}>${opt.price.toFixed(2)}</span>
+                                  <span style={{
+                                    width: 18, height: 18, borderRadius: "50%",
+                                    border: `2px solid ${selected ? "#7c3aed" : "#d1d5db"}`,
+                                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                  }}>
+                                    {selected && <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#7c3aed" }} />}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <span style={{ color: "#7c3aed", fontWeight: 600, fontSize: "0.75rem", flexShrink: 0 }}>Usually in 2–4 days</span>
-                  </div>
+                  )}
 
                   <div style={{ borderTop: "1.5px solid #f0f2f5", paddingTop: 16, marginBottom: 16 }}>
                     {/* Promo Code */}
@@ -5120,9 +5672,9 @@ export default function DesignEditorShell({
                   <button
                     disabled={stripeLoading}
                     onClick={async () => {
-                      const { houseNo, flat, city, state, phone } = checkoutForm;
+                      const { houseNo, flat, city, state, postalCode, country, phone } = checkoutForm;
                       if (!phone.trim()) { setCheckoutError("Phone number is required. Please add your delivery address."); return; }
-                      if (!houseNo.trim() || !flat.trim() || !city.trim() || !state.trim()) {
+                      if (!flat.trim() || !city.trim() || !state.trim() || !postalCode.trim() || !country.trim()) {
                         setCheckoutError("Please add your delivery address first."); return;
                       }
                       setCheckoutError("");
@@ -5132,12 +5684,12 @@ export default function DesignEditorShell({
                         fetch("/api/auth/profile", {
                           method: "PATCH",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state }),
+                          body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state, postalCode, country }),
                         }).catch(() => { /* ignore */ });
                       }
 
                       if (onSaveAndContinue) {
-                        onSaveAndContinue(selectedQty, previewFrontPng, previewBackPng);
+                        onSaveAndContinue(effectiveQty, previewFrontPng, previewBackPng);
                         return;
                       }
 
@@ -5179,26 +5731,61 @@ export default function DesignEditorShell({
                         ]);
                       } catch { /* ignore — proceed without images */ }
 
+                      // For Sinalite-linked business cards, also generate + upload print-ready
+                      // files (design + bleed cut-line + safe-area guide) for the order API.
+                      let currentFrontFileUrl: string | undefined;
+                      let currentBackFileUrl: string | undefined;
+                      if (sinaliteId && isBusinessCard) {
+                        try {
+                          const uploadFile = async (dataUrl: string, filename: string) => {
+                            const r = await fetch("/api/upload", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ dataUrl, filename }),
+                            });
+                            const d = await r.json() as { url?: string };
+                            return d.url;
+                          };
+                          const printFront = await generatePrintReadyPNG("front", sides as Parameters<typeof generateSidePreviewPNG>[1], bgColors, bgSvg, dims, 3.5, 2, 2);
+                          currentFrontFileUrl = await uploadFile(printFront, `${pendingCartIdRef.current ?? Date.now()}-front.png`);
+                          if (sides.back.template) {
+                            const printBack = await generatePrintReadyPNG("back", sides as Parameters<typeof generateSidePreviewPNG>[1], bgColors, bgSvg, dims, 3.5, 2, 2);
+                            currentBackFileUrl = await uploadFile(printBack, `${pendingCartIdRef.current ?? Date.now()}-back.png`);
+                          }
+                        } catch { /* ignore — order confirmation falls back to placeholder */ }
+                      }
+
                       // Always include the current design as the first item, plus any previously saved cart items
                       const hasBackCart2 = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
-                      const effectivePpu2 = (pricePerUnit ?? 0) + (hasBackCart2 ? (pricePerUnit ?? 0) * 0.7 : 0);
-                      const currentItem = pricePerUnit && pricePerUnit > 0 && selectedQty > 0
+                      const total2 = sinaliteId
+                        ? (sinalitePrice?.price ?? 0)
+                        : ((pricePerUnit ?? 0) + (hasBackCart2 ? (pricePerUnit ?? 0) * 0.7 : 0)) * effectiveQty;
+                      const effectivePpu2 = sinaliteId
+                        ? (effectiveQty > 0 ? total2 / effectiveQty : 0)
+                        : (pricePerUnit ?? 0) + (hasBackCart2 ? (pricePerUnit ?? 0) * 0.7 : 0);
+                      const currentItem = pricePerUnit && pricePerUnit > 0 && effectiveQty > 0
                         ? {
                             id: pendingCartIdRef.current ?? Date.now().toString(),
                             name: productName ?? "Custom Print",
-                            qty: selectedQty,
+                            qty: effectiveQty,
                             pricePerUnit: effectivePpu2,
-                            total: effectivePpu2 * selectedQty,
+                            total: total2,
                             doubleSided: !!sides.back.template,
                             thumb: currentThumb,
                             frontPreview: currentFrontPreview,
                             backPreview: currentBackPreview,
+                            ...(sinaliteId ? { sinaliteId, sinaliteOptions: buildSinaliteChosenOptions() } : {}),
+                            ...(currentFrontFileUrl ? { frontFileUrl: currentFrontFileUrl } : {}),
+                            ...(currentBackFileUrl ? { backFileUrl: currentBackFileUrl } : {}),
                           }
                         : null;
 
                       const otherItems = existingCartItems
-                        .map(({ id, name, qty, pricePerUnit: ppu, total, doubleSided, thumb }) => ({
+                        .map(({ id, name, qty, pricePerUnit: ppu, total, doubleSided, thumb, sinaliteId: sid, sinaliteOptions: sopts, frontFileUrl, backFileUrl }) => ({
                           id, name, qty, pricePerUnit: ppu ?? 0, total: total ?? 0, doubleSided: doubleSided ?? false, thumb,
+                          ...(sid ? { sinaliteId: sid, sinaliteOptions: sopts } : {}),
+                          ...(frontFileUrl ? { frontFileUrl } : {}),
+                          ...(backFileUrl ? { backFileUrl } : {}),
                         }))
                         .filter((i) => i.pricePerUnit > 0 && i.qty > 0);
 
@@ -5211,6 +5798,7 @@ export default function DesignEditorShell({
                       }
 
                       try {
+                        const shippingMethod = selectedShippingIdx != null ? shippingOptions[selectedShippingIdx]?.service : "";
                         const res = await fetch("/api/checkout/create-session", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -5218,8 +5806,13 @@ export default function DesignEditorShell({
                             items: cartItems,
                             customerName: cartUser ? `${cartUser.firstName} ${cartUser.lastName}` : "Guest",
                             customerEmail: cartUser?.email ?? "",
-                            address: [houseNo, flat, city, state].filter(Boolean).join(", "),
+                            address: [flat, houseNo, city, state, postalCode, country].filter(Boolean).join(", "),
                             customerId: cartUser?.id ?? "",
+                            shipping: {
+                              firstName: cartUser?.firstName ?? "", lastName: cartUser?.lastName ?? "", email: cartUser?.email ?? "",
+                              addr: flat, addr2: houseNo, city, state: regionCode(state), zip: postalCode, country, phone,
+                              method: shippingMethod ?? "",
+                            },
                           }),
                         });
                         const data = await res.json() as { url?: string; error?: string };
@@ -5319,145 +5912,6 @@ export default function DesignEditorShell({
           </div>
         )}
 
-        {/* ── Edit Address Popup ── */}
-        {addressEditOpen && (
-          <div style={{
-            position: "absolute", inset: 0, zIndex: 800,
-            background: "rgba(0,0,0,0.45)", backdropFilter: "blur(3px)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 24,
-          }}>
-            <div style={{
-              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 460,
-              boxShadow: "0 24px 60px rgba(0,0,0,0.25)", overflow: "hidden",
-            }}>
-              {/* Popup header */}
-              <div style={{
-                background: "linear-gradient(135deg,#7c3aed 0%,#db2777 60%,#f97316 100%)",
-                padding: "18px 24px", display: "flex", alignItems: "center", justifyContent: "space-between",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                  </svg>
-                  <span style={{ color: "#fff", fontWeight: 800, fontSize: "1rem" }}>
-                    {editForm.houseNo || editForm.city ? "Edit Address" : "Add Address"}
-                  </span>
-                </div>
-                <button onClick={() => setAddressEditOpen(false)} style={{
-                  background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
-                  borderRadius: "50%", width: 32, height: 32, cursor: "pointer",
-                  color: "#fff", fontSize: "0.9rem", fontWeight: 700,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>✕</button>
-              </div>
-
-              {/* Popup form */}
-              <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: 14 }}>
-                {(
-                  [
-                    { key: "houseNo", label: "House / Unit No.", placeholder: "e.g. 12" },
-                    { key: "flat",    label: "Street / Apartment", placeholder: "e.g. 123 Main St, Apt 4B" },
-                    { key: "city",    label: "City", placeholder: "e.g. Halifax" },
-                    { key: "state",   label: "Province", placeholder: "e.g. Nova Scotia" },
-                  ] as { key: keyof typeof editForm; label: string; placeholder: string }[]
-                ).map(({ key, label, placeholder }) => (
-                  <div key={key}>
-                    <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                      {label}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={placeholder}
-                      value={editForm[key]}
-                      onChange={(e) => setEditForm((p) => ({ ...p, [key]: e.target.value }))}
-                      style={{
-                        width: "100%", padding: "11px 13px",
-                        border: "1.5px solid #e5e7eb", borderRadius: 9,
-                        fontSize: "0.92rem", color: "#111827", outline: "none",
-                        boxSizing: "border-box", background: "#fff",
-                        transition: "border-color 0.15s",
-                      }}
-                      onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
-                      onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
-                    />
-                  </div>
-                ))}
-
-                {/* Phone */}
-                <div>
-                  <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                    Phone Number <span style={{ color: "#dc2626" }}>*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="e.g. +1 902 489 6081"
-                    value={editForm.phone}
-                    onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))}
-                    style={{
-                      width: "100%", padding: "11px 13px",
-                      border: `1.5px solid ${editFormError && !editForm.phone ? "#dc2626" : "#e5e7eb"}`,
-                      borderRadius: 9, fontSize: "0.92rem", color: "#111827",
-                      outline: "none", boxSizing: "border-box", background: "#fff",
-                      transition: "border-color 0.15s",
-                    }}
-                    onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
-                    onBlur={(e) => (e.target.style.borderColor = editFormError && !editForm.phone ? "#dc2626" : "#e5e7eb")}
-                  />
-                </div>
-
-                {editFormError && (
-                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#dc2626", fontWeight: 600 }}>{editFormError}</p>
-                )}
-
-                {/* Action buttons */}
-                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                  <button
-                    onClick={() => setAddressEditOpen(false)}
-                    style={{
-                      flex: 1, padding: "12px", border: "1.5px solid #e5e7eb",
-                      borderRadius: 10, cursor: "pointer", background: "#fff",
-                      color: "#374151", fontWeight: 700, fontSize: "0.9rem",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      const { houseNo, flat, city, state, phone } = editForm;
-                      if (!phone.trim()) { setEditFormError("Phone number is required."); return; }
-                      if (!houseNo.trim() || !flat.trim() || !city.trim() || !state.trim()) {
-                        setEditFormError("Please fill in all address fields."); return;
-                      }
-                      setEditFormError("");
-                      setCheckoutForm({ houseNo, flat, city, state, phone });
-                      if (cartUser) {
-                        fetch("/api/auth/profile", {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state }),
-                        }).catch(() => { /* ignore */ });
-                      }
-                      setAddressEditOpen(false);
-                    }}
-                    style={{
-                      flex: 2, padding: "12px",
-                      background: "linear-gradient(135deg,#7c3aed,#db2777)",
-                      border: "none", borderRadius: 10, cursor: "pointer",
-                      color: "#fff", fontWeight: 800, fontSize: "0.9rem",
-                      boxShadow: "0 4px 14px rgba(124,58,237,0.35)",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                    Save Address
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     )}
 

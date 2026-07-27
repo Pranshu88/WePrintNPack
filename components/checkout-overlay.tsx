@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import AuthModal from "@/components/auth-modal";
+import { COUNTRIES, regionsForCountry, regionCode, fullAddressLine } from "@/lib/shipping-regions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AuthCustomer = { id: string; firstName: string; lastName: string; email: string };
-type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; boxFaceImages?: { front?: string; right?: string; top?: string }; previewBoxColor?: string; previewW?: number; previewH?: number; previewD?: number };
+type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; boxFaceImages?: { front?: string; right?: string; top?: string }; previewBoxColor?: string; previewW?: number; previewH?: number; previewD?: number; sinaliteId?: string; sinaliteOptions?: Record<string, string> };
+type ShippingOption = { carrier: string; service: string; price: number; days: number };
 
 function SimpleCube3D({ bg, faceImages, previewW = 1, previewH = 1, previewD = 1 }: { bg: string; faceImages?: { front?: string; right?: string; top?: string }; previewW?: number; previewH?: number; previewD?: number }) {
   const MAX = 44;
@@ -72,14 +74,20 @@ export default function CheckoutOverlay({
   const [authForCartOpen, setAuthForCartOpen] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [existingCartItems, setExistingCartItems] = useState<SavedCartItem[]>([]);
-  const [checkoutForm, setCheckoutForm] = useState({ houseNo: "", flat: "", city: "", state: "", phone: "" });
+  const [checkoutForm, setCheckoutForm] = useState({ houseNo: "", flat: "", city: "", state: "", postalCode: "", country: "CA", phone: "" });
   const [checkoutError, setCheckoutError] = useState("");
   const [stripeLoading, setStripeLoading] = useState(false);
   const [addressLoading, setAddressLoading] = useState(false);
   const [addressEditOpen, setAddressEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ houseNo: "", flat: "", city: "", state: "", phone: "" });
+  const [editForm, setEditForm] = useState({ houseNo: "", flat: "", city: "", state: "", postalCode: "", country: "CA", phone: "" });
   const [editFormError, setEditFormError] = useState("");
+  const [shippingOptions, setShippingOptions] = useState<ShippingOption[]>([]);
+  const [selectedShippingIdx, setSelectedShippingIdx] = useState<number | null>(null);
+  const [shippingLoading, setShippingLoading] = useState(false);
+  const [shippingError, setShippingError] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [hasSavedAddress, setHasSavedAddress] = useState(false);
+  const autoFetchedRef = useRef(false);
 
   // Load saved user from localStorage on mount
   useEffect(() => {
@@ -101,22 +109,81 @@ export default function CheckoutOverlay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Loads this customer's most recently saved address (if any) — a customer can
+  // have multiple saved addresses; the latest one pre-fills checkout.
   async function fetchAndPrefillAddress(userId: string) {
     setAddressLoading(true);
     try {
-      const res = await fetch(`/api/auth/profile?id=${encodeURIComponent(userId)}`, { cache: "no-store" });
+      const res = await fetch(`/api/auth/addresses?id=${encodeURIComponent(userId)}`, { cache: "no-store" });
       if (res.ok) {
-        const data = await res.json() as { phone: string; address: { houseNo: string; flat: string; city: string; state: string } };
-        setCheckoutForm({
-          phone:   data.phone ?? "",
-          houseNo: data.address?.houseNo ?? "",
-          flat:    data.address?.flat ?? "",
-          city:    data.address?.city ?? "",
-          state:   data.address?.state ?? "",
-        });
+        const data = await res.json() as { addresses?: { houseNo: string; flat: string; city: string; state: string; postalCode: string; country: string; phone: string }[] };
+        const latest = data.addresses?.[0];
+        if (latest) {
+          setCheckoutForm({
+            houseNo: latest.houseNo, flat: latest.flat, city: latest.city, state: latest.state,
+            postalCode: latest.postalCode, country: latest.country || "CA", phone: latest.phone,
+          });
+          setHasSavedAddress(true);
+        }
       }
     } catch { /* ignore */ } finally {
       setAddressLoading(false);
+    }
+  }
+
+  // Once a saved address and the cart items are both ready, auto-fetch shipping
+  // options once — no need to click "Get Shipping Options" again next visit.
+  useEffect(() => {
+    if (autoFetchedRef.current) return;
+    if (!hasSavedAddress) return;
+    const { flat, city, state, postalCode, country } = checkoutForm;
+    if (!flat.trim() || !city.trim() || !state.trim() || !postalCode.trim() || !country.trim()) return;
+    autoFetchedRef.current = true;
+    void fetchShippingOptions(state, postalCode, country);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasSavedAddress, checkoutForm, existingCartItems.length]);
+
+  // Fetch live carrier rates from Sinalite for every Sinalite-linked cart item.
+  // Box products aren't Sinalite-linked today, so this will report "no shippable
+  // items" until/unless a box product gains a sinaliteId — the UI stays consistent
+  // with the other checkout screens either way.
+  async function fetchShippingOptions(state: string, postalCode: string, country: string) {
+    const shippingItems = existingCartItems
+      .filter((i) => i.sinaliteId && i.sinaliteOptions)
+      .map((i) => ({ productId: Number(i.sinaliteId), options: i.sinaliteOptions! }));
+    if (!shippingItems.length) {
+      setShippingError("No shippable items in cart.");
+      setShippingOptions([]);
+      setSelectedShippingIdx(null);
+      return;
+    }
+    setShippingLoading(true);
+    setShippingError("");
+    try {
+      const res = await fetch("/api/sinalite/shipping-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: shippingItems, state: regionCode(state), zip: postalCode, country }),
+      });
+      const data = await res.json() as { options?: ShippingOption[]; error?: string };
+      if (data.error) { setShippingError(data.error); setShippingOptions([]); setSelectedShippingIdx(null); return; }
+      const fetched = data.options ?? [];
+      setShippingOptions(fetched);
+      setSelectedShippingIdx(fetched.length ? 0 : null);
+      if (fetched.length > 0 && cartUser) {
+        const { houseNo, flat, city, phone } = checkoutForm;
+        fetch("/api/auth/addresses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customerId: cartUser.id, houseNo, flat, city, state, postalCode, country, phone }),
+        }).catch(() => { /* ignore */ });
+      }
+    } catch {
+      setShippingError("Failed to fetch shipping options.");
+      setShippingOptions([]);
+      setSelectedShippingIdx(null);
+    } finally {
+      setShippingLoading(false);
     }
   }
 
@@ -278,33 +345,14 @@ export default function CheckoutOverlay({
                   <p style={{ margin: "0 0 14px", fontSize: "0.82rem", color: "#6b7280" }}>
                     Custom Design{isDoubleSided ? " · Double-sided" : ""}
                   </p>
-                  {/* Quantity stepper */}
-                  <div style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                    <button
-                      onClick={() => setSelectedQty(q => Math.max(1, q - 1))}
-                      style={{
-                        width: 36, height: 36, border: "none", background: "#f9fafb",
-                        cursor: "pointer", fontSize: "1.2rem", color: "#374151",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontWeight: 700,
-                      }}
-                    >−</button>
-                    <span style={{
-                      minWidth: 44, textAlign: "center", fontSize: "0.95rem",
-                      fontWeight: 700, color: "#111827", padding: "0 8px",
-                      borderLeft: "1.5px solid #e5e7eb", borderRight: "1.5px solid #e5e7eb",
-                      lineHeight: "36px",
-                    }}>{selectedQty}</span>
-                    <button
-                      onClick={() => setSelectedQty(q => q + 1)}
-                      style={{
-                        width: 36, height: 36, border: "none", background: "#f9fafb",
-                        cursor: "pointer", fontSize: "1.2rem", color: "#374151",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontWeight: 700,
-                      }}
-                    >+</button>
-                  </div>
+                  <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
+                    Qty: <span style={{ fontWeight: 700, color: "#111827" }}>{selectedQty}</span>
+                  </p>
+                  {pricePerUnit * selectedQty > 0 && (
+                    <p style={{ margin: "4px 0 0", fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>
+                      ${(pricePerUnit * selectedQty).toFixed(2)}
+                    </p>
+                  )}
                 </div>
 
                 {/* Delete current item */}
@@ -354,35 +402,14 @@ export default function CheckoutOverlay({
                         <p style={{ margin: "0 0 14px", fontSize: "0.82rem", color: "#6b7280" }}>
                           Custom Design{item.doubleSided ? " · Double-sided" : ""}
                         </p>
-                        <div style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                          <button
-                            onClick={() => {
-                              const updated = existingCartItems.map(i =>
-                                i.id === item.id
-                                  ? { ...i, qty: Math.max(1, i.qty - 1), total: i.pricePerUnit * Math.max(1, i.qty - 1) }
-                                  : i
-                              );
-                              setExistingCartItems(updated);
-                              try { localStorage.setItem("wp_cart", JSON.stringify(updated)); } catch { /* ignore */ }
-                            }}
-                            style={{ width: 36, height: 36, border: "none", background: "#f9fafb", cursor: "pointer", fontSize: "1.2rem", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
-                          >−</button>
-                          <span style={{ minWidth: 44, textAlign: "center", fontSize: "0.95rem", fontWeight: 700, color: "#111827", padding: "0 8px", borderLeft: "1.5px solid #e5e7eb", borderRight: "1.5px solid #e5e7eb", lineHeight: "36px" }}>
-                            {item.qty}
-                          </span>
-                          <button
-                            onClick={() => {
-                              const updated = existingCartItems.map(i =>
-                                i.id === item.id
-                                  ? { ...i, qty: i.qty + 1, total: i.pricePerUnit * (i.qty + 1) }
-                                  : i
-                              );
-                              setExistingCartItems(updated);
-                              try { localStorage.setItem("wp_cart", JSON.stringify(updated)); } catch { /* ignore */ }
-                            }}
-                            style={{ width: 36, height: 36, border: "none", background: "#f9fafb", cursor: "pointer", fontSize: "1.2rem", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
-                          >+</button>
-                        </div>
+                        <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
+                          Qty: <span style={{ fontWeight: 700, color: "#111827" }}>{item.qty}</span>
+                        </p>
+                        {item.total > 0 && (
+                          <p style={{ margin: "4px 0 0", fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>
+                            ${item.total.toFixed(2)}
+                          </p>
+                        )}
                       </div>
 
                       {/* Delete */}
@@ -407,10 +434,8 @@ export default function CheckoutOverlay({
             {/* RIGHT — Order Summary */}
             {(() => {
               const hasAddress = !addressLoading &&
-                checkoutForm.houseNo.trim() !== "" &&
-                checkoutForm.flat.trim() !== "" &&
-                checkoutForm.city.trim() !== "" &&
-                checkoutForm.state.trim() !== "";
+                (checkoutForm.flat.trim() !== "" || checkoutForm.city.trim() !== "");
+              const addressLine = fullAddressLine(checkoutForm);
               const openAddressPopup = () => {
                 setEditForm({ ...checkoutForm });
                 setEditFormError("");
@@ -430,8 +455,8 @@ export default function CheckoutOverlay({
                     const existingTotal = existingCartItems.reduce((s, i) => s + i.total, 0);
                     const subtotal = currentTotal + existingTotal;
                     const totalItemCount = 1 + existingCartItems.length;
-                    const delivery = 10;
-                    const total = subtotal + delivery;
+                    const shippingCost = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
+                    const total = subtotal + shippingCost;
                     return (
                       <>
                         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
@@ -441,10 +466,12 @@ export default function CheckoutOverlay({
                               {subtotal > 0 ? `$${subtotal.toFixed(2)}` : "—"}
                             </span>
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", color: "#6b7280" }}>
-                            <span>Delivery Charges</span>
-                            <span style={{ color: "#111827", fontWeight: 600 }}>USD ${delivery.toFixed(2)}</span>
-                          </div>
+                          {shippingCost > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", color: "#6b7280" }}>
+                              <span>Shipping ({shippingOptions[selectedShippingIdx!]?.service})</span>
+                              <span style={{ color: "#111827", fontWeight: 600 }}>${shippingCost.toFixed(2)}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ borderTop: "1.5px solid #f0f2f5", paddingTop: 14, marginBottom: 20 }}>
@@ -454,10 +481,9 @@ export default function CheckoutOverlay({
                               {subtotal > 0 ? `$${total.toFixed(2)}` : "Contact for quote"}
                             </span>
                           </div>
-                          <p style={{ margin: "8px 0 0", fontSize: "0.78rem", color: "#6b7280" }}>
-                            Quantity: <strong style={{ color: "#111827" }}>{selectedQty} {selectedQty === 1 ? "copy" : "copies"}</strong>
-                            {isDoubleSided && <span style={{ color: "#7c3aed", marginLeft: 8 }}>· Double-sided included</span>}
-                          </p>
+                          {isDoubleSided && (
+                            <p style={{ margin: "8px 0 0", fontSize: "0.78rem", color: "#7c3aed" }}>Double-sided included</p>
+                          )}
                         </div>
                       </>
                     );
@@ -479,66 +505,268 @@ export default function CheckoutOverlay({
                       </div>
                     </div>
 
-                    {/* Address row */}
-                    <div style={{
-                      border: "1.5px solid #e5e7eb", borderRadius: 10,
-                      padding: "11px 14px", display: "flex", alignItems: "center",
-                      justifyContent: "space-between", gap: 10, background: "#fafafa",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        {hasAddress ? (
-                          <span style={{ fontSize: "0.85rem", color: "#111827", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {checkoutForm.houseNo}, {checkoutForm.flat}, {checkoutForm.city}, {checkoutForm.state}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: "0.85rem", color: "#9ca3af" }}>Select delivery address</span>
-                        )}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        <button
-                          onClick={openAddressPopup}
-                          style={{
-                            padding: "6px 14px", borderRadius: 7, cursor: "pointer",
-                            border: "1.5px solid #7c3aed", background: "#fff",
-                            color: "#7c3aed", fontWeight: 700, fontSize: "0.78rem",
-                          }}
-                        >{hasAddress ? "Edit" : "Add"}</button>
-                        <button
-                          onClick={openAddressPopup}
-                          style={{
-                            width: 28, height: 28, border: "1.5px solid #e5e7eb",
-                            borderRadius: 7, background: "#fff", cursor: "pointer",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            color: "#374151",
-                          }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-                        </button>
-                      </div>
-                    </div>
+                    {!addressEditOpen ? (
+                      <>
+                        {/* Address row */}
+                        <div style={{
+                          border: "1.5px solid #e5e7eb", borderRadius: 10,
+                          padding: "11px 14px", display: "flex", alignItems: "center",
+                          justifyContent: "space-between", gap: 10, background: "#fafafa",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            {hasAddress ? (
+                              <span style={{ fontSize: "0.85rem", color: "#111827", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {addressLine}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: "0.85rem", color: "#9ca3af" }}>Select delivery address</span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            <button
+                              onClick={openAddressPopup}
+                              style={{
+                                padding: "6px 14px", borderRadius: 7, cursor: "pointer",
+                                border: "1.5px solid #7c3aed", background: "#fff",
+                                color: "#7c3aed", fontWeight: 700, fontSize: "0.78rem",
+                              }}
+                            >{hasAddress ? "Edit" : "Add"}</button>
+                            <button
+                              onClick={openAddressPopup}
+                              style={{
+                                width: 28, height: 28, border: "1.5px solid #e5e7eb",
+                                borderRadius: 7, background: "#fff", cursor: "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                color: "#374151",
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                            </button>
+                          </div>
+                        </div>
 
-                    {/* Phone shown below address if saved */}
-                    {hasAddress && checkoutForm.phone && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 2 }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l.85-.85a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.73 17z"/></svg>
-                        <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>{checkoutForm.phone}</span>
+                        {/* Phone shown below address if saved */}
+                        {hasAddress && checkoutForm.phone && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 2 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l.85-.85a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.73 17z"/></svg>
+                            <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>{checkoutForm.phone}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Inline shipping address form — replaces the popup */
+                      <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 18, background: "#fafafa", display: "flex", flexDirection: "column", gap: 14 }}>
+                        <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                          Shipping Address
+                        </span>
+
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                            Street Address <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="123 Main Street"
+                            value={editForm.flat}
+                            onChange={(e) => setEditForm((p) => ({ ...p, flat: e.target.value }))}
+                            style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                            Address Line 2
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Suite, unit, floor, etc."
+                            value={editForm.houseNo}
+                            onChange={(e) => setEditForm((p) => ({ ...p, houseNo: e.target.value }))}
+                            style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                          />
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              City <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Toronto"
+                              value={editForm.city}
+                              onChange={(e) => setEditForm((p) => ({ ...p, city: e.target.value }))}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              Province / State <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <select
+                              value={editForm.state}
+                              onChange={(e) => setEditForm((p) => ({ ...p, state: e.target.value }))}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: editForm.state ? "#111827" : "#9ca3af", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            >
+                              <option value="">Select region</option>
+                              {regionsForCountry(editForm.country).map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              Postal / ZIP Code <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="M5V 1A1"
+                              value={editForm.postalCode}
+                              onChange={(e) => setEditForm((p) => ({ ...p, postalCode: e.target.value }))}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                              Country <span style={{ color: "#dc2626" }}>*</span>
+                            </label>
+                            <select
+                              value={editForm.country}
+                              onChange={(e) => setEditForm((p) => {
+                                const nextRegions = regionsForCountry(e.target.value);
+                                return { ...p, country: e.target.value, state: nextRegions.includes(p.state) ? p.state : "" };
+                              })}
+                              style={{ width: "100%", padding: "11px 13px", border: "1.5px solid #e5e7eb", borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                            >
+                              {COUNTRIES.map((c) => (
+                                <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                            Phone Number <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <input
+                            type="tel"
+                            placeholder="e.g. +1 902 489 6081"
+                            value={editForm.phone}
+                            onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))}
+                            style={{ width: "100%", padding: "11px 13px", border: `1.5px solid ${editFormError && !editForm.phone ? "#dc2626" : "#e5e7eb"}`, borderRadius: 9, fontSize: "0.9rem", color: "#111827", outline: "none", boxSizing: "border-box", background: "#fff" }}
+                          />
+                        </div>
+
+                        {editFormError && (
+                          <p style={{ margin: 0, fontSize: "0.78rem", color: "#dc2626", fontWeight: 600 }}>{editFormError}</p>
+                        )}
+
+                        <div style={{ display: "flex", gap: 10 }}>
+                          <button
+                            onClick={() => setAddressEditOpen(false)}
+                            style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: 10, cursor: "pointer", background: "#fff", color: "#374151", fontWeight: 700, fontSize: "0.88rem" }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            disabled={shippingLoading}
+                            onClick={async () => {
+                              const { houseNo, flat, city, state, postalCode, country, phone } = editForm;
+                              if (!phone.trim()) { setEditFormError("Phone number is required."); return; }
+                              if (!flat.trim() || !city.trim() || !state.trim() || !postalCode.trim() || !country.trim()) {
+                                setEditFormError("Please fill in all required address fields."); return;
+                              }
+                              setEditFormError("");
+                              setCheckoutForm({ houseNo, flat, city, state, postalCode, country, phone });
+                              if (cartUser) {
+                                fetch("/api/auth/profile", {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state, postalCode, country }),
+                                }).catch(() => { /* ignore */ });
+                              }
+                              await fetchShippingOptions(state, postalCode, country);
+                              setAddressEditOpen(false);
+                            }}
+                            style={{
+                              flex: 2, padding: "12px",
+                              background: "linear-gradient(135deg,#7c3aed,#db2777)",
+                              border: "none", borderRadius: 10,
+                              cursor: shippingLoading ? "not-allowed" : "pointer",
+                              color: "#fff", fontWeight: 800, fontSize: "0.88rem",
+                              opacity: shippingLoading ? 0.75 : 1,
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                            }}
+                          >
+                            {shippingLoading && (
+                              <span style={{
+                                width: 14, height: 14, borderRadius: "50%",
+                                border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff",
+                                animation: "wp-spin 0.7s linear infinite",
+                              }} />
+                            )}
+                            {shippingLoading ? "Getting Shipping Options…" : "Get Shipping Options"}
+                          </button>
+                        </div>
                       </div>
                     )}
-                  </div>
 
-                  {/* Fast delivery badge */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    background: "#f9f5ff", borderRadius: 10, padding: "12px 14px",
-                    marginBottom: 20,
-                  }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                    <div style={{ flex: 1 }}>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: "0.85rem", color: "#111827" }}>Fast &amp; Reliable Delivery</p>
-                      <p style={{ margin: 0, fontSize: "0.75rem", color: "#6b7280" }}>We deliver your products safely to your doorstep</p>
-                    </div>
-                    <span style={{ color: "#7c3aed", fontWeight: 600, fontSize: "0.75rem", flexShrink: 0 }}>Usually in 2–4 days</span>
+                    {/* Shipment Details — live carrier rates from Sinalite */}
+                    {(shippingLoading || shippingOptions.length > 0 || shippingError) && (
+                      <div style={{ marginTop: 16, marginBottom: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                          <span style={{ fontWeight: 800, fontSize: "0.95rem", color: "#111827" }}>Shipment Details</span>
+                        </div>
+                        <p style={{ margin: "0 0 12px", fontSize: "0.78rem", color: "#6b7280" }}>Select a shipping method for your order.</p>
+
+                        {shippingLoading && (
+                          <p style={{ margin: 0, fontSize: "0.85rem", color: "#9ca3af" }}>Loading shipping options…</p>
+                        )}
+                        {shippingError && (
+                          <p style={{ margin: 0, fontSize: "0.82rem", color: "#dc2626", fontWeight: 600 }}>{shippingError}</p>
+                        )}
+                        {!shippingLoading && shippingOptions.length > 0 && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            {shippingOptions.map((opt, i) => {
+                              const selected = selectedShippingIdx === i;
+                              return (
+                                <button
+                                  key={`${opt.carrier}-${opt.service}-${i}`}
+                                  onClick={() => setSelectedShippingIdx(i)}
+                                  style={{
+                                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                                    border: `1.5px solid ${selected ? "#7c3aed" : "#e5e7eb"}`,
+                                    borderRadius: 10, padding: "12px 14px", background: "#fff",
+                                    cursor: "pointer", width: "100%", textAlign: "left",
+                                  }}
+                                >
+                                  <div>
+                                    <p style={{ margin: 0, fontWeight: 700, fontSize: "0.88rem", color: "#111827" }}>{opt.carrier}</p>
+                                    <p style={{ margin: 0, fontSize: "0.78rem", color: "#6b7280" }}>{opt.service}</p>
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                    <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#111827" }}>${opt.price.toFixed(2)}</span>
+                                    <span style={{
+                                      width: 18, height: 18, borderRadius: "50%",
+                                      border: `2px solid ${selected ? "#7c3aed" : "#d1d5db"}`,
+                                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                    }}>
+                                      {selected && <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#7c3aed" }} />}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ borderTop: "1.5px solid #f0f2f5", paddingTop: 16, marginBottom: 16 }}>
@@ -575,9 +803,9 @@ export default function CheckoutOverlay({
                   <button
                     disabled={stripeLoading}
                     onClick={async () => {
-                      const { houseNo, flat, city, state, phone } = checkoutForm;
+                      const { houseNo, flat, city, state, postalCode, country, phone } = checkoutForm;
                       if (!phone.trim()) { setCheckoutError("Phone number is required. Please add your delivery address."); return; }
-                      if (!houseNo.trim() || !flat.trim() || !city.trim() || !state.trim()) {
+                      if (!flat.trim() || !city.trim() || !state.trim() || !postalCode.trim() || !country.trim()) {
                         setCheckoutError("Please add your delivery address first."); return;
                       }
                       setCheckoutError("");
@@ -585,7 +813,7 @@ export default function CheckoutOverlay({
                         fetch("/api/auth/profile", {
                           method: "PATCH",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state }),
+                          body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state, postalCode, country }),
                         }).catch(() => {});
                       }
                       setStripeLoading(true);
@@ -603,6 +831,7 @@ export default function CheckoutOverlay({
                       const cartItems = [...(currentItem ? [currentItem] : []), ...otherItems];
                       if (!cartItems.length) { setStripeLoading(false); setCheckoutError("No valid items to checkout."); return; }
                       try {
+                        const shippingMethod = selectedShippingIdx != null ? shippingOptions[selectedShippingIdx]?.service : "";
                         const res = await fetch("/api/checkout/create-session", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -610,8 +839,13 @@ export default function CheckoutOverlay({
                             items: cartItems,
                             customerName: cartUser ? `${cartUser.firstName} ${cartUser.lastName}` : "Guest",
                             customerEmail: cartUser?.email ?? "",
-                            address: [houseNo, flat, city, state].filter(Boolean).join(", "),
+                            address: [flat, houseNo, city, state, postalCode, country].filter(Boolean).join(", "),
                             customerId: cartUser?.id ?? "",
+                            shipping: {
+                              firstName: cartUser?.firstName ?? "", lastName: cartUser?.lastName ?? "", email: cartUser?.email ?? "",
+                              addr: flat, addr2: houseNo, city, state: regionCode(state), zip: postalCode, country, phone,
+                              method: shippingMethod ?? "",
+                            },
                           }),
                         });
                         const data = await res.json() as { url?: string; error?: string };
@@ -703,145 +937,6 @@ export default function CheckoutOverlay({
           </div>
         )}
 
-        {/* ── Edit Address Popup ── */}
-        {addressEditOpen && (
-          <div style={{
-            position: "absolute", inset: 0, zIndex: 800,
-            background: "rgba(0,0,0,0.45)", backdropFilter: "blur(3px)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 24,
-          }}>
-            <div style={{
-              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 460,
-              boxShadow: "0 24px 60px rgba(0,0,0,0.25)", overflow: "hidden",
-            }}>
-              {/* Popup header */}
-              <div style={{
-                background: "linear-gradient(135deg,#7c3aed 0%,#db2777 60%,#f97316 100%)",
-                padding: "18px 24px", display: "flex", alignItems: "center", justifyContent: "space-between",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                  </svg>
-                  <span style={{ color: "#fff", fontWeight: 800, fontSize: "1rem" }}>
-                    {editForm.houseNo || editForm.city ? "Edit Address" : "Add Address"}
-                  </span>
-                </div>
-                <button onClick={() => setAddressEditOpen(false)} style={{
-                  background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
-                  borderRadius: "50%", width: 32, height: 32, cursor: "pointer",
-                  color: "#fff", fontSize: "0.9rem", fontWeight: 700,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>✕</button>
-              </div>
-
-              {/* Popup form */}
-              <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: 14 }}>
-                {(
-                  [
-                    { key: "houseNo", label: "House / Unit No.", placeholder: "e.g. 12" },
-                    { key: "flat",    label: "Street / Apartment", placeholder: "e.g. 123 Main St, Apt 4B" },
-                    { key: "city",    label: "City", placeholder: "e.g. Halifax" },
-                    { key: "state",   label: "Province", placeholder: "e.g. Nova Scotia" },
-                  ] as { key: keyof typeof editForm; label: string; placeholder: string }[]
-                ).map(({ key, label, placeholder }) => (
-                  <div key={key}>
-                    <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                      {label}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={placeholder}
-                      value={editForm[key]}
-                      onChange={(e) => setEditForm((p) => ({ ...p, [key]: e.target.value }))}
-                      style={{
-                        width: "100%", padding: "11px 13px",
-                        border: "1.5px solid #e5e7eb", borderRadius: 9,
-                        fontSize: "0.92rem", color: "#111827", outline: "none",
-                        boxSizing: "border-box", background: "#fff",
-                        transition: "border-color 0.15s",
-                      }}
-                      onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
-                      onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
-                    />
-                  </div>
-                ))}
-
-                {/* Phone */}
-                <div>
-                  <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                    Phone Number <span style={{ color: "#dc2626" }}>*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="e.g. +1 902 489 6081"
-                    value={editForm.phone}
-                    onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))}
-                    style={{
-                      width: "100%", padding: "11px 13px",
-                      border: `1.5px solid ${editFormError && !editForm.phone ? "#dc2626" : "#e5e7eb"}`,
-                      borderRadius: 9, fontSize: "0.92rem", color: "#111827",
-                      outline: "none", boxSizing: "border-box", background: "#fff",
-                      transition: "border-color 0.15s",
-                    }}
-                    onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
-                    onBlur={(e) => (e.target.style.borderColor = editFormError && !editForm.phone ? "#dc2626" : "#e5e7eb")}
-                  />
-                </div>
-
-                {editFormError && (
-                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#dc2626", fontWeight: 600 }}>{editFormError}</p>
-                )}
-
-                {/* Action buttons */}
-                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                  <button
-                    onClick={() => setAddressEditOpen(false)}
-                    style={{
-                      flex: 1, padding: "12px", border: "1.5px solid #e5e7eb",
-                      borderRadius: 10, cursor: "pointer", background: "#fff",
-                      color: "#374151", fontWeight: 700, fontSize: "0.9rem",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      const { houseNo, flat, city, state, phone } = editForm;
-                      if (!phone.trim()) { setEditFormError("Phone number is required."); return; }
-                      if (!houseNo.trim() || !flat.trim() || !city.trim() || !state.trim()) {
-                        setEditFormError("Please fill in all address fields."); return;
-                      }
-                      setEditFormError("");
-                      setCheckoutForm({ houseNo, flat, city, state, phone });
-                      if (cartUser) {
-                        fetch("/api/auth/profile", {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ id: cartUser.id, phone, houseNo, flat, city, state }),
-                        }).catch(() => { /* ignore */ });
-                      }
-                      setAddressEditOpen(false);
-                    }}
-                    style={{
-                      flex: 2, padding: "12px",
-                      background: "linear-gradient(135deg,#7c3aed,#db2777)",
-                      border: "none", borderRadius: 10, cursor: "pointer",
-                      color: "#fff", fontWeight: 800, fontSize: "0.9rem",
-                      boxShadow: "0 4px 14px rgba(124,58,237,0.35)",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                    Save Address
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </>
   );

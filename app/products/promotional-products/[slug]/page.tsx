@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug, subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { subProductSlug, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export default async function PromotionalProductsOrderPage({
   const { slug } = await params;
   const { gallery } = await searchParams;
 
-  const parent = getProductBySlug("promotional-products");
+  const parent = await getProductBySlug("promotional-products");
   if (!parent) notFound();
 
   const name = CATEGORY_SUBPRODUCT_OPTIONS["promotional-products"].find((n) => subProductSlug(n) === slug);

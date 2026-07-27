@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { createProduct, getProducts } from "@/lib/data";
+import { createProduct, getProducts } from "@/lib/products";
 
 function parseSpecs(value: unknown) {
   if (!Array.isArray(value)) {
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
   const category = searchParams.get("category") || undefined;
 
   return NextResponse.json({
-    products: getProducts(category)
+    products: await getProducts(category)
   });
 }
 
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
     }
 
-    const product = createProduct({
+    const product = await createProduct({
       slug,
       name,
       category,

@@ -29,7 +29,9 @@ async function initializeDb(client: Client): Promise<void> {
       preview_image TEXT NOT NULL,
       created_at    TEXT NOT NULL,
       price         TEXT,
-      specs_json    TEXT
+      specs_json    TEXT,
+      sinalite_id   TEXT,
+      sinalite_sku  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_gt_slug_date
       ON gallery_templates(product_slug, created_at DESC);
@@ -78,6 +80,20 @@ async function initializeDb(client: Client): Promise<void> {
       created_at    TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS customer_addresses (
+      id            TEXT PRIMARY KEY,
+      customer_id   TEXT NOT NULL,
+      house_no      TEXT DEFAULT '',
+      flat          TEXT DEFAULT '',
+      city          TEXT DEFAULT '',
+      state         TEXT DEFAULT '',
+      postal_code   TEXT DEFAULT '',
+      country       TEXT DEFAULT '',
+      phone         TEXT DEFAULT '',
+      created_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ca_customer ON customer_addresses(customer_id);
+
     CREATE TABLE IF NOT EXISTS orders (
       id                TEXT PRIMARY KEY,
       stripe_session_id TEXT UNIQUE,
@@ -125,6 +141,22 @@ async function initializeDb(client: Client): Promise<void> {
     CREATE TABLE IF NOT EXISTS applied_fixes (
       id TEXT PRIMARY KEY
     );
+
+    CREATE TABLE IF NOT EXISTS products (
+      slug            TEXT PRIMARY KEY,
+      name            TEXT NOT NULL,
+      category        TEXT NOT NULL,
+      category_name   TEXT NOT NULL,
+      image           TEXT NOT NULL,
+      description     TEXT NOT NULL,
+      starting_price  TEXT NOT NULL,
+      colors_json     TEXT,
+      color_variants_json TEXT,
+      sub_products_json   TEXT,
+      specs_json      TEXT NOT NULL,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL
+    );
   `);
 
   // Migrations — add columns if missing
@@ -139,6 +171,24 @@ async function initializeDb(client: Client): Promise<void> {
   } catch { /* already exists */ }
   try {
     await client.execute("ALTER TABLE gallery_templates ADD COLUMN visible INTEGER NOT NULL DEFAULT 1");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE gallery_templates ADD COLUMN description TEXT");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE gallery_templates ADD COLUMN sinalite_id TEXT");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE gallery_templates ADD COLUMN sinalite_sku TEXT");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE gallery_templates ADD COLUMN sinalite_options_json TEXT");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE orders ADD COLUMN shipping_json TEXT DEFAULT ''");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE orders ADD COLUMN sinalite_order_ref TEXT DEFAULT ''");
   } catch { /* already exists */ }
 
   // One-time data fixes — each runs at most once per database, tracked via applied_fixes.

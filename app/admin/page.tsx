@@ -1,6 +1,7 @@
 import { AdminProductManager } from "@/components/admin-product-manager";
-import { getProducts } from "@/lib/data";
+import { getProducts } from "@/lib/products";
 
-export default function AdminPage() {
-  return <AdminProductManager initialProducts={getProducts()} />;
+export default async function AdminPage() {
+  const products = await getProducts();
+  return <AdminProductManager initialProducts={products} />;
 }

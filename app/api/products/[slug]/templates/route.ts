@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGalleryTemplates, getGalleryTemplatesPaginated, createGalleryTemplate } from "@/lib/template-data";
+import { syncSinaliteCategoryIntoGallery } from "@/lib/sinalite-category-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,12 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const rawPage = searchParams.get("page");
   const includeHidden = searchParams.get("admin") === "1";
+
+  // Admin view only — checks Sinalite's live catalog for this category and imports
+  // anything new before reading from the DB, so the admin list is always current
+  // without a manual import script. Skipped on the public site to avoid the extra
+  // Sinalite round-trip on every storefront visit.
+  if (includeHidden) await syncSinaliteCategoryIntoGallery(slug);
 
   if (rawPage === null) {
     const templates = await getGalleryTemplates(slug, includeHidden);
@@ -31,11 +38,12 @@ export async function POST(
   const body = (await req.json()) as Record<string, unknown>;
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const previewImage = typeof body.previewImage === "string" ? body.previewImage : "";
+  const description = typeof body.description === "string" ? body.description : undefined;
 
   if (!name || !previewImage) {
     return NextResponse.json({ error: "name and previewImage are required." }, { status: 400 });
   }
 
-  const template = await createGalleryTemplate(slug, name, previewImage);
+  const template = await createGalleryTemplate(slug, name, previewImage, description);
   return NextResponse.json({ template }, { status: 201 });
 }

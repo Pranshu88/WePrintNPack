@@ -975,9 +975,51 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   // outside this set would fall into that route's generic business-card-shaped fallback,
   // which doesn't fit e.g. a label or sign — so the button simply doesn't show for those.
   const isBannerProductSlug = productSlug === "vinyl-banners" || productSlug === "roll-up-banners" || productSlug === "large-outdoor-banner";
-  const isNamedBcGallery = gallery?.name === "Business Cards" || gallery?.name === "Premium Business Cards" || gallery?.name === "Luxury Business Cards";
+  // sinaliteId "1"/"2"/"7" are the first 3 Sinalite "Business Cards" category products, repurposed to
+  // carry the hand-built Business/Premium/Luxury seed-design sets regardless of their display name.
+  const isNamedBcGallery = gallery?.sinaliteId === "1" || gallery?.sinaliteId === "2" || gallery?.sinaliteId === "7"
+    || gallery?.name === "Business Cards" || gallery?.name === "Premium Business Cards" || gallery?.name === "Luxury Business Cards";
+  // sinaliteId "37"/"38" are the first 2 Sinalite "Flyers" category products, repurposed to carry
+  // the Express/Prime Flyers seed-design set regardless of their display name. Other imported
+  // flyers under "bold-flyers" get no seed-design option.
+  const isNamedFlyerGallery = productSlug === "bold-flyers" && (
+    gallery?.sinaliteId === "37" || gallery?.sinaliteId === "38" || gallery?.name === "Express Flyers" || gallery?.name === "Prime Flyers"
+  );
+  // sinaliteId "97"/"98" are the first 2 Sinalite "Coroplast Signs & Yard Signs" category
+  // products, repurposed to carry the Business/Elite Yard Sign seed-design set regardless of
+  // their display name. Other imported yard signs get no seed-design option.
+  const isNamedYardSignGallery = isYardSign && (
+    gallery?.sinaliteId === "97" || gallery?.sinaliteId === "98" || gallery?.name === "Business Yard Sign" || gallery?.name === "Elite Yard Sign"
+  );
+  // sinaliteId "65"/"66" are the first 2 Sinalite "Posters" category products, repurposed to
+  // carry the Large/Small Posters seed-design set regardless of their display name. Other
+  // imported posters get no seed-design option.
+  const isNamedPosterGallery = productSlug === "posters" && (
+    gallery?.sinaliteId === "65" || gallery?.sinaliteId === "66" || gallery?.name === "Large Posters" || gallery?.name === "Small Posters"
+  );
+  // The single Sinalite "Large Format Posters" product reuses the Posters arr[0] ("Large
+  // Posters") seed-design set.
+  const isLargeFormatPosterGallery = productSlug === "large-format-posters" && gallery?.sinaliteId === "105";
+  // The first Sinalite "Vinyl Banners" category product (sinaliteId "101") reuses the seed-design
+  // set from "Vinyl Banner" under Banners (slug "vinyl-banners"). Other imported vinyl banners
+  // get no seed-design option.
+  const isSinaliteVinylBannerGallery = productSlug === "sinalite-vinyl-banners" && gallery?.sinaliteId === "101";
+  // The first Sinalite "Pull Up Banners" category product (sinaliteId "103") reuses the
+  // seed-design set from "Premium Roll-Up Banner" under Banners (slug "vinyl-banners"). Other
+  // imported pull up banners get no seed-design option.
+  const isPullUpBannerGallery = productSlug === "pull-up-banners" && gallery?.sinaliteId === "103";
+  // The single Sinalite "Square Cut Labels / Stickers" product reuses the "Die-Cut Stickers"
+  // seed-design set from Roll Labels / Stickers (slug "stickers-and-labels").
+  const isSquareCutLabelGallery = productSlug === "square-cut-labels-stickers" && gallery?.sinaliteId === "96";
+  // sinaliteId "7028" is the first Sinalite "Roll Labels / Stickers" category product,
+  // repurposed to carry the Product Labels seed-design set regardless of display name. Other
+  // imported roll labels/stickers get no seed-design option; the 2 original hand-built
+  // templates (matched by name) still work as before.
+  const isNamedStickerLabelGallery = isStickerLabel && (
+    gallery?.sinaliteId === "7028" || gallery?.name === "Product Labels" || gallery?.name === "Die-Cut Stickers"
+  );
   const canSeedDesigns = !isCustomPackage && !isTShirt && (
-    isBannerProductSlug || productSlug === "posters" || productSlug === "bold-flyers" || isStickerLabel || isYardSign || isNamedBcGallery
+    isBannerProductSlug || isSinaliteVinylBannerGallery || isPullUpBannerGallery || isNamedPosterGallery || isLargeFormatPosterGallery || isNamedFlyerGallery || isNamedStickerLabelGallery || isSquareCutLabelGallery || isNamedYardSignGallery || isNamedBcGallery
   );
 
   const editorBase = editorDesign ? (editorSide === "front" ? editorDesign.frontImage : editorDesign.backImage) : undefined;
@@ -990,8 +1032,16 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
         <div>
-          <Link href="/admin/templates" style={{ fontSize: "0.8rem", color: "#7c3aed", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.5rem" }}>
-            ← Back to Templates
+          <Link href={
+            ["t-shirts", "round-neck-tshirt", "collar-tshirt"].includes(productSlug) ? "/admin/apparel"
+              : ["packaging-box", "pizza-boxes", "shipping-boxes", "mailer-boxes", "square-shipping-boxes"].includes(productSlug) ? "/admin/packaging"
+              : "/admin/templates"
+          } style={{ fontSize: "0.8rem", color: "#7c3aed", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.5rem" }}>
+            ← Back to {
+              ["t-shirts", "round-neck-tshirt", "collar-tshirt"].includes(productSlug) ? "Apparel"
+                : ["packaging-box", "pizza-boxes", "shipping-boxes", "mailer-boxes", "square-shipping-boxes"].includes(productSlug) ? "Packaging"
+                : "Printing"
+            }
           </Link>
           <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 800, color: "#111827" }}>{gallery?.name ?? BC_PACKAGE_NAMES[galleryId] ?? getCustomPackageTitle(galleryId) ?? product?.name ?? "Gallery"}</h2>
           <p style={{ margin: "2px 0 0", fontSize: "0.85rem", color: "#6b7280" }}>Design templates for this gallery</p>

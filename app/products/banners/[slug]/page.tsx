@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import { getGalleryTemplate } from "@/lib/template-data";
 import BusinessCardOrderClient from "@/components/business-card-order-client";
 
@@ -14,7 +14,7 @@ export default async function BannerDetailPage({
 }) {
   const { slug }    = await params;
   const { gallery } = await searchParams;
-  const product     = getProductBySlug(slug);
+  const product     = await getProductBySlug(slug);
 
   if (!product || (product.category !== "vinyl-banners" && product.category !== "roll-up-banners")) {
     notFound();

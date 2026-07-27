@@ -315,7 +315,9 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
 
   const navItems = [
     { label: "Category listing", href: "/admin", count: productCount, active: pathname === "/admin" },
-    { label: "Templates", href: "/admin/templates", count: null, active: pathname === "/admin/templates" },
+    { label: "Printing", href: "/admin/templates", count: null, active: pathname === "/admin/templates" },
+    { label: "Apparel", href: "/admin/apparel", count: null, active: pathname === "/admin/apparel" },
+    { label: "Packaging", href: "/admin/packaging", count: null, active: pathname === "/admin/packaging" },
     { label: "Reviews", href: "/admin/reviews", count: null, active: pathname === "/admin/reviews" },
   ];
 
@@ -345,7 +347,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
             {navItems.map((item) => (
               <Link key={item.label} href={item.href} style={S.navItem(item.active)}>
                 <span style={{ fontSize: "1rem" }}>
-                  {item.label === "Category listing" ? "🗂️" : item.label === "Templates" ? "🎨" : "💬"}
+                  {item.label === "Category listing" ? "🗂️" : item.label === "Printing" ? "🎨" : item.label === "Apparel" ? "👕" : item.label === "Packaging" ? "📦" : "💬"}
                 </span>
                 {item.label}
                 {item.count !== null && (

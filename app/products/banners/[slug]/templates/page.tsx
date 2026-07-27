@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/data";
+import { getProductBySlug } from "@/lib/products";
 import GalleryTemplatePage from "@/components/gallery-templates-page";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export default async function BannerTemplatesPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const product  = getProductBySlug(slug);
+  const product  = await getProductBySlug(slug);
 
   if (!product || (product.category !== "vinyl-banners" && product.category !== "roll-up-banners")) {
     notFound();
