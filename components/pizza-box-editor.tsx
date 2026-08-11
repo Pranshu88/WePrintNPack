@@ -402,14 +402,74 @@ const FOLD_TOP_IDS = new Set([
 const FOLD_BOT_IDS = new Set<string>([]);
 const FOLD_ALL_IDS = new Set([...FOLD_TOP_IDS, ...FOLD_BOT_IDS]);
 
+// The 2D dieline editor's outside/print view swaps the shape+label of just
+// this one pair (see `_dfSwaps` in the editor component) — every other
+// left/right face already renders on the same side in both the flat 2D
+// dieline and the raw (unmirrored) 3D preview geometry. Mirror only this
+// pair's content here too so the 3D preview's Open state matches the 2D
+// editor exactly, without touching fold pivots/physics for any face.
+const MIRROR_CONTENT_SWAP: Partial<Record<FaceId, FaceId>> = {
+  "top-side-flap-left": "top-side-flap-right", "top-side-flap-right": "top-side-flap-left",
+};
+
 // ─── Clip path helper (shared by dieline + 3D preview) ───────────────────────
-function getFaceClipPath(face: FaceDef, s: number, mirror = false): string | undefined {
+function getFaceClipPath(face: FaceDef, s: number, mirror = false, lockFlapSize = 0, topLockR = 0, topLockW = 0): string | undefined {
+  const W = face.w * s, H = face.h * s;
+  const roundDiamondTL = mirror ? face.roundDiamondTR : face.roundDiamondTL;
+  const roundDiamondTR = mirror ? face.roundDiamondTL : face.roundDiamondTR;
+  if (roundDiamondTL) {
+    const cr = 6 * s, off = cr / Math.SQRT2;
+    return `path('M ${W/2+off} ${off} L ${W} ${H/2} L ${W/2} ${H} L ${off} ${H/2+off} A ${cr} ${cr} 0 0 1 ${off} ${H/2-off} L ${W/2-off} ${off} A ${cr} ${cr} 0 0 1 ${W/2+off} ${off} Z')`;
+  }
+  if (roundDiamondTR) {
+    const cr = 6 * s, off = cr / Math.SQRT2;
+    return `path('M 0 ${H/2} L ${W/2-off} ${off} A ${cr} ${cr} 0 0 1 ${W/2+off} ${off} L ${W-off} ${H/2-off} A ${cr} ${cr} 0 0 1 ${W-off} ${H/2+off} L ${W/2} ${H} Z')`;
+  }
+  if (face.chamferBL && face.chamferBR) {
+    const bchs = (face.chamferW ?? lockFlapSize) * s;
+    return `path('M 0 0 L ${W} 0 L ${W} ${H - bchs} L ${W - bchs} ${H} L ${bchs} ${H} L 0 ${H - bchs} Z')`;
+  }
+  const cw = (face.cutW ?? 0) * s;
+  if (face.triCutBR) return `polygon(0px 0px, ${W}px 0px, ${W - cw}px ${cw}px, ${W - cw}px ${H}px, 0px ${H}px)`;
+  if (face.triCutBL) return `polygon(0px 0px, ${W}px 0px, ${W}px ${H}px, ${cw}px ${H}px, ${cw}px ${cw}px)`;
+  if (face.triExTR) return `polygon(0% 0%, 100% 100%, 0% 100%)`;
+  if (face.triExTL) return `polygon(100% 0%, 100% 100%, 0% 100%)`;
+  const kiteMidYPct = (face.kiteMidY ?? 0.5) * 100;
+  const kiteSMidYPct = 2 * kiteMidYPct;
+  if (face.diamondMergedGusset) return `polygon(50% 0%, 100% ${kiteMidYPct}%, 50% ${kiteSMidYPct}%, 50% 100%, 0% 100%, 0% ${kiteMidYPct}%)`;
+  if (face.diamondMergedGussetMirror) return `polygon(50% 0%, 0% ${kiteMidYPct}%, 50% ${kiteSMidYPct}%, 50% 100%, 100% 100%, 100% ${kiteMidYPct}%)`;
+  if (face.gussetQuad) return `polygon(100% 0%, 100% 100%, 0% 100%, 0% ${kiteMidYPct}%)`;
+  if (face.gussetQuadMirror) return `polygon(0% 0%, 0% 100%, 100% 100%, 100% ${kiteMidYPct}%)`;
+  if (face.triangleTop) return `polygon(50% 0%, 100% 100%, 0% 100%)`;
+  if (face.triangleTR) return `polygon(0% 0%, 100% 0%, 0% 100%)`;
+  if (face.triangleTL) return `polygon(0% 0%, 100% 0%, 100% 100%)`;
+  if (face.topLockGapFillR) return `polygon(0px 0px, ${W}px 0px, ${W}px ${H}px)`;
+  if (face.topLockGapFillL) return `polygon(0px 0px, ${W}px 0px, 0px ${H}px)`;
+  const sh = topLockR * s, slw = topLockW * s;
+  if (face.leftBottomCorner) return `polygon(0px 0px, ${W}px 0px, ${W}px ${H - sh}px, ${W - sh}px ${H}px, 0px ${H}px)`;
+  if (face.rightBottomCorner) return `polygon(0px 0px, ${W}px 0px, ${W}px ${H}px, ${sh}px ${H}px, 0px ${H - sh}px)`;
+  if (face.tuckWithGapBL) return `polygon(64% 0%, 100% 50%, 71% 90%, 64% 100%, 43% 100%, 29% 80%, 29% 50%, 36% 40%)`;
+  if (face.tuckWithGapBR) return `polygon(36% 0%, 0% 50%, 29% 90%, 36% 100%, 57% 100%, 71% 80%, 71% 50%, 64% 40%)`;
+  if (face.gapLockTuckL) return `polygon(44% 0%, 100% 56%, 56% 100%, 0% 44%)`;
+  if (face.gapLockTuckR) return `polygon(56% 0%, 0% 56%, 44% 100%, 100% 44%)`;
+  if (face.diagCutTopSides) return `polygon(${slw}px 0px, ${W - slw}px 0px, ${W}px ${sh}px, ${W}px ${H}px, 0px ${H}px, 0px ${sh}px)`;
+  if (face.diagCutBothSides) return `polygon(${sh}px 0px, ${W - sh}px 0px, ${W}px ${sh}px, ${W}px ${H - sh}px, ${W - sh}px ${H}px, ${sh}px ${H}px, 0px ${H - sh}px, 0px ${sh}px)`;
+  if (face.diagCutRightSide) return `polygon(0px 0px, ${W - sh}px 0px, ${W}px ${sh}px, ${W}px ${H - sh}px, ${W - sh}px ${H}px, 0px ${H}px)`;
+  if (face.diagCutTopRight) return `polygon(0px 0px, ${W - sh}px 0px, ${W}px ${sh}px, ${W}px ${H}px, 0px ${H}px)`;
+  if (face.diamondCutBL) return `polygon(50% 0%, 100% 50%, 90% 60%, 60% 60%, 40% 40%, 40% 10%)`;
+  if (face.diamondCutBR) return `polygon(50% 0%, 0% 50%, 10% 60%, 40% 60%, 60% 40%, 60% 10%)`;
+  if (face.diamond) return `polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)`;
+  const chs = lockFlapSize * s;
+  if (face.chamferTR) return `path('M 0 0 L ${W - chs} 0 L ${W} ${chs} L ${W} ${H} L 0 ${H} Z')`;
+  if (face.chamferTL) return `path('M ${chs} 0 L ${W} 0 L ${W} ${H} L 0 ${H} L 0 ${chs} Z')`;
+  const bchs = (face.chamferW ?? lockFlapSize) * s;
+  if (face.chamferBL) return `path('M 0 0 L ${W} 0 L ${W} ${H} L ${bchs} ${H} L 0 ${H - bchs} Z')`;
+  if (face.chamferBR) return `path('M 0 0 L ${W} 0 L ${W} ${H - bchs} L ${W - bchs} ${H} L 0 ${H} Z')`;
   const bl = mirror ? face.clipBottomRight : face.clipBottomLeft;
   const br = mirror ? face.clipBottomLeft  : face.clipBottomRight;
   const tr = mirror ? face.clipTopLeft     : face.clipTopRight;
   const tl = mirror ? face.clipTopRight    : face.clipTopLeft;
   if (!bl && !br && !tr && !tl) return undefined;
-  const W = face.w * s, H = face.h * s;
   const cs = 8 * s;
   const endY = H - Math.min(15 * s, H * 0.2);
   const startY = Math.min(15 * s, H * 0.2);
@@ -504,7 +564,8 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
   geo?: ReturnType<typeof buildGeometry>;
 }) {
   const g = geo ?? DEFAULT_GEOMETRY;
-  const { NX1, NX2, NX3, PAD, BW, BH, BD, NY_BASE, NY_DUST, NY_LID, DIELINE_H_FULL, FACES_OUTSIDE } = g;
+  const { NX1, NX2, NX3, PAD, BW, BH, BD, NY_BASE, NY_DUST, NY_LID, DIELINE_H_FULL, FACES_OUTSIDE, LOCK_FLAP_SIZE, TOP_LOCK_R, TOP_LOCK_W } = g;
+  const clipP = (face: FaceDef, mirror = false) => getFaceClipPath(face, ps, mirror, LOCK_FLAP_SIZE, TOP_LOCK_R, TOP_LOCK_W);
   const ps = 0.56;
   const cW = (NX3 + PAD) * ps;
   const cH = DIELINE_H_FULL * ps;
@@ -541,6 +602,10 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
   const inProjected = insideGlobalItems && insideGlobalItems.length > 0 ? projectGlobalItemsToFaces(insideGlobalItems, pInFaces) : {};
   const mOut = (id: string) => [...(outsideItems[id] ?? []), ...(outProjected[id] ?? [])];
   const mIn  = (id: string) => [...(insideItems[id] ?? []),  ...(inProjected[id] ?? [])];
+  // Content (color/items/label) shown at a given raw face's slot, matching
+  // the 2D editor's mirrored left/right display — see MIRROR_CONTENT_SWAP.
+  const cid = (id: FaceId) => MIRROR_CONTENT_SWAP[id] ?? id;
+  const clabel = (id: FaceId, fallback: string) => FACES_OUTSIDE.find(f => f.id === cid(id))?.label ?? fallback;
 
   return (
     <div style={{ width: "100%", height: 620, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700, perspectiveOrigin: "50% 30%", overflow: "hidden" }}>
@@ -553,34 +618,36 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
               ...ff,
               left: face.x * ps, top: face.y * ps,
               width: face.w * ps, height: face.h * ps,
-              background: fc[face.id] || "#c8a97e",
+              background: fc[cid(face.id)] || "#c8a97e",
               opacity: sp,
               transform: "translateZ(0.5px)",
               backfaceVisibility: "hidden",
               borderRadius: face.roundTL ? `${50 * ps}px 0 0 ${15 * ps}px`
                           : face.roundTR ? `0 ${50 * ps}px ${15 * ps}px 0` : undefined,
+              clipPath: clipP(face),
             }}>
-              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
-                : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {mOut(face.id).map(item => renderPreviewItem(item, ps))}
+              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{clabel(face.id, face.label)}</span>
+                : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>}
+              {mOut(cid(face.id)).map(item => renderPreviewItem(item, ps))}
             </div>
             <div style={{
               ...ff,
               left: face.x * ps, top: face.y * ps,
               width: face.w * ps, height: face.h * ps,
-              background: insideFaceColors[face.id] || insideColor,
+              background: insideFaceColors[cid(face.id)] || insideColor,
               opacity: sp, overflow: "hidden",
               transform: "rotateY(180deg) translateZ(0.5px)",
               backfaceVisibility: "hidden",
               borderRadius: face.roundTL ? `0 ${50 * ps}px ${15 * ps}px 0`
                           : face.roundTR ? `${50 * ps}px 0 0 ${15 * ps}px` : undefined,
+              clipPath: clipP(face, true),
             }}>
               {face.small ? (
-                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.03em", userSelect: "none", textAlign: "center", padding: "1px 2px", lineHeight: 1.2 }}>{face.label}</span>
+                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.03em", userSelect: "none", textAlign: "center", padding: "1px 2px", lineHeight: 1.2 }}>{clabel(face.id, face.label)}</span>
               ) : (
-                <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
+                <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>
               )}
-              {mIn(face.id).map(item => renderPreviewItem(item, ps))}
+              {mIn(cid(face.id)).map(item => renderPreviewItem(item, ps))}
             </div>
           </Fragment>
         ))}
@@ -592,13 +659,13 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
             const isL  = face.id === "lid-left";
             const fL   = isSF ? (isL ? -face.w * ps : 0) : face.x * ps;
             const fT   = isSF ? 0 : (face.y - NY_BASE) * ps;
-            const fOut = <div key="o" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: getFaceClipPath(face, ps) }}>
-              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {mOut(face.id).map(item => renderPreviewItem(item, ps))}
+            const fOut = <div key="o" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: fc[cid(face.id)] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: clipP(face) }}>
+              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{clabel(face.id, face.label)}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>}
+              {mOut(cid(face.id)).map(item => renderPreviewItem(item, ps))}
             </div>;
-            const fIn = <div key="i" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: getFaceClipPath(face, ps, true) }}>
-              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>}
-              {mIn(face.id).map(item => renderPreviewItem(item, ps))}
+            const fIn = <div key="i" style={{ position: "absolute", left: fL, top: fT, width: face.w * ps, height: face.h * ps, background: insideFaceColors[cid(face.id)] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: clipP(face, true) }}>
+              {face.small ? <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{clabel(face.id, face.label)}</span> : <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>}
+              {mIn(cid(face.id)).map(item => renderPreviewItem(item, ps))}
             </div>;
             if (isSF) return (
               <div key={face.id + "-ft"} style={{ position: "absolute", left: isL ? (face.x + face.w) * ps : face.x * ps, top: (face.y - NY_BASE) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${isL ? -foldAngle2 : foldAngle2}deg)` }}>
@@ -616,11 +683,11 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
           const s5L = (step7T === 0 ? ["top-side-flap-left"] : []).map(id => FACES_OUTSIDE.find(f => f.id === id)!);
           const renderS5Face = (face: typeof FACES_OUTSIDE[0], pivotX: number, angle: number) => (
             <div key={face.id + "-s5"} style={{ position: "absolute", left: pivotX * ps, top: (face.y - NY_BASE) * ps, width: 0, height: face.h * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${angle}deg)` }}>
-              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: getFaceClipPath(face, ps) }}>
+              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `${50*ps}px 0 0 ${15*ps}px` : face.roundTR ? `0 ${50*ps}px ${15*ps}px 0` : undefined, clipPath: clipP(face) }}>
                 <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
                 {mOut(face.id).map(item => renderPreviewItem(item, ps))}
               </div>
-              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: getFaceClipPath(face, ps, true) }}>
+              <div style={{ position: "absolute", left: (face.x - pivotX) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden", borderRadius: face.roundTL ? `0 ${50*ps}px ${15*ps}px 0` : face.roundTR ? `${50*ps}px 0 0 ${15*ps}px` : undefined, clipPath: clipP(face, true) }}>
                 <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "5px", fontWeight: 700, color: "rgba(0,0,0,0.45)", pointerEvents: "none", textTransform: "uppercase", userSelect: "none", textAlign: "center", lineHeight: 1.2 }}>{face.label}</span>
                 {mIn(face.id).map(item => renderPreviewItem(item, ps))}
               </div>
@@ -665,13 +732,13 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
             <div style={{ position: "absolute", left: NX2 * ps, top: NY_BASE * ps, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${foldAngle3}deg)`, opacity: sp }}>
               {faces3R.map(face => (
                 <Fragment key={face.id + "-s3"}>
-                  <div style={{ position: "absolute", left: (face.x - NX2) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {mOut(face.id).map(item => renderPreviewItem(item, ps))}
+                  <div style={{ position: "absolute", left: (face.x - NX2) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[cid(face.id)] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
+                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>
+                    {mOut(cid(face.id)).map(item => renderPreviewItem(item, ps))}
                   </div>
-                  <div style={{ position: "absolute", left: (face.x - NX2) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
-                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {mIn(face.id).map(item => renderPreviewItem(item, ps))}
+                  <div style={{ position: "absolute", left: (face.x - NX2) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[cid(face.id)] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
+                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>
+                    {mIn(cid(face.id)).map(item => renderPreviewItem(item, ps))}
                   </div>
                 </Fragment>
               ))}
@@ -686,13 +753,13 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems,
             <div style={{ position: "absolute", left: NX1 * ps, top: NY_BASE * ps, width: 0, height: BH * ps, transformStyle: "preserve-3d", transformOrigin: "0 0", transform: `rotateY(${-foldAngle3}deg)`, opacity: sp }}>
               {faces3L.map(face => (
                 <Fragment key={face.id + "-s3"}>
-                  <div style={{ position: "absolute", left: (face.x - NX1) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[face.id] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
-                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {mOut(face.id).map(item => renderPreviewItem(item, ps))}
+                  <div style={{ position: "absolute", left: (face.x - NX1) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: fc[cid(face.id)] || "#c8a97e", border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", backfaceVisibility: "hidden", transform: "translateZ(0.5px)" }}>
+                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>
+                    {mOut(cid(face.id)).map(item => renderPreviewItem(item, ps))}
                   </div>
-                  <div style={{ position: "absolute", left: (face.x - NX1) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[face.id] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
-                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{face.label}</span>
-                    {mIn(face.id).map(item => renderPreviewItem(item, ps))}
+                  <div style={{ position: "absolute", left: (face.x - NX1) * ps, top: 0, width: face.w * ps, height: face.h * ps, background: insideFaceColors[cid(face.id)] || insideColor, border: "1px solid rgba(0,0,0,0.18)", boxSizing: "border-box", overflow: "hidden", transform: "rotateY(180deg) translateZ(0.5px)", backfaceVisibility: "hidden" }}>
+                    <span style={{ position: "absolute", top: 3, left: 4, fontSize: "6px", fontWeight: 700, color: "rgba(0,0,0,0.4)", pointerEvents: "none", textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}>{clabel(face.id, face.label)}</span>
+                    {mIn(cid(face.id)).map(item => renderPreviewItem(item, ps))}
                   </div>
                 </Fragment>
               ))}
@@ -931,6 +998,26 @@ function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeav
     </div>
   );
 }
+
+// ─── Dieline download format options ──────────────────────────────────────────
+const DIELINE_DOWNLOAD_FMTS: { id: "ai" | "pdf" | "dxf" | "3d"; label: string; icon: React.ReactNode }[] = [
+  {
+    id: "ai", label: "AI dieline",
+    icon: <div style={{ width: 28, height: 28, background: "#f97316", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>Ai</div>,
+  },
+  {
+    id: "pdf", label: "PDF dieline",
+    icon: <div style={{ width: 28, height: 28, background: "#ef4444", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 8, fontWeight: 800 }}>PDF</div>,
+  },
+  {
+    id: "dxf", label: "DXF dieline",
+    icon: <div style={{ width: 28, height: 28, background: "#374151", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 8, fontWeight: 800 }}>DXF</div>,
+  },
+  {
+    id: "3d", label: "3D mockup",
+    icon: <div style={{ width: 28, height: 28, background: "#22c55e", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 8, fontWeight: 800 }}>JPG</div>,
+  },
+];
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 type Props = { product: Product; onClose: () => void };
@@ -1276,12 +1363,77 @@ export default function PizzaBoxEditor({ product, onClose }: Props) {
   const dragRef = useRef<{ id: string; faceId: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const globalDragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
+  const dielineCanvasRef = useRef<HTMLDivElement>(null);
+  const [downloadingDieline, setDownloadingDieline] = useState(false);
+  const [dielineFmt, setDielineFmt] = useState<"ai" | "pdf" | "dxf" | "3d">("pdf");
   useEffect(() => {
     const el = canvasScrollRef.current;
     if (!el) return;
     el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
     el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
   }, []);
+
+  function triggerBlobDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function renderDielinePng(node: HTMLDivElement): Promise<{ dataUrl: string; width: number; height: number }> {
+    const { default: html2canvas } = await import("html2canvas");
+    const canvas = await html2canvas(node, { backgroundColor: "#ffffff", scale: 2, useCORS: true });
+    return { dataUrl: canvas.toDataURL("image/png"), width: node.offsetWidth, height: node.offsetHeight };
+  }
+
+  function buildDielineVectorSvg(node: HTMLDivElement): SVGSVGElement {
+    const width = node.offsetWidth;
+    const height = node.offsetHeight;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    node.querySelectorAll("svg").forEach(overlay => {
+      Array.from(overlay.children).forEach(child => svg.appendChild(child.cloneNode(true)));
+    });
+    return svg;
+  }
+
+  async function handleDownloadDieline(fmt: "ai" | "pdf" | "dxf" | "3d" = dielineFmt) {
+    const node = dielineCanvasRef.current;
+    if (!node || downloadingDieline) return;
+    setDownloadingDieline(true);
+    try {
+      if (fmt === "dxf") {
+        const { downloadDXF } = await import("@/lib/dieline-export");
+        downloadDXF(buildDielineVectorSvg(node), "pizza-box-dieline.dxf");
+      } else if (fmt === "ai") {
+        const svg = buildDielineVectorSvg(node);
+        const svgStr = new XMLSerializer().serializeToString(svg);
+        triggerBlobDownload(new Blob([svgStr], { type: "application/postscript" }), "pizza-box-dieline.ai");
+      } else if (fmt === "3d") {
+        const { default: html2canvas } = await import("html2canvas");
+        const canvas = await html2canvas(node, { backgroundColor: "#ffffff", scale: 2, useCORS: true });
+        triggerBlobDownload(await (await fetch(canvas.toDataURL("image/jpeg", 0.92))).blob(), "pizza-box-mockup.jpg");
+      } else {
+        const { dataUrl, width, height } = await renderDielinePng(node);
+        const { jsPDF } = await import("jspdf");
+        const pxToMm = 0.264583;
+        const wMm = width * pxToMm;
+        const hMm = height * pxToMm;
+        const doc = new jsPDF({ orientation: wMm > hMm ? "landscape" : "portrait", unit: "mm", format: [wMm, hMm] });
+        doc.addImage(dataUrl, "PNG", 0, 0, wMm, hMm);
+        doc.save("pizza-box-dieline.pdf");
+      }
+    } catch (err) {
+      console.error("Dieline download failed:", err);
+    } finally {
+      setDownloadingDieline(false);
+    }
+  }
 
   function startDragItem(e: React.PointerEvent, faceId: string, item: CanvasItem) {
     e.preventDefault(); e.stopPropagation();
@@ -1451,7 +1603,7 @@ export default function PizzaBoxEditor({ product, onClose }: Props) {
             <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{product.name}</span>
           </div>
         )}
-        <button onClick={() => setFinalStepsOpen(true)} style={{ padding: "0.4rem 1.5rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: "0.875rem", fontWeight: 700 }}>Save and Continue</button>
+        <button onClick={() => void handleDownloadDieline(dielineFmt)} disabled={downloadingDieline} style={{ padding: "0.4rem 1.5rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: 8, cursor: downloadingDieline ? "wait" : "pointer", fontSize: "0.875rem", fontWeight: 700, opacity: downloadingDieline ? 0.7 : 1 }}>{downloadingDieline ? "Downloading…" : "Download Dieline"}</button>
       </div>
 
       {/* ── Body ── */}
@@ -1784,7 +1936,7 @@ export default function PizzaBoxEditor({ product, onClose }: Props) {
             onClick={() => { setSelectedFace(null); setSelectedItemId(null); setEditingItemId(null); setShowFaceColorPopup(false); setSelectedItemIsGlobal(false); }}
           >
             <div style={{ minHeight: "150vh", minWidth: "100%", display: "flex", alignItems: "center", justifyContent: "center", paddingTop: `${Math.max(48, Math.max(topLockFlapH, TOP_LOCK_R) * zoom + 8)}px`, paddingRight: "3rem", paddingBottom: "3rem", paddingLeft: "3rem", boxSizing: "border-box" }}>
-            <div style={{ position: "relative", width: dielineW * zoom, height: (DIELINE_H_FULL + Math.max(0, Math.max(topLockFlapH, TOP_LOCK_R) - PAD)) * zoom, flexShrink: 0, transform: `rotate(${canvasRotation}deg)`, transformOrigin: "center center", transition: "transform 0.3s ease" }}>
+            <div ref={dielineCanvasRef} style={{ position: "relative", width: dielineW * zoom, height: (DIELINE_H_FULL + Math.max(0, Math.max(topLockFlapH, TOP_LOCK_R) - PAD)) * zoom, flexShrink: 0, transform: `rotate(${canvasRotation}deg)`, transformOrigin: "center center", transition: "transform 0.3s ease" }}>
 
               {/* Dieline background — extends up to cover top flap and dust flap which sit above y=0 */}
               <div style={{ position: "absolute", top: -(Math.max(topLockFlapH, TOP_LOCK_R) - PAD) * zoom, bottom: 0, left: 0, right: 0, background: "#f5f5f0", borderRadius: 4 }} />
@@ -2718,58 +2870,37 @@ export default function PizzaBoxEditor({ product, onClose }: Props) {
           </div>
         </div>
 
-        {/* ── Right panel ── */}
-        <div style={{ width: 520, borderLeft: "1px solid #e5e7eb", background: "#fafafa", flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
-
-          {/* 3D Preview - draggable to rotate */}
-          <div style={{ padding: "0.75rem", borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>3D Preview</span>
-              <span style={{ fontSize: "0.65rem", background: "#f3f4f6", color: "#374151", padding: "2px 7px", borderRadius: 999, fontWeight: 700 }}>3D</span>
-            </div>
-            <div
-              onPointerDown={start3DRotate}
-              style={{ cursor: "grab", borderRadius: 12, overflow: "hidden", background: "#f0f0f0", userSelect: "none", position: "relative" }}
-            >
-              <div style={{ transform: `scale(${preview3dZoom})`, transformOrigin: "center 65%", transition: "transform 0.15s" }}>
-                <Box3DPreview faceColors={state.outside.faceColors} insideFaceColors={state.inside.faceColors} insideColor={state.insideColor} outsideItems={state.outside.items} insideItems={state.inside.items} outsideGlobalItems={outGlobalForPreview} insideGlobalItems={inGlobalForPreview} openAmount={openAmount} rotX={rotX} rotY={rotY} geo={geo} />
-              </div>
-              {/* Zoom buttons — bottom right */}
-              <div style={{ position: "absolute", bottom: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
+        {/* ── Right panel: file formats ── */}
+        <div style={{ width: 340, background: "#fff", borderLeft: "1px solid #e5e7eb", flexShrink: 0, overflowY: "auto" }}>
+          <div style={{ padding: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 18, color: "#111827", marginBottom: 14 }}>File formats</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+              {DIELINE_DOWNLOAD_FMTS.map(fmt => (
                 <button
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={() => setPreview3dZoom(z => Math.min(2.5, parseFloat((z + 0.15).toFixed(2))))}
-                  style={{ width: 28, height: 28, borderRadius: 6, background: "rgba(255,255,255,0.92)", border: "1px solid #d1d5db", cursor: "pointer", fontWeight: 700, fontSize: "1.1rem", display: "flex", alignItems: "center", justifyContent: "center", color: "#374151", boxShadow: "0 1px 3px rgba(0,0,0,0.12)" }}
-                >+</button>
-                <button
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={() => setPreview3dZoom(z => Math.max(0.3, parseFloat((z - 0.15).toFixed(2))))}
-                  style={{ width: 28, height: 28, borderRadius: 6, background: "rgba(255,255,255,0.92)", border: "1px solid #d1d5db", cursor: "pointer", fontWeight: 700, fontSize: "1.1rem", display: "flex", alignItems: "center", justifyContent: "center", color: "#374151", boxShadow: "0 1px 3px rgba(0,0,0,0.12)" }}
-                >−</button>
-                <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "#374151", textAlign: "center", background: "rgba(255,255,255,0.85)", borderRadius: 4, padding: "2px 0" }}>{Math.round(preview3dZoom * 100)}%</span>
-              </div>
-            </div>
-            {/* Open / Close slider */}
-            <div style={{ padding: "0.6rem 0 0.25rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: "0.7rem", color: "#6b7280", fontWeight: 600 }}>Open</span>
-                <span style={{ fontSize: "0.7rem", color: "#6b7280", fontWeight: 600 }}>Close</span>
-              </div>
-              <input type="range" min={0} max={100} value={openAmount} onChange={e => setOpenAmount(Number(e.target.value))} style={{ width: "100%", accentColor: "#7c3aed", cursor: "pointer" }} />
-            </div>
-          </div>
-
-          {/* Outside / Inside toggle */}
-          <div style={{ padding: "0.75rem", borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 3 }}>
-              {(["outside", "inside"] as const).map(v => (
-                <button key={v} onClick={() => { setView(v); setSelectedFace(null); setSelectedItemId(null); setShowFaceColorPopup(false); setSelectedItemIsGlobal(false); }} style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: "0.8rem", background: view === v ? "#fff" : "transparent", color: view === v ? "#111827" : "#6b7280", boxShadow: view === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none", textTransform: "capitalize" }}>
-                  {v.charAt(0).toUpperCase() + v.slice(1)}
+                  key={fmt.id}
+                  onClick={() => setDielineFmt(fmt.id)}
+                  disabled={downloadingDieline}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "11px 12px", borderRadius: 8,
+                    border: `1.5px solid ${dielineFmt === fmt.id ? "#2563eb" : "#e5e7eb"}`,
+                    background: "#fff", cursor: downloadingDieline ? "wait" : "pointer", fontSize: 15, fontWeight: 600,
+                    color: "#111827", transition: "border-color 0.15s",
+                  }}
+                >
+                  {fmt.icon}
+                  {fmt.label}
                 </button>
               ))}
             </div>
-          </div>
 
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginBottom: 10 }}>You will get</div>
+            <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: 13.5, color: "#6b7280", lineHeight: 1.7 }}>
+              <li>All dieline files can be generated and downloaded within a few minutes.</li>
+              <li>All dieline files are rigorously structurally inspected. Dimensions, thickness, and material descriptions are included. Ready for printing.</li>
+              <li>All dieline files are without watermarks and can be locally edited using Adobe Illustrator.</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

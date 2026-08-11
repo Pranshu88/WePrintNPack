@@ -476,6 +476,84 @@ function renderPreviewItem(item: CanvasItem, s: number) {
   return null;
 }
 
+// ─── Canvas-native closed-box renderer (used for the Download Mockup export) ──
+// Draws a real projected cuboid instead of screenshotting the CSS 3D preview —
+// html2canvas doesn't understand rotateX/rotateY/perspective, and a foreignObject
+// SVG screenshot permanently taints the canvas (toDataURL always throws), so this
+// draws plain canvas fill/stroke shapes instead, which is never tainted.
+function shadeHex(hex: string, amount: number): string {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return hex;
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const adj = (c: number) => Math.max(0, Math.min(255, Math.round(c + (amount > 0 ? (255 - c) * amount : c * amount))));
+  return `rgb(${adj(r)}, ${adj(g)}, ${adj(b)})`;
+}
+
+function drawBoxMockup(canvas: HTMLCanvasElement, opts: { faceColors: Record<string, string>; rotX: number; rotY: number; bw: number; bh: number; bd: number }) {
+  const { faceColors, rotX, rotY, bw, bh, bd } = opts;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d")!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#e5e7eb";
+  ctx.fillRect(0, 0, W, H);
+
+  const rx = (rotX * Math.PI) / 180, ry = (rotY * Math.PI) / 180;
+  const cosY = Math.cos(ry), sinY = Math.sin(ry), cosX = Math.cos(rx), sinX = Math.sin(rx);
+  const rotate = ([x, y, z]: [number, number, number]): [number, number, number] => {
+    const x1 = x * cosY + z * sinY;
+    const z1 = -x * sinY + z * cosY;
+    const y1 = y * cosX - z1 * sinX;
+    const z2 = y * sinX + z1 * cosX;
+    return [x1, y1, z2];
+  };
+
+  const hw = bw / 2, hh = bh / 2, hd = bd / 2;
+  // Orthographic (parallel) projection — no perspective divide, so every face stays a
+  // true parallelogram under rotation instead of tapering into a wedge like a single-
+  // point perspective projection would for a box this wide relative to its depth.
+  const diag = Math.sqrt(bw * bw + bh * bh + bd * bd);
+  const fitScale = (Math.min(W, H) * 0.62) / diag;
+  const cx = W / 2, cy = H / 2;
+  const project = (p: [number, number, number]) => {
+    const [x, y, z] = rotate(p);
+    return { x: cx + x * fitScale, y: cy + y * fitScale, z };
+  };
+
+  type Face = { corners: [number, number, number][]; normal: [number, number, number]; color: string; shade: number };
+  const faces: Face[] = [
+    { corners: [[-hw, -hh, hd], [hw, -hh, hd], [hw, hh, hd], [-hw, hh, hd]], normal: [0, 0, 1],  color: faceColors["front"] ?? "#c8a97e", shade: 0.08 },
+    { corners: [[-hw, -hh, -hd], [-hw, -hh, hd], [-hw, hh, hd], [-hw, hh, -hd]], normal: [-1, 0, 0], color: faceColors["side-left"] ?? "#c8a97e", shade: -0.18 },
+    { corners: [[hw, -hh, -hd], [hw, hh, -hd], [hw, hh, hd], [hw, -hh, hd]], normal: [1, 0, 0],  color: faceColors["side-right"] ?? "#c8a97e", shade: -0.18 },
+    { corners: [[-hw, -hh, -hd], [hw, -hh, -hd], [hw, -hh, hd], [-hw, -hh, hd]], normal: [0, -1, 0], color: faceColors["lid"] ?? faceColors["front"] ?? "#c8a97e", shade: 0.22 },
+    { corners: [[-hw, hh, -hd], [-hw, hh, hd], [hw, hh, hd], [hw, hh, -hd]], normal: [0, 1, 0],  color: faceColors["back"] ?? "#c8a97e", shade: -0.3 },
+    { corners: [[-hw, -hh, -hd], [-hw, hh, -hd], [hw, hh, -hd], [hw, -hh, -hd]], normal: [0, 0, -1], color: faceColors["back"] ?? "#c8a97e", shade: -0.3 },
+  ];
+
+  const visible = faces
+    .map(f => {
+      const n = rotate(f.normal);
+      const projected = f.corners.map(project);
+      const avgZ = projected.reduce((s, p) => s + p.z, 0) / 4;
+      return { ...f, projected, camZ: n[2], avgZ };
+    })
+    .sort((a, b) => b.avgZ - a.avgZ);
+
+  for (const f of visible) {
+    ctx.beginPath();
+    f.projected.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.closePath();
+    ctx.fillStyle = shadeHex(f.color, f.shade);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.22)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
 function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems: outsideItemsProp, insideItems: insideItemsProp, outsideGlobalItems, insideGlobalItems, openAmount, rotX, rotY, hideFlaps, squareFaces }: {
   faceColors: Record<string, string>; insideFaceColors: Record<string, string>; insideColor: string;
   outsideItems: Record<string, CanvasItem[]>; insideItems: Record<string, CanvasItem[]>;
@@ -1020,10 +1098,10 @@ function Box3DPreview({ faceColors, insideFaceColors, insideColor, outsideItems:
 }
 
 // ─── Dieline face ─────────────────────────────────────────────────────────────
-function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeave, items, zoom, dividerColor }: {
+function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeave, items, zoom, dividerColor, dividerWidth }: {
   face: FaceDef; color: string; selected: boolean; hovered: boolean;
   onSelect: () => void; onHover: () => void; onLeave: () => void;
-  items: CanvasItem[]; zoom: number; dividerColor?: string;
+  items: CanvasItem[]; zoom: number; dividerColor?: string; dividerWidth?: number;
 }) {
   const lineX1 = face.w * 0.47;
   const lineX2 = face.w * 0.53;
@@ -1050,7 +1128,7 @@ function DielineFace({ face, color, selected, hovered, onSelect, onHover, onLeav
         left: face.x * zoom, top: face.y * zoom,
         width: face.w * zoom, height: face.h * zoom,
         background: color,
-        border: selected ? "2px solid #3b82f6" : hovered ? "2px solid #93c5fd" : `1.5px dashed ${dividerColor ?? "rgba(0,0,0,0.25)"}`,
+        border: selected ? "2px solid #3b82f6" : hovered ? "2px solid #93c5fd" : `${dividerWidth ?? 1.5}px dashed ${dividerColor ?? "rgba(0,0,0,0.25)"}`,
         boxSizing: "border-box", cursor: "pointer", overflow: "hidden",
         clipPath,
         borderRadius: face.roundTL ? `${65 * zoom}px 0 0 ${20 * zoom}px` : face.roundTR ? `0 ${65 * zoom}px ${20 * zoom}px 0` : undefined,
@@ -1100,11 +1178,53 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   const [toolMode, setToolMode] = useState<"select" | "pan">("select");
   const [showFaceColorPopup, setShowFaceColorPopup] = useState(false);
 
+  // ── Download Mockup modal ──────────────────────────────────────────────────
+  const [superExportOpen, setSuperExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"jpg" | "png">("jpg");
+  const [exportingMockup, setExportingMockup] = useState(false);
+  const superExportCanvasRef = useRef<HTMLCanvasElement>(null);
+  const superExportRotRef = useRef<{ sx: number; sy: number; rx: number; ry: number } | null>(null);
+
   const [history, setHistory] = useState<EditorState[]>([defaultState()]);
   const [histIdx, setHistIdx] = useState(0);
   const state = history[histIdx];
 
-  const [activeTab, setActiveTab] = useState<"uploads" | "elements" | "package-color" | "basics">(hideFlaps ? "basics" : "uploads");
+  function startSuperExportRotate(e: React.PointerEvent) {
+    e.preventDefault();
+    superExportRotRef.current = { sx: e.clientX, sy: e.clientY, rx: rotX, ry: rotY };
+    const onMove = (ev: PointerEvent) => {
+      const d = superExportRotRef.current;
+      if (!d) return;
+      setRotY(d.ry + (ev.clientX - d.sx) * 0.5);
+      setRotX(d.rx - (ev.clientY - d.sy) * 0.5);
+    };
+    const onUp = () => { superExportRotRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+  }
+
+  async function handleSuperExportDownload() {
+    const canvas = superExportCanvasRef.current;
+    if (!canvas || exportingMockup) return;
+    setExportingMockup(true);
+    try {
+      redrawSuperExportCanvas();
+      const mime = exportFormat === "jpg" ? "image/jpeg" : "image/png";
+      const dataUrl = canvas.toDataURL(mime, 0.95);
+      const blob = await (await fetch(dataUrl)).blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${product.name || "shipping-box"}-mockup.${exportFormat}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error("Mockup export failed:", err);
+    } finally {
+      setExportingMockup(false);
+    }
+  }
+
+  const [activeTab, setActiveTab] = useState<"uploads" | "elements" | "package-color" | "basics">("uploads");
   const [sqLengthMM, setSqLengthMM] = useState(305);
   const [sqWidthMM, setSqWidthMM] = useState(305);
   const [sqHeightMM, setSqHeightMM] = useState(305);
@@ -1316,6 +1436,33 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   const sqBackWidthPx = sqLengthMM * PX_PER_MM_XY;
   const sqSideWidthPx = sqWidthMM * PX_PER_MM_XY;
   const sqBaseHeightPx = sqHeightMM * PX_PER_MM_H;
+
+  const redrawSuperExportCanvas = useCallback(() => {
+    const canvas = superExportCanvasRef.current;
+    if (!canvas) return;
+    if (hideFlaps) {
+      const fc = state.outside.faceColors;
+      const mockupColors: Record<string, string> = {
+        front: fc["sq-front-panel"] ?? "#c8a97e",
+        "side-left": fc["sq-left-side-panel"] ?? "#c8a97e",
+        "side-right": fc["sq-right-side-panel"] ?? "#c8a97e",
+        lid: fc["sq-back-panel"] ?? fc["sq-front-panel"] ?? "#c8a97e",
+        back: fc["sq-back-panel"] ?? "#c8a97e",
+      };
+      drawBoxMockup(canvas, { faceColors: mockupColors, rotX, rotY, bw: sqBackWidthPx, bh: sqBaseHeightPx, bd: sqSideWidthPx });
+    } else {
+      drawBoxMockup(canvas, { faceColors: state.outside.faceColors, rotX, rotY, bw: BW, bh: BH, bd: BD });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.outside.faceColors, rotX, rotY, hideFlaps, sqBackWidthPx, sqBaseHeightPx, sqSideWidthPx]);
+
+  useEffect(() => {
+    if (!superExportOpen) return;
+    redrawSuperExportCanvas();
+    window.addEventListener("resize", redrawSuperExportCanvas);
+    return () => window.removeEventListener("resize", redrawSuperExportCanvas);
+  }, [superExportOpen, redrawSuperExportCanvas]);
+
   const sqGlueFlapW = 35 * PX_PER_MM_XY;
   const sqTotalW = sqSideWidthPx * 2 + sqBackWidthPx * 2 + sqGlueFlapW;
   const sqLidH   = (sqSideWidthPx + sqBackWidthPx) / 2 / 2;  // flap row height, based on avg panel width
@@ -1352,7 +1499,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
           .filter(f => !SQUARE_HIDDEN.has(f.id) && f.id !== "bottom" && f.id !== "front"),
         ...squareLidFaces,
         ...squareBottomFaces,
-        ...squareBaseFaces,
+        ...squareBaseFaces.filter(f => f.id !== "sq-glue-flap"),
       ].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x)
     : FACES_OUTSIDE;
 
@@ -1376,7 +1523,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
   // Adjacency is derived from each face's actual on-screen x-order (not a hardcoded side),
   // so it stays correct regardless of the inside/outside mirroring.
   const dielineFaces = (() => {
-    const GAP = 6;
+    const GAP = 0;
     const half = GAP / 2;
     const insetLeft: Record<string, number> = {};
     const insetRight: Record<string, number> = {};
@@ -1682,7 +1829,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
             <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{product.name}</span>
           </div>
         )}
-        <button onClick={() => setFinalStepsOpen(true)} style={{ padding: "0.4rem 1.5rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: "0.875rem", fontWeight: 700 }}>Save and Continue</button>
+        <button onClick={() => setSuperExportOpen(true)} style={{ padding: "0.4rem 1.5rem", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: "0.875rem", fontWeight: 700 }}>Download Mockup</button>
       </div>
 
       {/* ── Body ── */}
@@ -1691,7 +1838,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
         {/* ── Left icon rail ── */}
         <div style={{ width: 72, borderRight: "1px solid #e5e7eb", background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 0", flexShrink: 0 }}>
           {/* Uploads/Elements/Package Color icons hidden in Square mode for now — may bring back later. */}
-          {!hideFlaps && (["uploads", "elements"] as const).map(tab => (
+          {(["uploads", "elements"] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === tab ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === tab ? "#2563eb" : "#6b7280", width: "88%" }}>
               {tab === "uploads" ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/></svg>
@@ -1702,19 +1849,10 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
             </button>
           ))}
           {/* Package Color icon */}
-          {!hideFlaps && (
-            <button onClick={() => setActiveTab(activeTab === "package-color" ? "uploads" : "package-color")} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === "package-color" ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === "package-color" ? "#2563eb" : "#6b7280", width: "88%" }}>
-              <div style={{ width: 22, height: 22, borderRadius: "50%", background: vd.faceColors["front"] ?? "#c8a97e", border: "2px solid currentColor", flexShrink: 0 }} />
-              <span style={{ fontSize: "0.6rem", fontWeight: 700, textAlign: "center", lineHeight: 1.2 }}>Package{"\n"}Color</span>
-            </button>
-          )}
-          {/* Basics icon (square box dimensions) */}
-          {hideFlaps && (
-            <button onClick={() => setActiveTab("basics")} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === "basics" ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === "basics" ? "#2563eb" : "#6b7280", width: "88%" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-              <span style={{ fontSize: "0.6rem", fontWeight: 700, textAlign: "center" }}>Basics</span>
-            </button>
-          )}
+          <button onClick={() => setActiveTab(activeTab === "package-color" ? "uploads" : "package-color")} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", border: "none", background: activeTab === "package-color" ? "#eff6ff" : "transparent", borderRadius: 10, cursor: "pointer", color: activeTab === "package-color" ? "#2563eb" : "#6b7280", width: "88%" }}>
+            <div style={{ width: 22, height: 22, borderRadius: "50%", background: vd.faceColors["front"] ?? "#c8a97e", border: "2px solid currentColor", flexShrink: 0 }} />
+            <span style={{ fontSize: "0.6rem", fontWeight: 700, textAlign: "center", lineHeight: 1.2 }}>Package{"\n"}Color</span>
+          </button>
         </div>
 
         {/* ── Left expanded panel ── */}
@@ -1947,32 +2085,6 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
         {/* ── Center: Dieline canvas ── */}
         <div style={{ flex: 1, background: "#f1f5f9", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
-          {/* Square mode — line-color legend + Manufacture/Inner/Outer dimensions (same as pizza-box-editor) */}
-          {hideFlaps && (
-            <>
-              <div style={{ position: "absolute", top: 16, left: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 20, background: "#eef1f5", padding: "8px 16px", borderRadius: 8, pointerEvents: "none" }}>
-                {[
-                  { label: "Bleed", color: "#22c55e" },
-                  { label: "Trim", color: "#3b3bfa" },
-                  { label: "Crease", color: "#ef4444" },
-                ].map(({ label, color }) => (
-                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 32, height: 3, background: color, borderRadius: 2 }} />
-                    <span style={{ fontSize: "0.85rem", color: "#4b5563" }}>{label}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ position: "absolute", top: 60, left: 16, zIndex: 30, background: "#eef1f5", padding: "12px 16px", borderRadius: 8, minWidth: 210, pointerEvents: "none" }}>
-                <div>
-                  <div style={{ fontSize: "0.72rem", color: "#6b7280" }}>Manufacture dimensions</div>
-                  <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#111827" }}>{sqBoxDims.mfgL.toFixed(2)} × {sqBoxDims.mfgW.toFixed(2)} × {sqBoxDims.mfgH.toFixed(2)} mm</div>
-                </div>
-                {/* Inner/Outer dimensions hidden for now — may bring back later. */}
-              </div>
-            </>
-          )}
-
           <div
             ref={canvasScrollRef}
             style={{ flex: 1, height: 0, overflowY: "auto", overflowX: "auto", cursor: toolMode === "pan" ? "grab" : "default" }}
@@ -1982,7 +2094,9 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
             <div style={{ position: "relative", width: dilineCanvasW * zoom, height: dilineCanvasH * zoom, flexShrink: 0 }}>
 
               {/* Dieline background */}
-              <div style={{ position: "absolute", inset: 0, background: "#f5f5f0", borderRadius: 4 }} />
+              {!hideFlaps && (
+                <div style={{ position: "absolute", inset: 0, background: "#f5f5f0", borderRadius: 4 }} />
+              )}
 
               {/* ── Mailer Box Dieline SVG ── */}
               {(() => {
@@ -2079,7 +2193,7 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
 
               {/* Face panels */}
               {dielineFaces.map(face => {
-                const faceColor = state[view].faceColors[face.id] ?? (hideFlaps ? "#ffffff" : "#c8a97e");
+                const faceColor = state[view].faceColors[face.id] ?? "#c8a97e";
                 return (
                   <DielineFace
                     key={face.id + "-" + view}
@@ -2091,7 +2205,8 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                     onLeave={() => setHoveredFace(null)}
                     items={getFaceItems(face.id)}
                     zoom={zoom}
-                    dividerColor={hideFlaps ? "#dc2626" : undefined}
+                    dividerColor={hideFlaps ? "#000000" : undefined}
+                    dividerWidth={hideFlaps ? 1 : undefined}
                   />
                 );
               })}
@@ -2242,9 +2357,6 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
                     {/* Margin band as a thick stroke (not a fill-based ring) so SVG's own
                         join rendering handles the concave glue-flap corners cleanly. */}
                     <path d={midEdgePath} fill="none" stroke={bleedFillColor} strokeWidth={bleedR * z} strokeLinejoin="round" />
-                    <path d={outerEdgePath} fill="none" stroke="#166534" strokeWidth={2} strokeLinejoin="round" />
-                    <path d={outline} fill="none" stroke="#1e3a8a" strokeWidth={2} strokeLinejoin="round" />
-                    <path d={notches.join(" ")} fill="none" stroke="#1e3a8a" strokeWidth={2} strokeLinejoin="round" />
                   </svg>
                 );
               })()}
@@ -2577,6 +2689,61 @@ export default function ShippingBoxEditor({ product, onClose, hideFlaps = false 
         </div>
       </div>
     </div>
+
+    {/* ── Download Mockup modal ──────────────────────────────────────────── */}
+    {superExportOpen && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 800, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(17,24,39,0.55)", backdropFilter: "blur(2px)" }} onClick={() => setSuperExportOpen(false)}>
+        <div onClick={e => e.stopPropagation()} style={{ width: "90vw", maxWidth: 1400, height: "85vh", maxHeight: 900, background: "#fff", borderRadius: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Tabs header */}
+          <div style={{ display: "flex", alignItems: "center", height: 64, borderBottom: "1px solid #e5e7eb", padding: "0 1.5rem", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "2rem", flex: 1 }}>
+              <div style={{ fontSize: "1.05rem", fontWeight: 700, padding: "0.5rem 0", color: "#111827", borderBottom: "3px solid #7c3aed" }}>
+                Mockup
+              </div>
+            </div>
+            <button onClick={() => setSuperExportOpen(false)} style={{ width: 36, height: 36, border: "none", background: "transparent", cursor: "pointer", color: "#111827", fontSize: "1.4rem", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          </div>
+
+          {/* Body */}
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            {/* Left: preview */}
+            <div onPointerDown={startSuperExportRotate} style={{ flex: 1, background: "#e5e7eb", overflow: "hidden", cursor: "grab" }}>
+              <canvas ref={superExportCanvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+            </div>
+
+            {/* Right: format + download */}
+            <div style={{ width: 340, borderLeft: "1px solid #e5e7eb", padding: "1.5rem", display: "flex", flexDirection: "column", overflowY: "auto" }}>
+              <div style={{ fontWeight: 700, fontSize: "1.1rem", color: "#111827", marginBottom: 16 }}>Format and quality</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 24 }}>
+                {(["jpg", "png"] as const).map(fmt => (
+                  <button
+                    key={fmt}
+                    onClick={() => setExportFormat(fmt)}
+                    style={{
+                      padding: "0.75rem 0", borderRadius: 8, textAlign: "center", fontWeight: 700, fontSize: "0.95rem",
+                      border: `1.5px solid ${exportFormat === fmt ? "#7c3aed" : "#e5e7eb"}`,
+                      background: exportFormat === fmt ? "#f5f3ff" : "#fff",
+                      color: exportFormat === fmt ? "#7c3aed" : "#374151",
+                      cursor: "pointer", textTransform: "uppercase",
+                    }}
+                  >
+                    {fmt}
+                  </button>
+                ))}
+              </div>
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => void handleSuperExportDownload()}
+                disabled={exportingMockup}
+                style={{ padding: "0.75rem", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)", color: "#fff", fontWeight: 700, fontSize: "0.95rem", cursor: exportingMockup ? "wait" : "pointer", opacity: exportingMockup ? 0.7 : 1 }}
+              >
+                {exportingMockup ? "Downloading…" : "Download"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* ── Finalize Your Order modal ───────────────────────────────────── */}
     {finalStepsOpen && (

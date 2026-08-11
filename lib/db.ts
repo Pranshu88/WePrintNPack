@@ -190,6 +190,9 @@ async function initializeDb(client: Client): Promise<void> {
   try {
     await client.execute("ALTER TABLE orders ADD COLUMN sinalite_order_ref TEXT DEFAULT ''");
   } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE gallery_templates ADD COLUMN images_json TEXT");
+  } catch { /* already exists */ }
 
   // One-time data fixes — each runs at most once per database, tracked via applied_fixes.
   const hideStrayFixId = "hide-stray-seed-business-card-templates-2026-07";

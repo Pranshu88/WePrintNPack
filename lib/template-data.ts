@@ -59,6 +59,7 @@ export type GalleryTemplate = {
   productSlug: string;
   name: string;
   previewImage: string;
+  images?: string[];
   designs: DesignTemplateItem[];
   createdAt: string;
   price?: string;
@@ -80,7 +81,7 @@ export type PaginatedTemplates = {
 
 // ─── Internal row shapes ──────────────────────────────────────────────────────
 
-type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null; visible?: number | null; description?: string | null; sinalite_id?: string | null; sinalite_sku?: string | null; sinalite_options_json?: string | null };
+type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null; visible?: number | null; description?: string | null; sinalite_id?: string | null; sinalite_sku?: string | null; sinalite_options_json?: string | null; images_json?: string | null };
 type DesignRow = { id: string; gallery_id: string; name: string; color_hex: string | null; color_name: string | null; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; front_bg_color: string | null; back_bg_color: string | null; created_at: string };
 type ColorRow  = { id: string; design_id: string; color_hex: string; color_name: string; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; created_at: string };
 
@@ -92,7 +93,7 @@ function s(v: unknown): string | null { return v == null ? null : String(v); }
 function n(v: unknown): number { return Number(v) || 0; }
 
 function toGtRow(r: Row): GtRow {
-  return { id: s(r.id)!, product_slug: s(r.product_slug)!, name: s(r.name)!, preview_image: s(r.preview_image)!, created_at: s(r.created_at)!, price: s(r.price), specs_json: s(r.specs_json), visible: r.visible == null ? 1 : n(r.visible), description: s(r.description), sinalite_id: s(r.sinalite_id), sinalite_sku: s(r.sinalite_sku), sinalite_options_json: s(r.sinalite_options_json) };
+  return { id: s(r.id)!, product_slug: s(r.product_slug)!, name: s(r.name)!, preview_image: s(r.preview_image)!, created_at: s(r.created_at)!, price: s(r.price), specs_json: s(r.specs_json), visible: r.visible == null ? 1 : n(r.visible), description: s(r.description), sinalite_id: s(r.sinalite_id), sinalite_sku: s(r.sinalite_sku), sinalite_options_json: s(r.sinalite_options_json), images_json: s(r.images_json) };
 }
 
 function toDesignRow(r: Row): DesignRow {
@@ -149,6 +150,7 @@ function assembleTemplates(rows: GtRow[], allDesigns: DesignRow[], allColors: Co
     if (r.sinalite_id) t.sinaliteId = r.sinalite_id;
     if (r.sinalite_sku) t.sinaliteSku = r.sinalite_sku;
     if (r.sinalite_options_json) { try { t.sinaliteOptions = JSON.parse(r.sinalite_options_json) as SinaliteSelectedOption[]; } catch { /* ignore */ } }
+    if (r.images_json) { try { t.images = JSON.parse(r.images_json) as string[]; } catch { /* ignore */ } }
     return t;
   });
 }
@@ -275,10 +277,11 @@ export async function createGalleryTemplate(productSlug: string, name: string, p
   return t;
 }
 
-export async function updateGalleryTemplate(id: string, updates: { name?: string; previewImage?: string; price?: string; specs?: string[]; description?: string; visible?: boolean; sinaliteOptions?: SinaliteSelectedOption[] }): Promise<GalleryTemplate | undefined> {
+export async function updateGalleryTemplate(id: string, updates: { name?: string; previewImage?: string; images?: string[]; price?: string; specs?: string[]; description?: string; visible?: boolean; sinaliteOptions?: SinaliteSelectedOption[] }): Promise<GalleryTemplate | undefined> {
   const db = await getDb();
   if (updates.name !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET name = ? WHERE id = ?", args: [updates.name.trim(), id] });
   if (updates.previewImage !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET preview_image = ? WHERE id = ?", args: [updates.previewImage, id] });
+  if (updates.images !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET images_json = ? WHERE id = ?", args: [JSON.stringify(updates.images), id] });
   if (updates.price !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET price = ? WHERE id = ?", args: [updates.price, id] });
   if (updates.specs !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET specs_json = ? WHERE id = ?", args: [JSON.stringify(updates.specs), id] });
   if (updates.description !== undefined) await db.execute({ sql: "UPDATE gallery_templates SET description = ? WHERE id = ?", args: [updates.description.trim() || null, id] });

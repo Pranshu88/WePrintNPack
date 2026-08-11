@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 const SUB_NAMES: Record<string, string> = {
   "pizza-boxes":           "Pizza Box",
-  "mailer-boxes":          "Mailer Box",
+  "mailer-boxes":          "Pizza Box",
   "shipping-boxes":        "Shipping Box",
   "square-shipping-boxes": "Square Shipping Box",
 };

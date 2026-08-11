@@ -79,6 +79,13 @@ export default function LandingPage() {
   const [policyOpen, setPolicyOpen] = useState<"privacy" | "terms" | null>(null);
   const [categoryProducts, setCategoryProducts] = useState<Product[]>([]);
   const [carouselProducts, setCarouselProducts] = useState<Product[]>([]);
+  const [servicesOpen, setServicesOpen] = useState(false);
+
+  const SERVICES_MENU = [
+    { label: "Printing", href: "/products" },
+    { label: "Dieline",  href: "/products/packaging-box" },
+    { label: "Mockup",   href: "/products/mockup-generator" },
+  ];
 
   useEffect(() => {
     try {
@@ -173,7 +180,37 @@ export default function LandingPage() {
 
           <nav className="lp-nav">
             <a href="#lp-popular"   className="lp-nav-link lp-nav-active">Products</a>
-            <a href="#lp-products"  className="lp-nav-link">Services</a>
+            <span
+              style={{ position: "relative", display: "inline-block" }}
+              onMouseEnter={() => setServicesOpen(true)}
+              onMouseLeave={() => setServicesOpen(false)}
+            >
+              <a href="#lp-products" className="lp-nav-link">Services</a>
+              {servicesOpen && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 10px)", left: 0,
+                  background: "#fff", borderRadius: 12, zIndex: 999,
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.14)", minWidth: 170,
+                  border: "1px solid #f3f4f6", overflow: "hidden",
+                }}>
+                  {SERVICES_MENU.map(({ label, href }) => (
+                    <a
+                      key={label}
+                      href={href}
+                      style={{
+                        display: "block", padding: "10px 16px",
+                        textDecoration: "none", fontSize: "0.88rem", fontWeight: 600,
+                        color: "#374151",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+                    >
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </span>
             <a href="#"             className="lp-nav-link">Deals</a>
             <a href="#lp-footer"    className="lp-nav-link">About Us</a>
             <span className="lp-nav-link" style={{ cursor: "default", pointerEvents: "none" }}>Resources ▾</span>
@@ -421,6 +458,17 @@ export default function LandingPage() {
               </div>
               <div className="lp-pp-img-wrap">
                 <Image src="/images/ic_design1.png" alt="Dieline Template Maker" fill sizes="(max-width:860px) 100vw, 50vw" style={{ objectFit: "cover" }} />
+              </div>
+            </a>
+            <a href="/products/mockup-generator" className="lp-pp-card lp-pp-card--purple lp-anim lp-anim-d3">
+              <div className="lp-pp-head">
+                <span className="lp-pp-title">Mockup Generator</span>
+                <span className="lp-pp-arrow">
+                  <Image src="/images/ic_arrow.png" alt="" width={48} height={48} />
+                </span>
+              </div>
+              <div className="lp-pp-img-wrap">
+                <Image src="/images/ic_mockup.png" alt="Mockup Generator" fill sizes="(max-width:860px) 100vw, 33vw" style={{ objectFit: "cover" }} />
               </div>
             </a>
           </div>

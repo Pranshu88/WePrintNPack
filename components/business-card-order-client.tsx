@@ -216,6 +216,11 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   const [zoom, setZoom] = useState(1);
   const [lensPos, setLensPos] = useState<{ x: number; y: number } | null>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
+  const [activeImage, setActiveImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveImage(null);
+  }, [gallery?.id]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -303,6 +308,8 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   const displaySpecs = parseGallerySpecs(gallery?.specs);
   const displayDescription = gallery?.description || product.description;
   const displayImage = bcImage || gallery?.previewImage || product.image || gallery?.designs[0]?.frontImage;
+  const galleryThumbs = Array.from(new Set([displayImage, ...(gallery?.images ?? [])].filter(Boolean))) as string[];
+  const shownImage = activeImage ?? displayImage;
   // Prefer options saved on the gallery (admin-curated); fall back to a live fetch
   // straight from Sinalite for galleries that were never edited/saved in admin.
   const effectiveSinaliteOptions = gallery?.sinaliteOptions?.length ? gallery.sinaliteOptions : liveSinaliteOptions;
@@ -461,12 +468,12 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
             >
               <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", boxShadow: "0 12px 40px rgba(0,0,0,0.22)", maxHeight: "420px" }}>
                 <img
-                  src={displayImage}
+                  src={shownImage}
                   alt={displayTitle}
                   style={{ width: "100%", height: "auto", maxHeight: "420px", objectFit: "contain", display: "block", transform: `scale(${zoom})`, transition: zoom === 1 ? "transform 0.2s ease" : "none", transformOrigin: lensPos ? `${lensPos.x * 100}% ${lensPos.y * 100}%` : "center center" }}
                 />
                 {lensPos && (
-                  <div style={{ position: "absolute", width: `${LENS_SIZE}px`, height: `${LENS_SIZE}px`, borderRadius: "50%", border: "2.5px solid rgba(124,58,237,0.6)", backgroundImage: `url(${displayImage})`, backgroundRepeat: "no-repeat", backgroundSize: `${ZOOM_FACTOR * 100}% ${ZOOM_FACTOR * 100}%`, backgroundPosition: `${lensPos.x * 100}% ${lensPos.y * 100}%`, left: `${lensPos.x * 100}%`, top: `${lensPos.y * 100}%`, transform: "translate(-50%, -50%)", boxShadow: "0 4px 20px rgba(0,0,0,0.25)", pointerEvents: "none", zIndex: 10 }} />
+                  <div style={{ position: "absolute", width: `${LENS_SIZE}px`, height: `${LENS_SIZE}px`, borderRadius: "50%", border: "2.5px solid rgba(124,58,237,0.6)", backgroundImage: `url(${shownImage})`, backgroundRepeat: "no-repeat", backgroundSize: `${ZOOM_FACTOR * 100}% ${ZOOM_FACTOR * 100}%`, backgroundPosition: `${lensPos.x * 100}% ${lensPos.y * 100}%`, left: `${lensPos.x * 100}%`, top: `${lensPos.y * 100}%`, transform: "translate(-50%, -50%)", boxShadow: "0 4px 20px rgba(0,0,0,0.25)", pointerEvents: "none", zIndex: 10 }} />
                 )}
               </div>
 
@@ -476,6 +483,31 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
                 <button onClick={() => setZoom(z => Math.max(z - 0.25, 1))} style={zoomBtnStyle} aria-label="Zoom out">−</button>
               </div>
             </div>
+
+            {galleryThumbs.length > 1 && (
+              <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.85rem", overflowX: "auto", paddingBottom: "2px" }}>
+                {galleryThumbs.map((src, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setActiveImage(src); setZoom(1); }}
+                    aria-label={`View image ${i + 1}`}
+                    style={{
+                      flexShrink: 0,
+                      width: "64px",
+                      height: "64px",
+                      borderRadius: "10px",
+                      overflow: "hidden",
+                      padding: 0,
+                      cursor: "pointer",
+                      background: "#fff",
+                      border: shownImage === src ? "2px solid #7c3aed" : "1px solid #e5e7eb",
+                    }}
+                  >
+                    <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  </button>
+                ))}
+              </div>
+            )}
 
             {gallery && (
               <div style={{ marginTop: "0.85rem", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.825rem", fontWeight: 600, background: "linear-gradient(90deg,#7c3aed,#db2777,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>

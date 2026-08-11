@@ -7,7 +7,7 @@ import type { Product } from "@/lib/types";
 import { AdminTemplateSection } from "./admin-template-section";
 import AdminNotificationBell from "./admin-notification-bell";
 
-export function AdminPackagingPage() {
+export function AdminMockupPage() {
   const pathname = usePathname();
   const router = useRouter();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -143,13 +143,13 @@ export function AdminPackagingPage() {
             <div>
               <p style={{ margin: "0 0 4px", fontSize: "0.75rem", fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.08em" }}>DASHBOARD / ADMIN</p>
               <h1 style={{ margin: "0 0 6px", fontSize: "2rem", fontWeight: 800, color: "#111827" }}>
-                Packaging <span style={{ color: "#7c3aed" }}>Templates</span>
+                Mockup <span style={{ color: "#7c3aed" }}>Templates</span>
               </h1>
               <p style={{ margin: "0 0 10px", fontSize: "0.8rem", color: "#9ca3af" }}>
                 <Link href="/" style={{ color: "#9ca3af", textDecoration: "none" }}>Home</Link>
                 {" › "}
                 <Link href="/admin" style={{ color: "#9ca3af", textDecoration: "none" }}>Admin</Link>
-                {" › "}Packaging
+                {" › "}Mockup
               </p>
               <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
                 Manage gallery templates and design options for Packaging Boxes.
@@ -160,7 +160,7 @@ export function AdminPackagingPage() {
           {loading ? (
             <div style={{ padding: "2rem", color: "#9ca3af", fontSize: "0.9rem" }}>Loading products…</div>
           ) : (
-            <AdminTemplateSection products={products} openAddRef={openAddRef} onlyCategory="packaging-box" packagingBoxOptions={["pizza-boxes", "square-shipping-boxes"]} />
+            <AdminTemplateSection products={products} openAddRef={openAddRef} onlyCategory="packaging-box" packagingBoxOptions={["mailer-boxes", "shipping-boxes", "square-shipping-boxes"]} />
           )}
         </main>
       </div>

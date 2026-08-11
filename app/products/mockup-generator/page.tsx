@@ -5,19 +5,20 @@ import Link from "next/link";
 import { PackagingTileCard, type PackagingTile } from "@/components/packaging-tile-card";
 import { loadIDBImage } from "@/lib/packaging-idb";
 
-const PACKAGING_DEFAULTS = [
-  { id: "pb-standard",  title: "Pizza Box",            price: "$150 + tax", metaKey: "pizzabox-packages-meta",     subSlug: "pizza-boxes",           dielineSlug: "pizza-boxes" },
-  { id: "ssb-standard", title: "Square Shipping Box",  price: "$230 + tax", metaKey: "ssb-packages-meta",          subSlug: "square-shipping-boxes",  dielineSlug: "square-shipping-boxes" },
+const MOCKUP_DEFAULTS = [
+  { id: "mb-standard", title: "Pizza Box",    price: "$200 + tax", metaKey: "mb-packages-meta", subSlug: "mailer-boxes",   dielineSlug: "mailer-boxes" },
+  { id: "sb-standard", title: "Shipping Box", price: "$220 + tax", metaKey: "sb-packages-meta", subSlug: "shipping-boxes", dielineSlug: "shipping-boxes" },
+  { id: "ssb-standard", title: "Square Shipping Box", price: "$230 + tax", metaKey: "ssb-packages-meta", subSlug: "square-shipping-boxes", dielineSlug: "square-shipping-boxes" },
 ];
 
-export default function PackagingBoxPage() {
+export default function MockupGeneratorPage() {
   const [tiles, setTiles] = useState<PackagingTile[]>([]);
 
   useEffect(() => {
     async function load() {
       const result: PackagingTile[] = [];
 
-      for (const pkg of PACKAGING_DEFAULTS) {
+      for (const pkg of MOCKUP_DEFAULTS) {
         let meta: Record<string, { title?: string; price?: string }> = {};
         try {
           const raw = localStorage.getItem(pkg.metaKey);
@@ -29,12 +30,12 @@ export default function PackagingBoxPage() {
 
         result.push({
           id: pkg.id,
-          name: saved?.title ?? pkg.title,
+          name: pkg.title,
           price: saved?.price ?? pkg.price,
           image: img || "/images/cardingprint.jpg",
           link: `/products/packaging-box/${pkg.subSlug}`,
           dielineSlug: pkg.dielineSlug,
-          hideMockup: pkg.dielineSlug === "square-shipping-boxes",
+          hideDieline: true,
           hidePrice: true,
         });
       }
@@ -51,14 +52,14 @@ export default function PackagingBoxPage() {
         <nav style={{ display: "flex", gap: "0.5rem", fontSize: "0.875rem", color: "#6b7280", alignItems: "center", marginBottom: "1.5rem" }}>
           <Link href="/" style={{ color: "#6b7280", textDecoration: "none" }}>Home</Link>
           <span>/</span>
-          <span style={{ color: "#374151" }}>Packaging Boxes</span>
+          <span style={{ color: "#374151" }}>Mockup Generator</span>
         </nav>
 
         <h1 style={{ margin: "0 0 0.4rem", fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>
-          Packaging Boxes
+          Mockup Generator
         </h1>
         <p style={{ margin: "0 0 2rem", fontSize: "0.95rem", color: "#6b7280" }}>
-          Custom printed packaging boxes for retail, e-commerce, and food delivery.
+          Design and preview your custom packaging before you print.
         </p>
 
         {tiles.length === 0 ? (

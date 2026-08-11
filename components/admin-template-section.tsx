@@ -50,6 +50,16 @@ async function loadBcImage(id: string): Promise<string> {
   }
 }
 
+async function saveBcImages(id: string, images: string[]): Promise<void> {
+  return saveBcImage(`${id}::gallery`, JSON.stringify(images));
+}
+
+async function loadBcImages(id: string): Promise<string[]> {
+  const raw = await loadBcImage(`${id}::gallery`);
+  if (!raw) return [];
+  try { const arr = JSON.parse(raw) as unknown; return Array.isArray(arr) ? (arr as string[]) : []; } catch { return []; }
+}
+
 const SPEC_KEYS = ["Size", "Color", "Paper Type", "Finishing", "Corners", "Quantities"];
 const CORNER_OPTIONS = ["Standard", "Rounded"];
 
@@ -96,9 +106,18 @@ type Props = {
   excludeTshirts?: boolean;
   /** When true, hides Packaging Box from the picker (moved to /admin/packaging). */
   excludePackaging?: boolean;
+  /** When set, restricts the Packaging Box "Select Product" dropdown to just these sub-products. */
+  packagingBoxOptions?: Array<"pizza-boxes" | "shipping-boxes" | "mailer-boxes" | "square-shipping-boxes">;
 };
 
-export function AdminTemplateSection({ products, openAddRef, onlyCategory, excludeTshirts, excludePackaging }: Props) {
+const PACKAGING_BOX_OPTION_LABELS: Record<"pizza-boxes" | "shipping-boxes" | "mailer-boxes" | "square-shipping-boxes", string> = {
+  "pizza-boxes": "Pizza Box",
+  "shipping-boxes": "Shipping Box",
+  "mailer-boxes": "Pizza Box",
+  "square-shipping-boxes": "Square Shipping Box",
+};
+
+export function AdminTemplateSection({ products, openAddRef, onlyCategory, excludeTshirts, excludePackaging, packagingBoxOptions }: Props) {
   const router = useRouter();
   const apparelProducts = products.filter((p) =>
     LISTING_ALLOWED_CATEGORIES.has(p.category) &&
@@ -146,6 +165,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
   useEffect(() => { try { localStorage.setItem("tmpl-marketingSubProduct", marketingSubProduct); } catch { /* ignore */ } }, [marketingSubProduct]);
   useEffect(() => { try { localStorage.setItem("tmpl-promotionalSubProduct", promotionalSubProduct); } catch { /* ignore */ } }, [promotionalSubProduct]);
   useEffect(() => { try { localStorage.setItem("tmpl-packagingSubProduct", packagingSubProduct); } catch { /* ignore */ } }, [packagingSubProduct]);
+  useEffect(() => {
+    if (packagingBoxOptions && !packagingBoxOptions.includes(packagingSubProduct)) {
+      setPackagingSubProduct(packagingBoxOptions[0]);
+    }
+  }, [packagingBoxOptions, packagingSubProduct]);
   useEffect(() => { try { localStorage.setItem("tmpl-tshirtSubProduct", tshirtSubProduct); } catch { /* ignore */ } }, [tshirtSubProduct]);
 
   const isTshirts = selectedSlug === "t-shirts";
@@ -207,7 +231,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
     : isMarketingMaterial
       ? marketingSubProduct
       : isPackagingBox
-        ? ({ "pizza-boxes": "Pizza Box", "shipping-boxes": "Shipping Box", "mailer-boxes": "Mailer Box", "square-shipping-boxes": "Square Shipping Box" }[packagingSubProduct] ?? "Packaging Box")
+        ? ({ "pizza-boxes": "Pizza Box", "shipping-boxes": "Shipping Box", "mailer-boxes": "Pizza Box", "square-shipping-boxes": "Square Shipping Box" }[packagingSubProduct] ?? "Packaging Box")
         : isPromotionalProducts
           ? promotionalSubProduct
           : isTshirts
@@ -382,23 +406,23 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
     "Product Labels":   { price: "$139 + tax", specs: ["Custom label size", "Full colour", "Quote may vary by size/material"] },
   };
 
-  const MAILER_BOX_DEFAULTS = [
-    { id: "mb-standard", title: "Mailer Box", price: "$200 + tax", specs: ["Material: Corrugated Board (3 Ply / 5 Ply)", "Size: Customizable as per product dimensions (L × W × H)", "Quantity: 20", "Full colour print"], image: "" },
+  const MAILER_BOX_DEFAULTS: PricingPackage[] = [
+    { id: "mb-standard", title: "Pizza Box", price: "$200 + tax", specs: ["Material: Corrugated Board (3 Ply / 5 Ply)", "Size: Customizable as per product dimensions (L × W × H)", "Quantity: 20", "Full colour print"], image: "", images: [] },
   ];
 
-  const SHIPPING_BOX_DEFAULTS = [
-    { id: "sb-standard", title: "Shipping Box", price: "$220 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Customizable as per product dimensions (L × W × H)", "Quantity: 40", "Full colour print"], image: "" },
+  const SHIPPING_BOX_DEFAULTS: PricingPackage[] = [
+    { id: "sb-standard", title: "Shipping Box", price: "$220 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Customizable as per product dimensions (L × W × H)", "Quantity: 40", "Full colour print"], image: "", images: [] },
   ];
 
-  const PIZZA_BOX_DEFAULTS = [
-    { id: "pb-standard", title: "Pizza Box", price: "$150 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Customizable as per product dimensions (L × W × H)", "Quantity: 40", "Full colour print"], image: "" },
+  const PIZZA_BOX_DEFAULTS: PricingPackage[] = [
+    { id: "pb-standard", title: "Pizza Box", price: "$150 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Customizable as per product dimensions (L × W × H)", "Quantity: 40", "Full colour print"], image: "", images: [] },
   ];
 
-  const SQUARE_SHIPPING_BOX_DEFAULTS = [
-    { id: "ssb-standard", title: "Square Shipping Box", price: "$230 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Square dimensions customizable (L × W × H)", "Quantity: 40", "Full colour print"], image: "" },
+  const SQUARE_SHIPPING_BOX_DEFAULTS: PricingPackage[] = [
+    { id: "ssb-standard", title: "Square Shipping Box", price: "$230 + tax", specs: ["Material: Heavy-Duty Corrugated Board (3 Ply, 5 Ply, or 7 Ply)", "Size: Square dimensions customizable (L × W × H)", "Quantity: 40", "Full colour print"], image: "", images: [] },
   ];
 
-  type PricingPackage = { id: string; title: string; price: string; specs: string[]; image: string };
+  type PricingPackage = { id: string; title: string; price: string; specs: string[]; image: string; images?: string[] };
 
   const [bcPackages, setBcPackages] = useState<PricingPackage[]>(() => {
     try {
@@ -551,12 +575,13 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
   useEffect(() => {
     void (async () => {
       const entries = await Promise.all(
-        MAILER_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
+        MAILER_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id), images: await loadBcImages(d.id) }))
       );
       setMailerBoxPackages((prev) =>
         prev.map((pkg) => {
           const found = entries.find((e) => e.id === pkg.id);
-          return found?.image ? { ...pkg, image: found.image } : pkg;
+          if (!found) return pkg;
+          return { ...pkg, ...(found.image ? { image: found.image } : {}), ...(found.images.length ? { images: found.images } : {}) };
         })
       );
     })();
@@ -584,12 +609,13 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
   useEffect(() => {
     void (async () => {
       const entries = await Promise.all(
-        SHIPPING_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
+        SHIPPING_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id), images: await loadBcImages(d.id) }))
       );
       setShippingBoxPackages((prev) =>
         prev.map((pkg) => {
           const found = entries.find((e) => e.id === pkg.id);
-          return found?.image ? { ...pkg, image: found.image } : pkg;
+          if (!found) return pkg;
+          return { ...pkg, ...(found.image ? { image: found.image } : {}), ...(found.images.length ? { images: found.images } : {}) };
         })
       );
     })();
@@ -617,12 +643,13 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
   useEffect(() => {
     void (async () => {
       const entries = await Promise.all(
-        PIZZA_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
+        PIZZA_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id), images: await loadBcImages(d.id) }))
       );
       setPizzaBoxPackages((prev) =>
         prev.map((pkg) => {
           const found = entries.find((e) => e.id === pkg.id);
-          return found?.image ? { ...pkg, image: found.image } : pkg;
+          if (!found) return pkg;
+          return { ...pkg, ...(found.image ? { image: found.image } : {}), ...(found.images.length ? { images: found.images } : {}) };
         })
       );
     })();
@@ -650,12 +677,13 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
   useEffect(() => {
     void (async () => {
       const entries = await Promise.all(
-        SQUARE_SHIPPING_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id) }))
+        SQUARE_SHIPPING_BOX_DEFAULTS.map(async (d) => ({ id: d.id, image: await loadBcImage(d.id), images: await loadBcImages(d.id) }))
       );
       setSquareShippingBoxPackages((prev) =>
         prev.map((pkg) => {
           const found = entries.find((e) => e.id === pkg.id);
-          return found?.image ? { ...pkg, image: found.image } : pkg;
+          if (!found) return pkg;
+          return { ...pkg, ...(found.image ? { image: found.image } : {}), ...(found.images.length ? { images: found.images } : {}) };
         })
       );
     })();
@@ -873,10 +901,9 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
               onChange={(e) => setPackagingSubProduct(e.target.value as "pizza-boxes" | "shipping-boxes" | "mailer-boxes" | "square-shipping-boxes")}
               style={{ padding: "0.6rem 1rem", border: "1.5px solid #d1d5db", borderRadius: "8px", fontSize: "0.875rem", color: "#111827", background: "#fff", minWidth: "280px", cursor: "pointer" }}
             >
-              <option value="pizza-boxes">Pizza Box</option>
-              <option value="shipping-boxes">Shipping Box</option>
-              <option value="mailer-boxes">Mailer Box</option>
-              <option value="square-shipping-boxes">Square Shipping Box</option>
+              {(packagingBoxOptions ?? ["pizza-boxes", "shipping-boxes", "mailer-boxes", "square-shipping-boxes"]).map((opt) => (
+                <option key={opt} value={opt}>{PACKAGING_BOX_OPTION_LABELS[opt]}</option>
+              ))}
             </select>
           </div>
         )}
@@ -938,6 +965,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={g.price || "$0 + tax"}
                 specs={g.specs ?? []}
                 image={g.previewImage}
+                images={g.images}
                 description={g.description ?? ""}
                 sinaliteId={g.sinaliteId}
                 sinaliteOptions={g.sinaliteOptions}
@@ -946,7 +974,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                    body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
                   }).then(() => loadTemplates()).catch(() => {});
                 }}
                 onDelete={() => void deleteGallery(g.id)}
@@ -959,16 +987,18 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                images={pkg.images ?? []}
                 description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
+                  void saveBcImages(pkg.id, updated.images);
                   setBcPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                   const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
                   void fetch(`/api/products/premium-business-cards/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, description: updated.description }),
+                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, images: updated.images, description: updated.description }),
                   }).then(() => loadTemplates()).catch(() => {});
                 }}
                 onDelete={() => setBcPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -983,6 +1013,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   price={g.price || "$0 + tax"}
                   specs={g.specs ?? []}
                   image={g.previewImage}
+                  images={g.images}
                   description={g.description ?? ""}
                   sinaliteId={g.sinaliteId}
                   sinaliteOptions={g.sinaliteOptions}
@@ -991,7 +1022,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
                       method: "PATCH",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                      body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
                     }).then(() => loadTemplates()).catch(() => {});
                   }}
                   onDelete={() => void deleteGallery(g.id)}
@@ -1021,6 +1052,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={g.price || "$0 + tax"}
                 specs={g.specs ?? []}
                 image={g.previewImage}
+                images={g.images}
                 description={g.description ?? ""}
                 sinaliteId={g.sinaliteId}
                 sinaliteOptions={g.sinaliteOptions}
@@ -1029,7 +1061,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                    body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
                   }).then(() => loadTemplates()).catch(() => {});
                 }}
                 onDelete={() => void deleteGallery(g.id)}
@@ -1042,16 +1074,18 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                images={pkg.images ?? []}
                 description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
+                  void saveBcImages(pkg.id, updated.images);
                   setFlyPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                   const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
                   void fetch(`/api/products/bold-flyers/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, description: updated.description }),
+                    body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, images: updated.images, description: updated.description }),
                   }).then(() => loadTemplates()).catch(() => {});
                 }}
                 onDelete={() => setFlyPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1066,6 +1100,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   price={g.price || "$0 + tax"}
                   specs={g.specs ?? []}
                   image={g.previewImage}
+                  images={g.images}
                   description={g.description ?? ""}
                   sinaliteId={g.sinaliteId}
                   sinaliteOptions={g.sinaliteOptions}
@@ -1074,7 +1109,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
                       method: "PATCH",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                      body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
                     }).then(() => loadTemplates()).catch(() => {});
                   }}
                   onDelete={() => void deleteGallery(g.id)}
@@ -1213,9 +1248,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/pizza-boxes/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
+                  void saveBcImages(pkg.id, updated.images);
                   setPizzaBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setPizzaBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1233,9 +1270,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/shipping-boxes/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
+                  void saveBcImages(pkg.id, updated.images);
                   setShippingBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setShippingBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1253,9 +1292,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/mailer-boxes/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
+                  void saveBcImages(pkg.id, updated.images);
                   setMailerBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setMailerBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1273,9 +1314,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 price={pkg.price}
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
+                images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/square-shipping-boxes/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
+                  void saveBcImages(pkg.id, updated.images);
                   setSquareShippingBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setSquareShippingBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1344,6 +1387,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                         price={g.price || "$0 + tax"}
                         specs={g.specs ?? []}
                         image={g.previewImage}
+                        images={g.images}
                         description={g.description ?? ""}
                         sinaliteId={g.sinaliteId}
                         sinaliteOptions={g.sinaliteOptions}
@@ -1352,7 +1396,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                           void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ name: updated.title, previewImage: updated.image, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
+                            body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
                           }).then(() => loadTemplates());
                         }}
                         onDelete={() => void deleteGallery(g.id)}
@@ -1823,14 +1867,14 @@ function ColorSwatchPicker({ value, onChange }: { value: string; onChange: (next
   );
 }
 
-type BcEditPayload = { title: string; price: string; specs: string[]; image: string; description: string; sinaliteOptions?: SinaliteSelectedOption[] };
+type BcEditPayload = { title: string; price: string; specs: string[]; image: string; images: string[]; description: string; sinaliteOptions?: SinaliteSelectedOption[] };
 
 type SinaliteOptionFetched = { id: number; group: string; name: string; hidden: number };
 
 function BusinessCardPricingCard({
-  title, price, specs, image, description, sinaliteId, sinaliteOptions, onBrowseDesigns, onEdit, onDelete,
+  title, price, specs, image, images, description, sinaliteId, sinaliteOptions, onBrowseDesigns, onEdit, onDelete,
 }: {
-  title: string; price: string; specs: string[]; image: string; description?: string;
+  title: string; price: string; specs: string[]; image: string; images?: string[]; description?: string;
   sinaliteId?: string; sinaliteOptions?: SinaliteSelectedOption[];
   onBrowseDesigns: () => void;
   onEdit: (updated: BcEditPayload) => void;
@@ -1844,8 +1888,10 @@ function BusinessCardPricingCard({
   const [eSpecs, setESpecs] = useState<{ key: string; value: string }[]>([]);
   const [eImage, setEImage] = useState("");
   const [eImageName, setEImageName] = useState("");
+  const [eImages, setEImages] = useState<string[]>([]);
   const [eDescription, setEDescription] = useState("");
   const eImageRef = useRef<HTMLInputElement>(null);
+  const eGalleryRef = useRef<HTMLInputElement>(null);
   const [optGroups, setOptGroups] = useState<Record<string, SinaliteOptionFetched[]>>({});
   const [optLoading, setOptLoading] = useState(false);
   const [optError, setOptError] = useState<string | null>(null);
@@ -1877,6 +1923,7 @@ function BusinessCardPricingCard({
     setESpecs(buildFixedSpecEntries(specs));
     setEImage(image);
     setEImageName("");
+    setEImages(images ?? []);
     setEDescription(description ?? "");
     setEditOpen(true);
     loadSinaliteOptions();
@@ -1889,6 +1936,19 @@ function BusinessCardPricingCard({
     setEImageName(file.name);
   }
 
+  async function handleGalleryImagesChange(e: ChangeEvent<HTMLInputElement>) {
+    const inputEl = e.currentTarget;
+    const files = Array.from(inputEl.files ?? []);
+    if (files.length === 0) return;
+    const dataUrls = await Promise.all(files.map(readFile));
+    setEImages((prev) => [...prev, ...dataUrls]);
+    inputEl.value = "";
+  }
+
+  function removeGalleryImage(i: number) {
+    setEImages((prev) => prev.filter((_, j) => j !== i));
+  }
+
   function saveEdit() {
     // No admin selection step — every fetched (non-hidden) Sinalite option is offered as-is.
     const chosenOptions: SinaliteSelectedOption[] = Object.values(optGroups)
@@ -1897,6 +1957,7 @@ function BusinessCardPricingCard({
     onEdit({
       title: eTitle.trim() || title,
       price: formatPriceValue(ePrice) || price,
+      images: eImages,
       specs: eSpecs.filter((s) => s.value.trim()).map(formatSpecEntry),
       image: eImage,
       description: eDescription.trim(),
@@ -2034,6 +2095,34 @@ function BusinessCardPricingCard({
                   </button>
                   {eImageName && <span style={{ fontSize: "0.75rem", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eImageName}</span>}
                 </div>
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#374151", marginBottom: "0.35rem" }}>Additional Images</span>
+                {eImages.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 8 }}>
+                    {eImages.map((src, i) => (
+                      <div key={i} style={{ position: "relative", flexShrink: 0 }}>
+                        <img src={src} alt={`Gallery ${i + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                        <button
+                          type="button"
+                          onClick={() => removeGalleryImage(i)}
+                          aria-label="Remove image"
+                          style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", border: "1px solid #d1d5db", background: "#fff", color: "#374151", fontSize: "0.7rem", lineHeight: "18px", cursor: "pointer", padding: 0 }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <input ref={eGalleryRef} type="file" accept="image/*" multiple onChange={(e) => void handleGalleryImagesChange(e)} style={{ display: "none" }} />
+                <button
+                  type="button"
+                  onClick={() => eGalleryRef.current?.click()}
+                  style={{ padding: "0.5rem 1rem", border: "1.5px solid #d1d5db", borderRadius: 8, background: "#f9fafb", color: "#374151", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer" }}
+                >
+                  Upload images
+                </button>
               </div>
               {!sinaliteId && (
               <div style={{ marginBottom: 20 }}>

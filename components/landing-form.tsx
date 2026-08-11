@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { categories, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 
 /* ── CONFIG — update these ───────────────────────────────── */
 const CONTACT_EMAIL   = "info@weprintnpack.ca";
 
-const PRODUCTS = [
-  "Business Cards", "Flyers", "Yard Signs",
-  "Stickers", "Banners", "Packaging", "T-Shirts", "Other",
-];
+const ALL_PRODUCT_NAMES = Array.from(new Set([
+  ...categories.map(c => c.name),
+  ...Object.values(CATEGORY_SUBPRODUCT_OPTIONS).flat(),
+]));
+
+const PRODUCTS = [...ALL_PRODUCT_NAMES, "Other"];
 
 type Form = {
   name: string; phone: string; email: string;
