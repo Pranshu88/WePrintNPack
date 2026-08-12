@@ -1046,8 +1046,12 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const isNamedStickerLabelGallery = isStickerLabel && (
     gallery?.sinaliteId === "7028" || gallery?.name === "Product Labels" || gallery?.name === "Die-Cut Stickers"
   );
+  // Postcards has no hand-built tiers of its own — every imported row falls through to the
+  // seed-designs route's generic (deterministic) design set, so the button is just enabled
+  // outright for the whole product.
+  const isPostcardGallery = productSlug === "promotional-postcards";
   const canSeedDesigns = !isCustomPackage && !isTShirt && (
-    isBannerProductSlug || isSinaliteVinylBannerGallery || isPullUpBannerGallery || isNamedPosterGallery || isLargeFormatPosterGallery || isNamedFlyerGallery || isNamedStickerLabelGallery || isSquareCutLabelGallery || isNamedYardSignGallery || isNamedBcGallery
+    isBannerProductSlug || isSinaliteVinylBannerGallery || isPullUpBannerGallery || isNamedPosterGallery || isLargeFormatPosterGallery || isNamedFlyerGallery || isNamedStickerLabelGallery || isSquareCutLabelGallery || isNamedYardSignGallery || isNamedBcGallery || isPostcardGallery
   );
   // Raw Sinalite-imported business card rows outside the 3 hand-built tiers (isNamedBcGallery)
   // come in with zero designs — this clones the design set from "Business cards 14pt (Profit
