@@ -1057,7 +1057,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   // come in with zero designs — this clones the design set from "Business cards 14pt (Profit
   // Maximizer)" (the first, fully-designed BC row) onto them.
   const BC_SEED_SOURCE_ID = "sn0001mrx575ni";
-  const canSeedFromFirstBc = isBusinessCard && !isCustomPackage && !isNamedBcGallery && !hasDesigns && galleryId !== BC_SEED_SOURCE_ID;
+  // Door Hangers has no product row of its own (so isBusinessCard is false for it) and no
+  // hand-built tier — every row gets the same BC design set as the raw business-card imports.
+  const canSeedFromFirstBc = !isCustomPackage && !hasDesigns && galleryId !== BC_SEED_SOURCE_ID && (
+    (isBusinessCard && !isNamedBcGallery) || productSlug === "door-hangers"
+  );
   // "Flyers 100lb Gloss Text" (sinaliteId 37) — the first, fully-designed flyer row — is the
   // source design set the "Seed Design" button copies onto any raw Sinalite-imported flyer row
   // (outside the 2 hand-built Express/Prime tiers) that has no designs of its own.
