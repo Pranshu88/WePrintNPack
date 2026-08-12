@@ -946,10 +946,16 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
 
       {/* Business Cards pricing cards */}
       {isBusinessCards ? (() => {
+        // Legacy non-imported tiers ("Business Cards" / "Premium Business Cards" /
+        // "Luxury Business Cards") — kept in the DB (their designs are still linked
+        // elsewhere) but hidden from this admin grid since they no longer come from
+        // the live Sinalite catalog sync.
+        const HIDDEN_LEGACY_BC_IDS = new Set(["c1rpi76mpgy241j", "dz5k2qpmpgxytkp", "lx0001mpgy31cn"]);
+        const visibleGalleryList = galleryList.filter((g) => !HIDDEN_LEGACY_BC_IDS.has(g.id));
         // Every Sinalite-imported gallery row (any sinaliteId) is shown with its real
         // name/price/specs from the DB — the old localStorage-only virtual placeholders
         // for the original 3 tiers are skipped in favor of the full imported catalogue.
-        const sinaliteBcRows = galleryList
+        const sinaliteBcRows = visibleGalleryList
           .filter((g): g is GalleryTemplate => !!g.sinaliteId)
           .sort((a, b) => Number(a.sinaliteId) - Number(b.sinaliteId));
         const sinaliteBcRowIds = new Set(sinaliteBcRows.map((g) => g.id));
@@ -988,13 +994,13 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 specs={pkg.specs}
                 image={pkg.image || (selectedProduct?.image ?? "")}
                 images={pkg.images ?? []}
-                description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
+                description={visibleGalleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${pkg.id}`)}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
                   setBcPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
-                  const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
+                  const realId = visibleGalleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
                   void fetch(`/api/products/premium-business-cards/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
@@ -1004,7 +1010,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 onDelete={() => setBcPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
               />
             ))}
-            {galleryList
+            {visibleGalleryList
               .filter((g) => !sinaliteBcRowIds.has(g.id) && !bcPackages.some((p) => p.title === g.name))
               .map((g) => (
                 <BusinessCardPricingCard
