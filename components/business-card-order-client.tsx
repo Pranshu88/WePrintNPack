@@ -451,6 +451,40 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
     );
   }
 
+  if (galleryId && loadingGallery) {
+    return (
+      <div className="container container-wide" style={{ paddingTop: "2rem", paddingBottom: "4rem" }}>
+        <div className="bc-order-layout">
+          <div>
+            <div
+              style={{
+                borderRadius: "20px",
+                aspectRatio: "460 / 270",
+                background: "linear-gradient(100deg, #f3f4f6 30%, #e9eaee 50%, #f3f4f6 70%)",
+                backgroundSize: "200% 100%",
+                animation: "bc-skeleton-shimmer 1.3s ease-in-out infinite",
+              }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+            <div style={{ height: "2.25rem", width: "70%", borderRadius: "8px", background: "linear-gradient(100deg, #f3f4f6 30%, #e9eaee 50%, #f3f4f6 70%)", backgroundSize: "200% 100%", animation: "bc-skeleton-shimmer 1.3s ease-in-out infinite" }} />
+            <div style={{ height: "1rem", width: "90%", borderRadius: "6px", background: "linear-gradient(100deg, #f3f4f6 30%, #e9eaee 50%, #f3f4f6 70%)", backgroundSize: "200% 100%", animation: "bc-skeleton-shimmer 1.3s ease-in-out infinite" }} />
+            <div style={{ height: "2.5rem", width: "40%", borderRadius: "8px", marginTop: "0.5rem", background: "linear-gradient(100deg, #f3f4f6 30%, #e9eaee 50%, #f3f4f6 70%)", backgroundSize: "200% 100%", animation: "bc-skeleton-shimmer 1.3s ease-in-out infinite" }} />
+            {[...Array(4)].map((_, i) => (
+              <div key={i} style={{ height: "2.75rem", borderRadius: "10px", background: "linear-gradient(100deg, #f3f4f6 30%, #e9eaee 50%, #f3f4f6 70%)", backgroundSize: "200% 100%", animation: "bc-skeleton-shimmer 1.3s ease-in-out infinite" }} />
+            ))}
+          </div>
+        </div>
+        <style>{`
+          @keyframes bc-skeleton-shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   if (galleryId && !loadingGallery && !gallery) {
     return (
       <div className="container container-wide" style={{ minHeight: "60vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: "1rem", padding: "4rem 1rem" }}>
