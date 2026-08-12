@@ -663,7 +663,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     }
   }
 
-  async function seedFromFirstBc() {
+  async function seedFromSource(sourceGalleryId: string) {
     setSeeding(true);
     try {
       const effectiveId = await ensureRealGalleryId();
@@ -672,7 +672,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fromGalleryId: BC_SEED_SOURCE_ID }),
+          body: JSON.stringify({ fromGalleryId: sourceGalleryId }),
         }
       );
       const data = (await res.json()) as { added?: number; error?: string };
@@ -1058,6 +1058,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   // Maximizer)" (the first, fully-designed BC row) onto them.
   const BC_SEED_SOURCE_ID = "sn0001mrx575ni";
   const canSeedFromFirstBc = isBusinessCard && !isCustomPackage && !isNamedBcGallery && !hasDesigns && galleryId !== BC_SEED_SOURCE_ID;
+  // "Flyers 100lb Gloss Text" (sinaliteId 37) — the first, fully-designed flyer row — is the
+  // source design set the "Seed Design" button copies onto any raw Sinalite-imported flyer row
+  // (outside the 2 hand-built Express/Prime tiers) that has no designs of its own.
+  const FLYER_SEED_SOURCE_ID = "snf0001mrxhirjn";
+  const canSeedFromFirstFlyer = productSlug === "bold-flyers" && !isCustomPackage && !isNamedFlyerGallery && !hasDesigns && galleryId !== FLYER_SEED_SOURCE_ID;
 
   const editorBase = editorDesign ? (editorSide === "front" ? editorDesign.frontImage : editorDesign.backImage) : undefined;
   const editorOverlay = editorDesign ? (editorSide === "front" ? editorDesign.frontOverlay : editorDesign.backOverlay) : undefined;
@@ -1137,9 +1142,23 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               {canSeedFromFirstBc && (
               <button
                 type="button"
-                onClick={() => void seedFromFirstBc()}
+                onClick={() => void seedFromSource(BC_SEED_SOURCE_ID)}
                 disabled={seeding}
                 title="Copy the design set from Business cards 14pt (Profit Maximizer)"
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Design"}
+              </button>
+              )}
+              {canSeedFromFirstFlyer && (
+              <button
+                type="button"
+                onClick={() => void seedFromSource(FLYER_SEED_SOURCE_ID)}
+                disabled={seeding}
+                title="Copy the design set from Flyers 100lb Gloss Text"
                 style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
