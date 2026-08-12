@@ -429,6 +429,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const [sizeChoices, setSizeChoices] = useState<{ width: number; height: number; label: string }[] | null>(null);
   const [sizeChoicesLoading, setSizeChoicesLoading] = useState(false);
   const [chosenAddDesignDims, setChosenAddDesignDims] = useState<{ width: number; height: number } | null>(null);
+  const [pendingOpenEditor, setPendingOpenEditor] = useState<(() => void) | null>(null);
   const [dFrontAdminItems, setDFrontAdminItems] = useState<SerializableItem[]>([]);
   const [dBackAdminItems, setDBackAdminItems] = useState<SerializableItem[]>([]);
   const [dFrontBgColor, setDFrontBgColor] = useState("#ffffff");
@@ -729,6 +730,34 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDBackOverlayName(file.name);
   }
 
+  // If this product has more than one Sinalite-catalog size, asks the admin which one before
+  // running `openEditor`, so the 2D editor's canvas dimensions match what they pick. Used by
+  // both "+ Add Design Template" and "Edit Design" (from the preview modal).
+  async function chooseSizeThenOpenEditor(openEditor: () => void) {
+    setChosenAddDesignDims(null);
+    if (gallery?.sinaliteId) {
+      setSizeChoicesLoading(true);
+      try {
+        const res = await fetch(`/api/sinalite/products/${gallery.sinaliteId}/options`, { cache: "no-store" });
+        const data = (await res.json()) as { options?: { group: string; name: string; hidden: number }[] };
+        const sizeNames = Array.from(new Set(
+          (data.options ?? []).filter((o) => o.hidden === 0 && o.group.toLowerCase() === "size").map((o) => o.name)
+        ));
+        const parsed = sizeNames
+          .map((n) => { const dims = parseSinaliteSizeName(n); return dims ? { ...dims, label: n } : null; })
+          .filter((s): s is { width: number; height: number; label: string } => !!s);
+        if (parsed.length > 1) {
+          setSizeChoicesLoading(false);
+          setSizeChoices(parsed);
+          setPendingOpenEditor(() => openEditor);
+          return; // editor opens from the picker once the admin picks a size
+        }
+      } catch { /* fall through and open with the default/spec dims */ }
+      setSizeChoicesLoading(false);
+    }
+    openEditor();
+  }
+
   async function openAddDesign() {
     setEditingDesignId(null);
     setDName(""); setDColorHex(""); setDColorName("");
@@ -752,28 +781,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       // only T-Shirts (which need per-color front/back mockup uploads) use the field form.
       setDFrontImage(""); setDFrontImageName("");
       setDBackImage("");  setDBackImageName("");
-      // If this product has more than one Sinalite-catalog size, ask the admin which one
-      // before opening the editor, so the canvas dimensions match what they pick.
-      if (gallery?.sinaliteId) {
-        setSizeChoicesLoading(true);
-        try {
-          const res = await fetch(`/api/sinalite/products/${gallery.sinaliteId}/options`, { cache: "no-store" });
-          const data = (await res.json()) as { options?: { group: string; name: string; hidden: number }[] };
-          const sizeNames = Array.from(new Set(
-            (data.options ?? []).filter((o) => o.hidden === 0 && o.group.toLowerCase() === "size").map((o) => o.name)
-          ));
-          const parsed = sizeNames
-            .map((n) => { const dims = parseSinaliteSizeName(n); return dims ? { ...dims, label: n } : null; })
-            .filter((s): s is { width: number; height: number; label: string } => !!s);
-          if (parsed.length > 1) {
-            setSizeChoicesLoading(false);
-            setSizeChoices(parsed);
-            return; // editor opens from the picker once the admin picks a size
-          }
-        } catch { /* fall through and open with the default/spec dims */ }
-        setSizeChoicesLoading(false);
-      }
-      setAdminEditorOpen(true);
+      await chooseSizeThenOpenEditor(() => setAdminEditorOpen(true));
       return;
     } else {
       setDFrontImage(""); setDFrontImageName("");
@@ -786,10 +794,12 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   function pickAddDesignSize(dims: { width: number; height: number }) {
     setChosenAddDesignDims(dims);
     setSizeChoices(null);
-    setAdminEditorOpen(true);
+    const openEditor = pendingOpenEditor;
+    setPendingOpenEditor(null);
+    if (openEditor) openEditor(); else setAdminEditorOpen(true);
   }
 
-  function startEditDesign(d: DesignTemplateItem) {
+  async function startEditDesign(d: DesignTemplateItem) {
     setChosenAddDesignDims(null);
     setEditingDesignId(d.id);
     setDName(d.name);
@@ -803,8 +813,9 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDFrontBgColor(d.frontBgColor ?? "#ffffff");
     setDBackBgColor(d.backBgColor ?? "#ffffff");
     // Every non-apparel category goes straight to the 2D editor; T-Shirts use the field form.
-    if (!isTShirt) setAdminEditorOpen(true);
-    else setFormOpen(true);
+    if (isTShirt) { setFormOpen(true); return; }
+    if (isBusinessCard || isFlyer) { setAdminEditorOpen(true); return; }
+    await chooseSizeThenOpenEditor(() => setAdminEditorOpen(true));
   }
 
   function clearDesignForm() {
@@ -1271,7 +1282,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               }
               onPreview={() => setPreviewDesign(d)}
               onAddColor={() => router.push(`/admin/templates/${productSlug}/${galleryId}/${d.id}`)}
-              onEdit={() => startEditDesign(d)}
+              onEdit={() => void startEditDesign(d)}
               onDelete={() => void deleteDesign(d.id)}
               onEditFrontOverlay={d.frontOverlay ? () => openEditor(d, "front") : undefined}
               onEditBackOverlay={(d.backOverlay && d.backImage) ? () => openEditor(d, "back") : undefined}
@@ -1694,7 +1705,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
             )}
           </div>
           <div style={{ padding: "0 1.25rem 1.25rem", display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-            <button onClick={() => { setPreviewDesign(null); startEditDesign(previewDesign); }}
+            <button onClick={() => { setPreviewDesign(null); void startEditDesign(previewDesign); }}
               style={{ padding: "0.5rem 1rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "7px", fontWeight: 700, fontSize: "0.825rem", cursor: "pointer" }}>
               Edit Design
             </button>
