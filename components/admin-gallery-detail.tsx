@@ -1119,6 +1119,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   // (outside the 2 hand-built Express/Prime tiers) that has no designs of its own.
   const FLYER_SEED_SOURCE_ID = "snf0001mrxhirjn";
   const canSeedFromFirstFlyer = productSlug === "bold-flyers" && !isCustomPackage && !isNamedFlyerGallery && !hasDesigns && galleryId !== FLYER_SEED_SOURCE_ID;
+  // "Posters 100LB + Matte Finish" (sinaliteId 66) — the first, fully-designed poster row — is
+  // the source design set the "Seed Design" button copies onto any raw Sinalite-imported poster
+  // row (outside the 2 hand-built Large/Small tiers) that has no designs of its own.
+  const POSTER_SEED_SOURCE_ID = "snps0002mrxigohp";
+  const canSeedFromFirstPoster = productSlug === "posters" && !isCustomPackage && !isNamedPosterGallery && !hasDesigns && galleryId !== POSTER_SEED_SOURCE_ID;
 
   const editorBase = editorDesign ? (editorSide === "front" ? editorDesign.frontImage : editorDesign.backImage) : undefined;
   const editorOverlay = editorDesign ? (editorSide === "front" ? editorDesign.frontOverlay : editorDesign.backOverlay) : undefined;
@@ -1215,6 +1220,20 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
                 onClick={() => void seedFromSource(FLYER_SEED_SOURCE_ID)}
                 disabled={seeding}
                 title="Copy the design set from Flyers 100lb Gloss Text"
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Design"}
+              </button>
+              )}
+              {canSeedFromFirstPoster && (
+              <button
+                type="button"
+                onClick={() => void seedFromSource(POSTER_SEED_SOURCE_ID)}
+                disabled={seeding}
+                title="Copy the design set from Posters 100LB + Matte Finish"
                 style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
