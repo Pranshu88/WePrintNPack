@@ -368,6 +368,13 @@ function parseSizeFromSpecs(specs: string[] | undefined | null): { width: number
   return { width, height };
 }
 
+// Sinalite catalog "size" option names look like "8.5 x 3.5" or "8.5 × 3.5" (width x height, inches).
+function parseSinaliteSizeName(name: string): { width: number; height: number } | null {
+  const m = name.match(/^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i);
+  if (!m) return null;
+  return { width: parseFloat(m[1]), height: parseFloat(m[2]) };
+}
+
 function parseColorsFromSpecs(specs: string[] | undefined | null): string[] {
   const colorSpec = specs?.find((s) => s.startsWith("Color:"));
   if (!colorSpec) return [];
@@ -417,6 +424,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const [dBackOverlayName, setDBackOverlayName] = useState("");
   /* admin 2D editor */
   const [adminEditorOpen, setAdminEditorOpen] = useState(false);
+  /* size picker — shown before opening the 2D editor when the product has more than one
+     Sinalite-catalog size, so the canvas dimensions match whichever size the admin picks */
+  const [sizeChoices, setSizeChoices] = useState<{ width: number; height: number; label: string }[] | null>(null);
+  const [sizeChoicesLoading, setSizeChoicesLoading] = useState(false);
+  const [chosenAddDesignDims, setChosenAddDesignDims] = useState<{ width: number; height: number } | null>(null);
   const [dFrontAdminItems, setDFrontAdminItems] = useState<SerializableItem[]>([]);
   const [dBackAdminItems, setDBackAdminItems] = useState<SerializableItem[]>([]);
   const [dFrontBgColor, setDFrontBgColor] = useState("#ffffff");
@@ -717,13 +729,14 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDBackOverlayName(file.name);
   }
 
-  function openAddDesign() {
+  async function openAddDesign() {
     setEditingDesignId(null);
     setDName(""); setDColorHex(""); setDColorName("");
     setDFrontOverlay(""); setDFrontOverlayName("");
     setDBackOverlay(""); setDBackOverlayName("");
     setDFrontAdminItems([]); setDBackAdminItems([]);
     setDFrontBgColor("#ffffff"); setDBackBgColor("#ffffff");
+    setChosenAddDesignDims(null);
     if (isBusinessCard) {
       setDFrontImage(bcCardOutline); setDFrontImageName("Business Card (Front)");
       setDBackImage(bcCardOutline);  setDBackImageName("Business Card (Back)");
@@ -739,6 +752,27 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       // only T-Shirts (which need per-color front/back mockup uploads) use the field form.
       setDFrontImage(""); setDFrontImageName("");
       setDBackImage("");  setDBackImageName("");
+      // If this product has more than one Sinalite-catalog size, ask the admin which one
+      // before opening the editor, so the canvas dimensions match what they pick.
+      if (gallery?.sinaliteId) {
+        setSizeChoicesLoading(true);
+        try {
+          const res = await fetch(`/api/sinalite/products/${gallery.sinaliteId}/options`, { cache: "no-store" });
+          const data = (await res.json()) as { options?: { group: string; name: string; hidden: number }[] };
+          const sizeNames = Array.from(new Set(
+            (data.options ?? []).filter((o) => o.hidden === 0 && o.group.toLowerCase() === "size").map((o) => o.name)
+          ));
+          const parsed = sizeNames
+            .map((n) => { const dims = parseSinaliteSizeName(n); return dims ? { ...dims, label: n } : null; })
+            .filter((s): s is { width: number; height: number; label: string } => !!s);
+          if (parsed.length > 1) {
+            setSizeChoicesLoading(false);
+            setSizeChoices(parsed);
+            return; // editor opens from the picker once the admin picks a size
+          }
+        } catch { /* fall through and open with the default/spec dims */ }
+        setSizeChoicesLoading(false);
+      }
       setAdminEditorOpen(true);
       return;
     } else {
@@ -749,7 +783,14 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setFormOpen(true);
   }
 
+  function pickAddDesignSize(dims: { width: number; height: number }) {
+    setChosenAddDesignDims(dims);
+    setSizeChoices(null);
+    setAdminEditorOpen(true);
+  }
+
   function startEditDesign(d: DesignTemplateItem) {
+    setChosenAddDesignDims(null);
     setEditingDesignId(d.id);
     setDName(d.name);
     setDColorHex(d.colorHex ?? ""); setDColorName(d.colorName ?? "");
@@ -1171,9 +1212,9 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
                 {seeding ? "Seeding…" : "Seed Design"}
               </button>
               )}
-              <button type="button" onClick={openAddDesign}
-                style={{ padding: "0.6rem 1.15rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
-                + Add Design Template
+              <button type="button" onClick={() => void openAddDesign()} disabled={sizeChoicesLoading}
+                style={{ padding: "0.6rem 1.15rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: sizeChoicesLoading ? "not-allowed" : "pointer", opacity: sizeChoicesLoading ? 0.7 : 1 }}>
+                {sizeChoicesLoading ? "Loading…" : "+ Add Design Template"}
               </button>
             </>
           )}
@@ -1191,9 +1232,9 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       {!hasDesigns ? (
         <div style={{ textAlign: "center", padding: "3rem 1rem", color: "#9ca3af", border: "2px dashed #e5e7eb", borderRadius: "12px" }}>
           <p style={{ margin: "0 0 0.75rem", fontSize: "0.95rem" }}>No designs yet for this gallery.</p>
-          <button onClick={openAddDesign}
-            style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}>
-            + Add Design Template
+          <button onClick={() => void openAddDesign()} disabled={sizeChoicesLoading}
+            style={{ padding: "0.55rem 1.1rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: sizeChoicesLoading ? "not-allowed" : "pointer", opacity: sizeChoicesLoading ? 0.7 : 1 }}>
+            {sizeChoicesLoading ? "Loading…" : "+ Add Design Template"}
           </button>
         </div>
       ) : (
@@ -1515,8 +1556,8 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           initialBackBgColor: dBackBgColor,
           materialColors: templateMaterialColors,
         } : {})}
-        customDimsInches={customDimsInches ?? undefined}
-        onClose={() => setAdminEditorOpen(false)}
+        customDimsInches={chosenAddDesignDims ?? customDimsInches ?? undefined}
+        onClose={() => { setAdminEditorOpen(false); setChosenAddDesignDims(null); }}
         onSaveAdmin={(frontItems, backItems, frontPNG, backPNG, frontBg, backBg, frontBgSvg, backBgSvg) => {
           // Update local state first, then immediately persist to DB so
           // bulk-imported designs (and any BC design) are saved in one step.
@@ -1660,6 +1701,40 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
             <button onClick={() => setPreviewDesign(null)}
               style={{ padding: "0.5rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: "7px", fontWeight: 600, fontSize: "0.825rem", cursor: "pointer", color: "#374151" }}>
               Close
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Size picker — shown before the 2D editor when this product has multiple Sinalite sizes */}
+    {sizeChoices && (
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+        onClick={() => setSizeChoices(null)}
+      >
+        <div style={{ background: "#fff", borderRadius: 18, width: "min(360px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ height: 5, background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)" }} />
+          <div style={{ padding: "22px 22px 18px" }}>
+            <p style={{ margin: "0 0 16px", fontSize: "0.95rem", fontWeight: 700, color: "#111827", textAlign: "center" }}>
+              This product has multiple sizes — pick one for the design canvas
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {sizeChoices.map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => pickAddDesignSize(s)}
+                  style={{ padding: "0.65rem 1rem", background: "#f9fafb", border: "1.5px solid #e5e7eb", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", color: "#374151", cursor: "pointer", textAlign: "center" }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSizeChoices(null)}
+              style={{ marginTop: 12, width: "100%", padding: "0.55rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.825rem", cursor: "pointer", color: "#374151" }}
+            >
+              Cancel
             </button>
           </div>
         </div>
