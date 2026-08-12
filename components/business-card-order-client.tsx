@@ -433,6 +433,23 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
     );
   }
 
+  if (galleryId && !loadingGallery && !gallery) {
+    return (
+      <div className="container container-wide" style={{ minHeight: "60vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: "1rem", padding: "4rem 1rem" }}>
+        <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#374151" }}>Template not found</h1>
+        <p style={{ color: "#6b7280", maxWidth: "32rem" }}>
+          This design template isn&apos;t available anymore. It may have been removed or the link is out of date.
+        </p>
+        <Link
+          href={`${basePath}/${product.slug}/templates`}
+          style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "0.85rem 1.5rem", background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)", color: "#fff", borderRadius: "12px", fontWeight: 700, textDecoration: "none" }}
+        >
+          Browse Templates
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <>
     <div style={{ background: "#fff", minHeight: "100vh", paddingBottom: "4rem" }}>
