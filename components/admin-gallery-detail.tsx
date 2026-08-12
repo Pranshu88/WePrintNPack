@@ -663,6 +663,34 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     }
   }
 
+  async function seedFromFirstBc() {
+    setSeeding(true);
+    try {
+      const effectiveId = await ensureRealGalleryId();
+      const res = await fetch(
+        `/api/products/${productSlug}/templates/${effectiveId}/copy-designs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromGalleryId: BC_SEED_SOURCE_ID }),
+        }
+      );
+      const data = (await res.json()) as { added?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Seed failed.");
+
+      if (effectiveId !== galleryId) {
+        router.replace(`/admin/templates/${productSlug}/${effectiveId}`);
+      } else {
+        flash(data.added === 0 ? "All seed designs already present." : `${data.added} design${data.added !== 1 ? "s" : ""} added.`);
+        await loadData();
+      }
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Seed failed.", true);
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   /* ── Design form helpers ── */
   async function handleFrontImage(e: ChangeEvent<HTMLInputElement>) {
     const file = e.currentTarget.files?.[0]; if (!file) return;
@@ -1021,6 +1049,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const canSeedDesigns = !isCustomPackage && !isTShirt && (
     isBannerProductSlug || isSinaliteVinylBannerGallery || isPullUpBannerGallery || isNamedPosterGallery || isLargeFormatPosterGallery || isNamedFlyerGallery || isNamedStickerLabelGallery || isSquareCutLabelGallery || isNamedYardSignGallery || isNamedBcGallery
   );
+  // Raw Sinalite-imported business card rows outside the 3 hand-built tiers (isNamedBcGallery)
+  // come in with zero designs — this clones the design set from "Business cards 14pt (Profit
+  // Maximizer)" (the first, fully-designed BC row) onto them.
+  const BC_SEED_SOURCE_ID = "sn0001mrx575ni";
+  const canSeedFromFirstBc = isBusinessCard && !isCustomPackage && !isNamedBcGallery && !hasDesigns && galleryId !== BC_SEED_SOURCE_ID;
 
   const editorBase = editorDesign ? (editorSide === "front" ? editorDesign.frontImage : editorDesign.backImage) : undefined;
   const editorOverlay = editorDesign ? (editorSide === "front" ? editorDesign.frontOverlay : editorDesign.backOverlay) : undefined;
@@ -1095,6 +1128,20 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
                   <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                 </svg>
                 {seeding ? "Seeding…" : "Seed Designs"}
+              </button>
+              )}
+              {canSeedFromFirstBc && (
+              <button
+                type="button"
+                onClick={() => void seedFromFirstBc()}
+                disabled={seeding}
+                title="Copy the design set from Business cards 14pt (Profit Maximizer)"
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Design"}
               </button>
               )}
               <button type="button" onClick={openAddDesign}

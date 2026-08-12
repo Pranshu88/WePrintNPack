@@ -952,18 +952,6 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
         // the live Sinalite catalog sync.
         const HIDDEN_LEGACY_BC_IDS = new Set(["c1rpi76mpgy241j", "dz5k2qpmpgxytkp", "lx0001mpgy31cn"]);
         const visibleGalleryList = galleryList.filter((g) => !HIDDEN_LEGACY_BC_IDS.has(g.id));
-        // "Business cards 14pt (Profit Maximizer)" — the first, fully-designed business card
-        // row — is the source design set the "Seed Design" button copies onto any raw
-        // Sinalite-imported row that hasn't been given its own designs yet.
-        const BC_SEED_SOURCE_ID = "sn0001mrx575ni";
-        const seedDesignsFrom = async (targetId: string) => {
-          await fetch(`/api/products/premium-business-cards/templates/${targetId}/copy-designs`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fromGalleryId: BC_SEED_SOURCE_ID }),
-          }).catch(() => {});
-          await loadTemplates();
-        };
         // Every Sinalite-imported gallery row (any sinaliteId) is shown with its real
         // name/price/specs from the DB — the old localStorage-only virtual placeholders
         // for the original 3 tiers are skipped in favor of the full imported catalogue.
@@ -987,7 +975,6 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 description={g.description ?? ""}
                 sinaliteId={g.sinaliteId}
                 sinaliteOptions={g.sinaliteOptions}
-                onSeedDesigns={g.id !== BC_SEED_SOURCE_ID && g.designs.length === 0 ? () => seedDesignsFrom(g.id) : undefined}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
                 onEdit={(updated) => {
                   void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
@@ -1891,17 +1878,15 @@ type BcEditPayload = { title: string; price: string; specs: string[]; image: str
 type SinaliteOptionFetched = { id: number; group: string; name: string; hidden: number };
 
 function BusinessCardPricingCard({
-  title, price, specs, image, images, description, sinaliteId, sinaliteOptions, onSeedDesigns, onBrowseDesigns, onEdit, onDelete,
+  title, price, specs, image, images, description, sinaliteId, sinaliteOptions, onBrowseDesigns, onEdit, onDelete,
 }: {
   title: string; price: string; specs: string[]; image: string; images?: string[]; description?: string;
   sinaliteId?: string; sinaliteOptions?: SinaliteSelectedOption[];
-  onSeedDesigns?: () => Promise<void> | void;
   onBrowseDesigns: () => void;
   onEdit: (updated: BcEditPayload) => void;
   onDelete: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [popup, setPopup] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [eTitle, setETitle] = useState("");
@@ -2024,18 +2009,6 @@ function BusinessCardPricingCard({
             <button onClick={onBrowseDesigns} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #06b6d4", background: "#ecfeff", color: "#0891b2", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>Designs</button>
             <button onClick={openEdit} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #d1d5db", background: "#fff", color: "#374151", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Edit</button>
           </div>
-          {onSeedDesigns && (
-            <button
-              disabled={seeding}
-              onClick={async () => {
-                setSeeding(true);
-                try { await onSeedDesigns(); } finally { setSeeding(false); }
-              }}
-              style={{ width: "100%", marginTop: 8, padding: "7px 0", borderRadius: 8, border: "1.5px solid #a78bfa", background: seeding ? "#ede9fe" : "#f5f3ff", color: "#6d28d9", fontSize: "0.78rem", fontWeight: 700, cursor: seeding ? "default" : "pointer", opacity: seeding ? 0.7 : 1 }}
-            >
-              {seeding ? "Seeding…" : "Seed Design"}
-            </button>
-          )}
         </div>
       </div>
 
