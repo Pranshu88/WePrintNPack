@@ -19,6 +19,19 @@ function parseSinaliteSizeToInches(sizeName: string | undefined): { width: numbe
   return { width: parseFloat(m[1]), height: parseFloat(m[2]) };
 }
 
+// Detects the auto-generated grey-box placeholder that sinalite-category-sync.ts's
+// placeholderImage() produces for SKUs with no real photo, so it can be treated as "no image".
+function isPlaceholderPreviewImage(previewImage: string | undefined): boolean {
+  if (!previewImage?.startsWith("data:image/svg+xml;base64,")) return false;
+  try {
+    const b64 = previewImage.slice("data:image/svg+xml;base64,".length);
+    const svg = typeof atob === "function" ? atob(b64) : Buffer.from(b64, "base64").toString("utf-8");
+    return svg.includes('fill="#eef0f3"');
+  } catch {
+    return false;
+  }
+}
+
 // Price overrides for non-BC gallery templates (mirrors PRICE_FALLBACKS in popular-products-carousel)
 const GALLERY_PRICE_MAP: Record<string, { price: string; priceNote: string }> = {
   "Vinyl Banner":            { price: "From $109", priceNote: "+ tax" },
@@ -307,7 +320,12 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   const displayPriceNum = parseFloat(displayPrice.replace(/[^0-9.]/g, "")) || undefined;
   const displaySpecs = parseGallerySpecs(gallery?.specs);
   const displayDescription = gallery?.description || product.description;
-  const displayImage = bcImage || gallery?.previewImage || product.image || gallery?.designs[0]?.frontImage;
+  // Sinalite catalog sync auto-generates a plain grey placeholder box (see placeholderImage()
+  // in lib/sinalite-category-sync.ts) for any SKU it can't find a real photo for — that's not
+  // a usable product image, so treat it the same as "no image" and fall back to the product's
+  // real default photo instead.
+  const usableGalleryImage = isPlaceholderPreviewImage(gallery?.previewImage) ? null : gallery?.previewImage;
+  const displayImage = bcImage || usableGalleryImage || product.image || gallery?.designs[0]?.frontImage;
   const galleryThumbs = Array.from(new Set([displayImage, ...(gallery?.images ?? [])].filter(Boolean))) as string[];
   const shownImage = activeImage ?? displayImage;
   // Prefer options saved on the gallery (admin-curated); fall back to a live fetch
