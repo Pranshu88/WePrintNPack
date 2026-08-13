@@ -611,6 +611,13 @@ function parseSVGForEditing(svgDataUrl: string, opts?: { extractGraphics?: boole
     svg.setAttribute("height", "270");
   }
   svg.style.cssText = "display:block;width:100%;height:100%;";
+  // The editor container is sized to the target product's actual canvas (which can have a
+  // very different aspect ratio than the design's native viewBox — e.g. a BC-shaped 460×270
+  // design applied to a tall wall-decal canvas). Without this, the default "xMidYMid meet"
+  // uniformly scales the SVG to fit and letterboxes it into a small strip at the top instead
+  // of filling the canvas; applySVGDesign's xScale/yScale item-position math already assumes
+  // this same non-uniform stretch, so the background must match it.
+  svg.setAttribute("preserveAspectRatio", "none");
 
   // Tag each editable shape with a unique data-id and force pointer-events so
   // fill="none" shapes (e.g. BC_CARD_OUTLINE rect) are still clickable.
@@ -734,6 +741,30 @@ function parseSVGForEditing(svgDataUrl: string, opts?: { extractGraphics?: boole
   // Ensure SVG fills its container without letterboxing
   bgStr = bgStr.replace(/ preserveAspectRatio="[^"]*"/g, "").replace(/<svg\b/, '<svg preserveAspectRatio="none"');
   return { bgStr, textItems, graphicItems };
+}
+
+// Rewrites a background SVG's viewBox to match the canvas it's actually being saved at,
+// wrapping its content in a scale transform so it still renders identically. Without this,
+// the viewBox stays at whatever the design was originally authored at (e.g. a BC template's
+// 460×270) forever — so every time the design is re-opened on a differently-shaped canvas,
+// applySVGDesign recomputes the same xScale/yScale and re-scales the already-correctly-placed
+// saved items on top of it, compounding a little more distorted each edit. Normalizing here
+// makes the native size match the canvas after the first save, so xScale/yScale become 1 (a
+// no-op) on every later load.
+function normalizeSvgViewBoxToCanvas(svgStr: string, targetW: number, targetH: number): string {
+  const m = svgStr.match(/viewBox\s*=\s*"([^"]+)"/);
+  if (!m) return svgStr;
+  const parts = m[1].trim().split(/[\s,]+/).map(Number);
+  if (parts.length !== 4) return svgStr;
+  const [, , nativeW, nativeH] = parts;
+  if (!nativeW || !nativeH || (Math.abs(nativeW - targetW) < 0.5 && Math.abs(nativeH - targetH) < 0.5)) return svgStr;
+  const sx = targetW / nativeW, sy = targetH / nativeH;
+  const openTagEnd = svgStr.indexOf(">");
+  const closeTagStart = svgStr.lastIndexOf("</svg>");
+  if (openTagEnd < 0 || closeTagStart < 0) return svgStr;
+  const openTag = svgStr.slice(0, openTagEnd + 1).replace(/viewBox\s*=\s*"[^"]*"/, `viewBox="0 0 ${targetW} ${targetH}"`);
+  const body = svgStr.slice(openTagEnd + 1, closeTagStart);
+  return `${openTag}<g transform="scale(${sx} ${sy})">${body}</g></svg>`;
 }
 
 function patchShapeColor(svgStr: string, dataId: string, fill: string, stroke: string): string {
@@ -1881,6 +1912,8 @@ export default function DesignEditorShell({
     // Items are stored in print-area-local coords (bbox - printOffset) and rendered
     // inside the print-area div. When xScale/yScale differ from 1, the unscaled
     // printOffset causes drift — correct it with ox/oy so items match the SVG background.
+    const printAreaW = dimsOverride?.PW ?? PRINT_W;
+    const printAreaH = dimsOverride?.PH ?? PRINT_H;
     const scaleItem = (it: CanvasItem): CanvasItem => {
       const cs = coordScale;
       if (cs === 1 && xScale === 1 && yScale === 1) return it;
@@ -1890,12 +1923,18 @@ export default function DesignEditorShell({
         // Width must accommodate the scaled font size — use max(xScale,yScale) so text never
         // wraps when yScale > xScale (non-uniform stretch). Shift x to keep the text anchor
         // (center / right) at the same scaled SVG position.
-        const bigScale = Math.max(xScale, yScale);
+        const bigScaleRaw = Math.max(xScale, yScale);
+        // But cap it so the scaled box can't exceed the print area width — an extreme
+        // aspect-ratio mismatch (e.g. a landscape business-card design stretched onto a
+        // tall narrow decal) would otherwise blow the box/font up so far it runs off the
+        // canvas edge entirely instead of just wrapping.
+        const maxFitScale = it.w > 0 ? Math.max(xScale, printAreaW / (it.w * cs)) : bigScaleRaw;
+        const bigScale = Math.min(bigScaleRaw, maxFitScale);
         const newW = it.w * cs * bigScale;
         const dx = it.align === "center" ? -it.w * cs * (bigScale - xScale) / 2
                  : it.align === "right"  ? -it.w * cs * (bigScale - xScale)
                  : 0;
-        return { ...it, x: it.x * cs * xScale + ox + dx, y: it.y * cs * yScale + oy, w: newW, size: it.size * cs * yScale };
+        return { ...it, x: it.x * cs * xScale + ox + dx, y: it.y * cs * yScale + oy, w: newW, size: it.size * cs * bigScale };
       }
       if (it.kind === "image") return { ...it, x: it.x * cs * xScale + ox, y: it.y * cs * yScale + oy, w: it.w * cs * xScale, h: it.h * cs * yScale };
       return it;
@@ -1925,8 +1964,6 @@ export default function DesignEditorShell({
         );
         return matches ? ({ ...it, photoPlaceholder: true } as CanvasItem) : it;
       });
-    const printAreaW = dimsOverride?.PW ?? PRINT_W;
-    const printAreaH = dimsOverride?.PH ?? PRINT_H;
     // Only text items are clamped to the safety area — running past it means the text gets
     // trimmed. Image items (e.g. full-bleed cover photos) are meant to extend to/past the
     // canvas edge and often use negative x/y intentionally; leave them untouched.
@@ -1938,8 +1975,13 @@ export default function DesignEditorShell({
         const maxY = Math.max(0, printAreaH - (it.size ?? 0));
         return { ...it, x: Math.min(Math.max(it.x, 0), maxX), y: Math.min(Math.max(it.y, 0), maxY) };
       });
+    // frontExisting/backExisting (already-saved design items, e.g. a seeded template's
+    // frontAdminItems) are stored in the coordinate space of whatever canvas they were
+    // originally saved on — scale them the same way freshly-extracted items are scaled,
+    // otherwise a BC-shaped (460×270) design's items land unchanged on a very
+    // differently-proportioned canvas (e.g. a tall wall-decal size) and overflow it.
     const frontItems = clampToPrintArea(frontExisting.length > 0
-      ? reapplyPlaceholderFlag(frontExisting, frontPlaceholders)
+      ? reapplyPlaceholderFlag(frontExisting.map(scaleItem), frontPlaceholders)
       : [...(pf?.graphicItems ?? []), ...(pf?.textItems ?? [])].map(scaleItem));
     if (isFlatArt) {
       setBgColors({ front: frontBgCol, back: backImageUrl ? backBgCol : "#ffffff" });
@@ -1957,7 +1999,7 @@ export default function DesignEditorShell({
       back: backImageUrl ? {
         items: (() => {
           const rawBackItems = clampToPrintArea(backExisting.length > 0
-            ? reapplyPlaceholderFlag(backExisting, backPlaceholders)
+            ? reapplyPlaceholderFlag(backExisting.map(scaleItem), backPlaceholders)
             : [...(pb?.graphicItems ?? []), ...(pb?.textItems ?? [])].map(scaleItem));
           return rawBackItems.length > 0
             ? rawBackItems as CanvasItem[]
@@ -3192,8 +3234,8 @@ export default function DesignEditorShell({
                     backPNG,
                     isFlatArt ? bgColors.front : undefined,
                     isFlatArt ? bgColors.back : undefined,
-                    isFlatArt ? toSvgUrl(bgSvg.front) : undefined,
-                    isFlatArt ? toSvgUrl(bgSvg.back) : undefined
+                    isFlatArt ? toSvgUrl(normalizeSvgViewBoxToCanvas(bgSvg.front, dims.CW, dims.CH)) : undefined,
+                    isFlatArt ? toSvgUrl(normalizeSvgViewBoxToCanvas(bgSvg.back, dims.CW, dims.CH)) : undefined
                   );
                 }
               : !adminMode
@@ -4054,7 +4096,7 @@ export default function DesignEditorShell({
             </button>
             <div style={{ width: "1px", height: "24px", background: "#e5e7eb", margin: "0 4px" }} />
             <button
-              onClick={() => setZoom((z) => parseFloat(Math.max(0.5, z - 0.1).toFixed(1)))}
+              onClick={() => setZoom((z) => parseFloat(Math.max(0.1, z - 0.1).toFixed(1)))}
               style={{ width: 38, height: 38, border: "none", background: "none", cursor: "pointer", fontSize: "1.4rem", fontWeight: 700, color: "#374151" }}
             >
               −

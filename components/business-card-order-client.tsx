@@ -268,10 +268,24 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
     void loadBcImage(bcData.dbKey).then((img) => { if (img) setBcImage(img); });
   }, [gallery]);
 
-  const hasDesigns = allDesigns.length > 0;
+  // A design tagged with a size (via sizeLabel — set by the admin from the size row on the
+  // template's admin page) only shows while the customer has that same size selected; untagged
+  // designs (made before size-tagging existed, or single-size products) keep showing for every
+  // size, unless a same-named tagged design exists for the currently-selected size (that tagged
+  // copy supersedes the shared original for this size only). Mirrors the admin gallery grid's
+  // filtering so what the customer sees here matches what the admin curated per size.
+  const selectedSizeLabel = selectedSinaliteOptions["size"];
+  const sizeFilteredDesigns = selectedSizeLabel
+    ? (() => {
+        const overriddenByThisSize = new Set(allDesigns.filter((d) => d.sizeLabel === selectedSizeLabel).map((d) => d.name));
+        return allDesigns.filter((d) => d.sizeLabel === selectedSizeLabel || (!d.sizeLabel && !overriddenByThisSize.has(d.name)));
+      })()
+    : allDesigns;
+
+  const hasDesigns = sizeFilteredDesigns.length > 0;
 
   // filtered + paginated designs for modal
-  const filteredDesigns = allDesigns.filter((d) =>
+  const filteredDesigns = sizeFilteredDesigns.filter((d) =>
     d.name.toLowerCase().includes(designSearch.toLowerCase())
   );
   const totalDesignPages = Math.max(1, Math.ceil(filteredDesigns.length / DESIGNS_PER_PAGE));
@@ -755,7 +769,7 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
                   </svg>
-                  Browse Designs ({allDesigns.length})
+                  Browse Designs ({sizeFilteredDesigns.length})
                 </button>
               )}
 
@@ -824,7 +838,7 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: "1.25rem" }}>
                 {pagedDesigns.map((d) => (
-                  <DesignCard key={d.id} design={d} price={displayPrice} galleryName={mappedGalleryName ?? gallery?.name} onSelect={() => selectDesign(d)} />
+                  <DesignCard key={d.id} design={d} galleryName={mappedGalleryName ?? gallery?.name} onSelect={() => selectDesign(d)} />
                 ))}
               </div>
             )}
@@ -1112,7 +1126,7 @@ async function buildDesignPreview(
   return canvas.toDataURL("image/png");
 }
 
-function DesignCard({ design, price, galleryName, onSelect }: { design: DesignTemplateItem; price: string; galleryName?: string; onSelect: () => void }) {
+function DesignCard({ design, galleryName, onSelect }: { design: DesignTemplateItem; galleryName?: string; onSelect: () => void }) {
   const [hovered, setHovered] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const dotColor = design.frontBgColor && design.frontBgColor !== "#ffffff" ? design.frontBgColor : "#111827";
@@ -1191,8 +1205,7 @@ function DesignCard({ design, price, galleryName, onSelect }: { design: DesignTe
 
       {/* Info */}
       <div style={{ padding: "0.6rem 0.85rem 0.75rem" }}>
-        <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: "0.875rem", color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{design.name}</p>
-        <p style={{ margin: 0, fontSize: "0.8rem", color: "#0891b2", fontWeight: 700 }}>{price}</p>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: "0.875rem", color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{design.name}</p>
         {design.frontBgColor && design.frontBgColor !== "#ffffff" && (
           <div style={{ display: "flex", alignItems: "center", gap: "5px", marginTop: "3px" }}>
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: design.frontBgColor, border: "1px solid #e5e7eb", display: "inline-block" }} />

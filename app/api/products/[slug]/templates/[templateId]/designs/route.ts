@@ -18,12 +18,13 @@ export async function POST(
   const backAdminItems = Array.isArray(body.backAdminItems) ? (body.backAdminItems as SerializableItem[]) : undefined;
   const frontBgColor = typeof body.frontBgColor === "string" ? body.frontBgColor : undefined;
   const backBgColor = typeof body.backBgColor === "string" ? body.backBgColor : undefined;
+  const sizeLabel = typeof body.sizeLabel === "string" ? body.sizeLabel : undefined;
 
   if (!name || !frontImage) {
     return NextResponse.json({ error: "name and frontImage are required." }, { status: 400 });
   }
 
-  const template = await addDesign(templateId, { name, colorHex, colorName, frontImage, frontOverlay, backImage, backOverlay, frontAdminItems, backAdminItems, frontBgColor, backBgColor });
+  const template = await addDesign(templateId, { name, colorHex, colorName, frontImage, frontOverlay, backImage, backOverlay, frontAdminItems, backAdminItems, frontBgColor, backBgColor, sizeLabel });
   if (!template) {
     return NextResponse.json({ error: "Gallery template not found." }, { status: 404 });
   }

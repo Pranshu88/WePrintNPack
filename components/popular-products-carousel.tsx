@@ -46,6 +46,17 @@ const PRICE_FALLBACKS: Record<string, string> = {
   "Product Labels":          "$139 + tax",
 };
 
+// Gallery templates that shouldn't appear as their own "Popular Products" cards, kept out by
+// id (not deleted) — the products page, admin, and everything else that references these real
+// DB rows is unaffected; this only trims what this carousel surfaces.
+const CAROUSEL_EXCLUDED_TEMPLATE_IDS = new Set([
+  "bn0001mpmc48n5", // Vinyl Banner
+  "bn0032mpmc48n8", // Large Outdoor Banner
+  "bn0063mpmc48n9", // Standard Roll-Up Banner
+  "bn0084mpmc48nb", // Premium Roll-Up Banner
+  "xi2twlqmppobesk", // Poll T shirt
+]);
+
 type CarouselItem = {
   id: string;
   name: string;
@@ -63,19 +74,6 @@ function openBcDB(): Promise<IDBDatabase> {
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
   });
-}
-
-type StoredPackage = { id: string; title: string; price: string };
-
-function loadPackagesList(key: string, fallback: StoredPackage[]): StoredPackage[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      const parsed = JSON.parse(raw) as StoredPackage[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch { /* ignore */ }
-  return fallback;
 }
 
 async function loadBcImage(id: string): Promise<string> {
@@ -220,6 +218,7 @@ export default function PopularProductsCarousel({
         const templates = templatesBySlug[job.slug] ?? [];
         const items: CarouselItem[] = [];
         for (const t of templates) {
+          if (CAROUSEL_EXCLUDED_TEMPLATE_IDS.has(t.id)) continue;
           const idbImg = await loadBcImage(t.id);
           const rawPrice = meta[t.id]?.price ?? t.price?.trim();
           const price = rawPrice
@@ -230,7 +229,12 @@ export default function PopularProductsCarousel({
             name: t.name,
             price,
             image: idbImg || t.previewImage || job.image,
-            link: `${job.linkBase}/${job.slug}?gallery=${t.id}`,
+            // directLinkPrefix (set via getProductLink) already includes the full path
+            // including the slug — appending job.slug again would duplicate it, so only
+            // fall back to the generic linkBase + "/" + slug pattern when it's absent.
+            link: job.directLinkPrefix
+              ? `${job.directLinkPrefix}?gallery=${t.id}`
+              : `${job.linkBase}/${job.slug}?gallery=${t.id}`,
             category: job.categoryLabel,
           });
         }
@@ -244,16 +248,6 @@ export default function PopularProductsCarousel({
           const jobIdx = jobs.findIndex((j) => j.slug === product.slug);
           const dbItems = jobIdx >= 0 ? jobResults[jobIdx] : [];
           allItems.push(...dbItems);
-
-          // Legacy browser-only packages added before this product had real DB templates —
-          // only shown if a same-named DB template doesn't already cover them.
-          const dbNames = new Set(dbItems.map((i) => i.name));
-          const legacyKey = product.category === "business-cards" ? "bc-packages-list" : "fly-packages-list";
-          for (const pkg of loadPackagesList(legacyKey, [])) {
-            if (dbNames.has(pkg.title)) continue;
-            const img = await loadBcImage(pkg.id);
-            allItems.push({ id: pkg.id, name: pkg.title, price: pkg.price, image: img || product.image, link: `/products/business-cards/${product.slug}` });
-          }
         }
       }
       // Remaining jobs (marketing-material/promotional-products/business-cards subproducts,

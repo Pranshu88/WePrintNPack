@@ -158,6 +158,14 @@ async function scaleOverlayToBase(overlayDataUrl: string, baseDataUrl: string): 
   return canvas.toDataURL("image/png");
 }
 
+// Raw Sinalite-imported business card rows outside the 3 hand-built tiers (isNamedBcGallery)
+// come in with zero designs — this clones the design set from "Business cards 14pt (Profit
+// Maximizer)" (the first, fully-designed BC row) onto them. Also used as the last-resort
+// fallback for the generic sibling-source lookup below when a product has no gallery of its
+// own with any designs yet (e.g. a freshly-imported category like Booklets or Presentation
+// Folders).
+const BC_SEED_SOURCE_ID = "sn0001mrx575ni";
+const BC_SEED_SOURCE_NAME = "Business cards 14pt (Profit Maximizer)";
 const BC_PREVIEW_DIMS           = { CW: 460, CH: 270, PX: 30, PY: 25 };
 const SHIRT_PREVIEW_DIMS        = { CW: 460, CH: 490, PX: 100, PY: 100 };
 const YARD_SIGN_PREVIEW_DIMS    = { CW: 600, CH: 450, PX: 0,  PY: 0  };
@@ -409,6 +417,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   /* design form */
   const [formOpen, setFormOpen] = useState(false);
   const [editingDesignId, setEditingDesignId] = useState<string | null>(null);
+  // The size the design being edited was already tagged with (if any) — set when the edit
+  // session starts. If the admin then saves it while a *different* size is checked, the save
+  // forks a new size-tagged copy instead of overwriting the original (which would otherwise
+  // edit it everywhere it's shared, e.g. shared/untagged legacy designs shown under every size).
+  const [editingDesignSizeLabel, setEditingDesignSizeLabel] = useState<string | undefined>(undefined);
   const [dName, setDName] = useState("");
   const [dColorHex, setDColorHex] = useState("");
   const [dColorName, setDColorName] = useState("");
@@ -429,7 +442,16 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const [sizeChoices, setSizeChoices] = useState<{ width: number; height: number; label: string }[] | null>(null);
   const [sizeChoicesLoading, setSizeChoicesLoading] = useState(false);
   const [chosenAddDesignDims, setChosenAddDesignDims] = useState<{ width: number; height: number } | null>(null);
+  // Sizes shown as a horizontal checkbox row below the gallery title — lets the admin pick
+  // which canvas dims "Edit"/"Add Design Template" opens at without a separate popup.
+  const [pageSizeChoices, setPageSizeChoices] = useState<{ width: number; height: number; label: string }[] | null>(null);
   const [pendingOpenEditor, setPendingOpenEditor] = useState<(() => void) | null>(null);
+  // Generic fallback "Seed Design" source: for any product without a hand-built named tier
+  // (i.e. not covered by canSeedDesigns / canSeedFromFirstBc / …Flyer / …Poster / …YardSign /
+  // …VinylBanner below), auto-detect a sibling gallery in the same product that already has
+  // designs — whichever has the most — and offer to copy from it instead of hardcoding a
+  // source id per product (there are 50+ products).
+  const [genericSiblingSource, setGenericSiblingSource] = useState<{ id: string; name: string } | null>(null);
   const [dFrontAdminItems, setDFrontAdminItems] = useState<SerializableItem[]>([]);
   const [dBackAdminItems, setDBackAdminItems] = useState<SerializableItem[]>([]);
   const [dFrontBgColor, setDFrontBgColor] = useState("#ffffff");
@@ -456,18 +478,47 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const [previewFrontSrc, setPreviewFrontSrc] = useState<string | null>(null);
   const [previewBackSrc, setPreviewBackSrc] = useState<string | null>(null);
 
+  // Populate the page-level horizontal size row (shown under the gallery title) whenever this
+  // gallery's Sinalite product has more than one catalog size.
+  useEffect(() => {
+    setPageSizeChoices(null);
+    setChosenAddDesignDims(null);
+    if (!gallery?.sinaliteId) return;
+    let cancelled = false;
+    fetch(`/api/sinalite/products/${gallery.sinaliteId}/options`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: { options?: { group: string; name: string; hidden: number }[] }) => {
+        if (cancelled) return;
+        const sizeNames = Array.from(new Set(
+          (data.options ?? []).filter((o) => o.hidden === 0 && o.group.toLowerCase() === "size").map((o) => o.name)
+        ));
+        const parsed = sizeNames
+          .map((n) => { const dims = parseSinaliteSizeName(n); return dims ? { ...dims, label: n } : null; })
+          .filter((s): s is { width: number; height: number; label: string } => !!s);
+        if (parsed.length > 1) {
+          setPageSizeChoices(parsed);
+          setChosenAddDesignDims({ width: parsed[0].width, height: parsed[0].height });
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [gallery?.id, gallery?.sinaliteId]);
+
   useEffect(() => {
     setPreviewFrontSrc(null);
     setPreviewBackSrc(null);
     if (!previewDesign) return;
     const gn = gallery?.name?.toLowerCase() ?? "";
     const isLabelGallery = gn.includes("label") || gn.includes("sticker");
+    // A size picked from the preview modal's horizontal row overrides the gallery's own
+    // declared size, so the preview reflects whichever size the admin has selected.
+    const previewDimsInches = chosenAddDesignDims ?? customDimsInches;
     const modalDims: PreviewDims =
-      customDimsInches                     ? {
-        CW: Math.round(customDimsInches.width * 130),
-        CH: Math.round(customDimsInches.height * 130),
-        PX: Math.round(customDimsInches.width * 130 * 0.065),
-        PY: Math.round(customDimsInches.height * 130 * 0.065),
+      previewDimsInches                    ? {
+        CW: Math.round(previewDimsInches.width * 130),
+        CH: Math.round(previewDimsInches.height * 130),
+        PX: Math.round(previewDimsInches.width * 130 * 0.065),
+        PY: Math.round(previewDimsInches.height * 130 * 0.065),
       } :
       isTShirt                             ? SHIRT_PREVIEW_DIMS         :
       isYardSign                           ? YARD_SIGN_PREVIEW_DIMS     :
@@ -517,7 +568,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       }
     }
     return () => { cancelled = true; };
-  }, [previewDesign, gallery]);
+  }, [previewDesign, gallery, chosenAddDesignDims]);
 
   /* seed designs */
   const [seeding, setSeeding] = useState(false);
@@ -537,6 +588,27 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const touchOriginRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
 
   useEffect(() => { void loadData(); }, [productSlug, galleryId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setGenericSiblingSource(null);
+    if (!gallery || gallery.designs.length > 0) return;
+    let cancelled = false;
+    fetch(`/api/products/${productSlug}/templates`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: { templates?: GalleryTemplate[] }) => {
+        if (cancelled) return;
+        const best = (data.templates ?? [])
+          .filter((t) => t.id !== galleryId && t.designs.length > 0)
+          .sort((a, b) => b.designs.length - a.designs.length)[0];
+        // No sibling gallery in this product has any designs yet (e.g. a freshly-imported
+        // category like Booklets or Presentation Folders) — fall back to the hand-built BC
+        // design set so the "Seed Design" button still has something to offer.
+        if (best) setGenericSiblingSource({ id: best.id, name: best.name });
+        else if (galleryId !== BC_SEED_SOURCE_ID) setGenericSiblingSource({ id: BC_SEED_SOURCE_ID, name: BC_SEED_SOURCE_NAME });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [gallery, productSlug, galleryId]);
 
   useEffect(() => {
     if (!editorDragging) return;
@@ -734,7 +806,6 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   // running `openEditor`, so the 2D editor's canvas dimensions match what they pick. Used by
   // both "+ Add Design Template" and "Edit Design" (from the preview modal).
   async function chooseSizeThenOpenEditor(openEditor: () => void) {
-    setChosenAddDesignDims(null);
     if (gallery?.sinaliteId) {
       setSizeChoicesLoading(true);
       try {
@@ -765,7 +836,6 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDBackOverlay(""); setDBackOverlayName("");
     setDFrontAdminItems([]); setDBackAdminItems([]);
     setDFrontBgColor("#ffffff"); setDBackBgColor("#ffffff");
-    setChosenAddDesignDims(null);
     if (isBusinessCard) {
       setDFrontImage(bcCardOutline); setDFrontImageName("Business Card (Front)");
       setDBackImage(bcCardOutline);  setDBackImageName("Business Card (Back)");
@@ -774,13 +844,16 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     } else if (isFlyer) {
       setDFrontImage(flyerOutline); setDFrontImageName("Flyer (Front)");
       setDBackImage(flyerOutline);  setDBackImageName("Flyer (Back)");
-      setAdminEditorOpen(true);
+      // A size already checked in the page's size row skips the separate popup.
+      if (chosenAddDesignDims) { setAdminEditorOpen(true); return; }
+      await chooseSizeThenOpenEditor(() => setAdminEditorOpen(true));
       return;
     } else if (!isTShirt) {
       // Every non-apparel category goes straight to the 2D editor (like BC/flyers) —
       // only T-Shirts (which need per-color front/back mockup uploads) use the field form.
       setDFrontImage(""); setDFrontImageName("");
       setDBackImage("");  setDBackImageName("");
+      if (chosenAddDesignDims) { setAdminEditorOpen(true); return; }
       await chooseSizeThenOpenEditor(() => setAdminEditorOpen(true));
       return;
     } else {
@@ -799,9 +872,10 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     if (openEditor) openEditor(); else setAdminEditorOpen(true);
   }
 
-  async function startEditDesign(d: DesignTemplateItem) {
-    setChosenAddDesignDims(null);
+  async function startEditDesign(d: DesignTemplateItem, presetDims?: { width: number; height: number } | null) {
+    setChosenAddDesignDims(presetDims ?? null);
     setEditingDesignId(d.id);
+    setEditingDesignSizeLabel(d.sizeLabel);
     setDName(d.name);
     setDColorHex(d.colorHex ?? ""); setDColorName(d.colorName ?? "");
     setDFrontImage(d.frontImage); setDFrontImageName("Existing");
@@ -814,7 +888,9 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
     setDBackBgColor(d.backBgColor ?? "#ffffff");
     // Every non-apparel category goes straight to the 2D editor; T-Shirts use the field form.
     if (isTShirt) { setFormOpen(true); return; }
-    if (isBusinessCard || isFlyer) { setAdminEditorOpen(true); return; }
+    if (isBusinessCard) { setAdminEditorOpen(true); return; }
+    // A size already picked from the preview modal's checkbox row skips the separate popup.
+    if (presetDims) { setAdminEditorOpen(true); return; }
     await chooseSizeThenOpenEditor(() => setAdminEditorOpen(true));
   }
 
@@ -1049,6 +1125,21 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const isBcPackage = galleryId.startsWith("bc-") || galleryId.startsWith("fly-");
   const designs = gallery?.designs ?? [];
   const hasDesigns = designs.length > 0;
+  // A design tagged with a size (via sizeLabel) only shows while that same size is checked in
+  // the page's size row; untagged designs (everything made before this, or single-size
+  // products) keep showing regardless of the selection.
+  const selectedSizeLabel = chosenAddDesignDims
+    ? (pageSizeChoices ?? sizeChoices)?.find((s) => s.width === chosenAddDesignDims.width && s.height === chosenAddDesignDims.height)?.label
+    : undefined;
+  // Editing a shared/untagged design under a specific size forks a same-named copy tagged with
+  // that size (see onSaveAdmin below) — once that fork exists, it supersedes the untagged
+  // original for this size only, so the same design doesn't appear twice.
+  const overriddenByThisSize = selectedSizeLabel
+    ? new Set(designs.filter((d) => d.sizeLabel === selectedSizeLabel).map((d) => d.name))
+    : null;
+  const visibleDesigns = selectedSizeLabel
+    ? designs.filter((d) => d.sizeLabel === selectedSizeLabel || (!d.sizeLabel && !overriddenByThisSize!.has(d.name)))
+    : designs;
 
   // Mirrors the exact set of galleries the seed-designs API route (app/api/products/[slug]/
   // templates/[templateId]/seed-designs/route.ts) knows how to generate art for. Any gallery
@@ -1105,14 +1196,11 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   const canSeedDesigns = !isCustomPackage && !isTShirt && (
     isBannerProductSlug || isSinaliteVinylBannerGallery || isPullUpBannerGallery || isNamedPosterGallery || isLargeFormatPosterGallery || isNamedFlyerGallery || isNamedStickerLabelGallery || isSquareCutLabelGallery || isNamedYardSignGallery || isNamedBcGallery || isPostcardGallery
   );
-  // Raw Sinalite-imported business card rows outside the 3 hand-built tiers (isNamedBcGallery)
-  // come in with zero designs — this clones the design set from "Business cards 14pt (Profit
-  // Maximizer)" (the first, fully-designed BC row) onto them.
-  const BC_SEED_SOURCE_ID = "sn0001mrx575ni";
-  // Door Hangers has no product row of its own (so isBusinessCard is false for it) and no
-  // hand-built tier — every row gets the same BC design set as the raw business-card imports.
+  // Door Hangers and Wall Decals have no product row of their own (so isBusinessCard is false
+  // for them) and no hand-built tier — every row gets the same BC design set as the raw
+  // business-card imports.
   const canSeedFromFirstBc = !isCustomPackage && !hasDesigns && galleryId !== BC_SEED_SOURCE_ID && (
-    (isBusinessCard && !isNamedBcGallery) || productSlug === "door-hangers"
+    (isBusinessCard && !isNamedBcGallery) || productSlug === "door-hangers" || productSlug === "wall-decals"
   );
   // "Flyers 100lb Gloss Text" (sinaliteId 37) — the first, fully-designed flyer row — is the
   // source design set the "Seed Design" button copies onto any raw Sinalite-imported flyer row
@@ -1124,6 +1212,21 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
   // row (outside the 2 hand-built Large/Small tiers) that has no designs of its own.
   const POSTER_SEED_SOURCE_ID = "snps0002mrxigohp";
   const canSeedFromFirstPoster = productSlug === "posters" && !isCustomPackage && !isNamedPosterGallery && !hasDesigns && galleryId !== POSTER_SEED_SOURCE_ID;
+  // "6mm Coroplast" (sinaliteId 98) — the first, fully-designed yard-sign row — is the source
+  // design set the "Seed Design" button copies onto any raw Sinalite-imported yard-sign row
+  // (outside the 2 hand-built Business/Elite tiers) that has no designs of its own.
+  const YARD_SIGN_SEED_SOURCE_ID = "snys0002mrxiae1e";
+  const canSeedFromFirstYardSign = isYardSign && !isCustomPackage && !isNamedYardSignGallery && !hasDesigns && galleryId !== YARD_SIGN_SEED_SOURCE_ID;
+  // "Banners 13oz Glossy Vinyl" (sinaliteId 101) — the first, fully-designed vinyl-banner row —
+  // is the source design set the "Seed Design" button copies onto any raw Sinalite-imported
+  // vinyl-banner row that has no designs of its own.
+  const VINYL_BANNER_SEED_SOURCE_ID = "snvb0001mrxj8qsp";
+  const canSeedFromFirstVinylBanner = productSlug === "sinalite-vinyl-banners" && !isCustomPackage && !isSinaliteVinylBannerGallery && !hasDesigns && galleryId !== VINYL_BANNER_SEED_SOURCE_ID;
+  // Generic fallback for every other product (no hand-built named tier of its own): offer to
+  // copy from whichever sibling gallery in the same product already has the most designs.
+  const canSeedFromSibling = !isCustomPackage && !isTShirt && !hasDesigns
+    && !canSeedDesigns && !canSeedFromFirstBc && !canSeedFromFirstFlyer && !canSeedFromFirstPoster && !canSeedFromFirstYardSign && !canSeedFromFirstVinylBanner
+    && !!genericSiblingSource;
 
   const editorBase = editorDesign ? (editorSide === "front" ? editorDesign.frontImage : editorDesign.backImage) : undefined;
   const editorOverlay = editorDesign ? (editorSide === "front" ? editorDesign.frontOverlay : editorDesign.backOverlay) : undefined;
@@ -1242,6 +1345,48 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
                 {seeding ? "Seeding…" : "Seed Design"}
               </button>
               )}
+              {canSeedFromFirstYardSign && (
+              <button
+                type="button"
+                onClick={() => void seedFromSource(YARD_SIGN_SEED_SOURCE_ID)}
+                disabled={seeding}
+                title="Copy the design set from 6mm Coroplast"
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Design"}
+              </button>
+              )}
+              {canSeedFromFirstVinylBanner && (
+              <button
+                type="button"
+                onClick={() => void seedFromSource(VINYL_BANNER_SEED_SOURCE_ID)}
+                disabled={seeding}
+                title="Copy the design set from Banners 13oz Glossy Vinyl"
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Design"}
+              </button>
+              )}
+              {canSeedFromSibling && genericSiblingSource && (
+              <button
+                type="button"
+                onClick={() => void seedFromSource(genericSiblingSource.id)}
+                disabled={seeding}
+                title={`Copy the design set from ${genericSiblingSource.name}`}
+                style={{ padding: "0.6rem 1.1rem", background: "#fff", color: seeding ? "#9ca3af" : "#7c3aed", border: `1.5px solid ${seeding ? "#d1d5db" : "#7c3aed"}`, borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: seeding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.4rem", opacity: seeding ? 0.6 : 1 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                {seeding ? "Seeding…" : "Seed Design"}
+              </button>
+              )}
               <button type="button" onClick={() => void openAddDesign()} disabled={sizeChoicesLoading}
                 style={{ padding: "0.6rem 1.15rem", background: "linear-gradient(135deg, #7c3aed, #db2777, #f97316)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "0.875rem", cursor: sizeChoicesLoading ? "not-allowed" : "pointer", opacity: sizeChoicesLoading ? 0.7 : 1 }}>
                 {sizeChoicesLoading ? "Loading…" : "+ Add Design Template"}
@@ -1250,6 +1395,28 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           )}
         </div>
       </div>
+
+      {/* Size row — pick which of this product's catalog sizes "Edit"/"Add Design Template"
+          opens the 2D editor at, without a separate popup each time */}
+      {pageSizeChoices && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          {pageSizeChoices.map((s) => {
+            const checked = chosenAddDesignDims?.width === s.width && chosenAddDesignDims?.height === s.height;
+            return (
+              <label key={s.label}
+                style={{ display: "flex", alignItems: "center", gap: "0.4rem", padding: "0.4rem 0.75rem", border: `1.5px solid ${checked ? "#7c3aed" : "#e5e7eb"}`, borderRadius: "999px", background: checked ? "#f5f3ff" : "#fff", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, color: checked ? "#7c3aed" : "#374151" }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => setChosenAddDesignDims(checked ? null : { width: s.width, height: s.height })}
+                  style={{ accentColor: "#7c3aed", cursor: "pointer" }}
+                />
+                {s.label}
+              </label>
+            );
+          })}
+        </div>
+      )}
 
       {/* Feedback */}
       {(msg || err) && (
@@ -1269,20 +1436,20 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${isTShirt ? "260px" : (isBannerVinyl || isBannerOutdoor) ? "320px" : (isBannerRollupStd || isBannerRollupPrem) ? "290px" : "190px"}, 1fr))`, gap: "1.25rem" }}>
-          {designs.map((d) => (
+          {visibleDesigns.map((d) => (
             <DesignCard
               key={d.id}
               design={d}
               isBusinessCard={isBusinessCard}
               isLabel={isStickerLabel}
               isTShirt={isTShirt}
-              imageAspect={customDimsInches ? `${customDimsInches.width}/${customDimsInches.height}` : isBusinessCard ? "16/9" : isLargePoster ? "2/3" : isSmallPoster ? "3/4" : isStickerLabel ? "1/1" : (isBannerVinyl || isBannerOutdoor) ? "9/4" : (isBannerRollupStd || isBannerRollupPrem) ? "1/1" : "4/3"}
+              imageAspect={(chosenAddDesignDims ?? customDimsInches) ? `${(chosenAddDesignDims ?? customDimsInches)!.width}/${(chosenAddDesignDims ?? customDimsInches)!.height}` : isBusinessCard ? "16/9" : isLargePoster ? "2/3" : isSmallPoster ? "3/4" : isStickerLabel ? "1/1" : (isBannerVinyl || isBannerOutdoor) ? "9/4" : (isBannerRollupStd || isBannerRollupPrem) ? "1/1" : "4/3"}
               previewDims={
-                customDimsInches   ? {
-                  CW: Math.round(customDimsInches.width * 130),
-                  CH: Math.round(customDimsInches.height * 130),
-                  PX: Math.round(customDimsInches.width * 130 * 0.065),
-                  PY: Math.round(customDimsInches.height * 130 * 0.065),
+                (chosenAddDesignDims ?? customDimsInches)   ? {
+                  CW: Math.round((chosenAddDesignDims ?? customDimsInches)!.width * 130),
+                  CH: Math.round((chosenAddDesignDims ?? customDimsInches)!.height * 130),
+                  PX: Math.round((chosenAddDesignDims ?? customDimsInches)!.width * 130 * 0.065),
+                  PY: Math.round((chosenAddDesignDims ?? customDimsInches)!.height * 130 * 0.065),
                 } :
                 isTShirt           ? SHIRT_PREVIEW_DIMS         :
                 isYardSign         ? YARD_SIGN_PREVIEW_DIMS     :
@@ -1301,14 +1468,14 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               }
               onPreview={() => setPreviewDesign(d)}
               onAddColor={() => router.push(`/admin/templates/${productSlug}/${galleryId}/${d.id}`)}
-              onEdit={() => void startEditDesign(d)}
+              onEdit={() => void startEditDesign(d, chosenAddDesignDims)}
               onDelete={() => void deleteDesign(d.id)}
               onEditFrontOverlay={d.frontOverlay ? () => openEditor(d, "front") : undefined}
               onEditBackOverlay={(d.backOverlay && d.backImage) ? () => openEditor(d, "back") : undefined}
               selectMode={selectMode}
               selected={selectedIds.has(d.id)}
               onToggleSelect={() => toggleSelected(d.id)}
-              hasCustomDims={!!customDimsInches}
+              hasCustomDims={!!(chosenAddDesignDims ?? customDimsInches)}
             />
           ))}
         </div>
@@ -1587,7 +1754,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           materialColors: templateMaterialColors,
         } : {})}
         customDimsInches={chosenAddDesignDims ?? customDimsInches ?? undefined}
-        onClose={() => { setAdminEditorOpen(false); setChosenAddDesignDims(null); }}
+        onClose={() => setAdminEditorOpen(false)}
         onSaveAdmin={(frontItems, backItems, frontPNG, backPNG, frontBg, backBg, frontBgSvg, backBgSvg) => {
           // Update local state first, then immediately persist to DB so
           // bulk-imported designs (and any BC design) are saved in one step.
@@ -1597,15 +1764,30 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           const nextBackOverlay  = backPNG  || dBackOverlay;
           const nextFrontBg = frontBg ?? dFrontBgColor;
           const nextBackBg  = backBg  ?? dBackBgColor;
+          // A flat SVG rect matching the canvas dims/bg color — used as the last-resort
+          // frontImage fallback below. Must NOT be the rendered preview PNG: that already has
+          // the admin's items baked in, and since those same items are also saved separately
+          // (frontAdminItems) and rendered on top by the editor, using the PNG as the base
+          // doubled up every item (e.g. an arrow shape appearing twice, only one draggable).
+          const plainBgSvg = (color: string) => {
+            const dims = chosenAddDesignDims ?? customDimsInches;
+            const w = dims ? Math.round(dims.width * 130) : 460;
+            const h = dims ? Math.round(dims.height * 130) : 270;
+            return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="${color}"/></svg>`)}`;
+          };
           // bgSvg data URLs represent the updated SVG template (with patched shape colors).
           // For labels the circle/oval is an extracted graphicItem (not in bgSvg), so always
-          // preserve the original full label SVG as frontImage.
+          // preserve the original full label SVG as frontImage. Categories with no dedicated
+          // outline (anything besides business cards/flyers) have nothing to fall back to when
+          // the admin never applied an SVG background template (just a plain color + items) —
+          // fall back to a flat rect so frontImage is never empty and the save (which requires
+          // it) doesn't fail.
           const nextFrontImg = isStickerLabel
             ? (dFrontImage || "")
-            : (frontBgSvg || dFrontImage || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : ""));
+            : (frontBgSvg || dFrontImage || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : "") || plainBgSvg(nextFrontBg));
           const nextBackImg  = isStickerLabel
             ? (dBackImage || "")
-            : (backBgSvg  || dBackImage  || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : ""));
+            : (backBgSvg  || dBackImage  || (isBusinessCard ? bcCardOutline : isFlyer ? flyerOutline : "") || (nextBackItems.length > 0 ? plainBgSvg(nextBackBg) : ""));
 
           setDFrontAdminItems(nextFrontItems);
           setDBackAdminItems(nextBackItems);
@@ -1621,6 +1803,13 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
           // except T-Shirts, which use the field form instead), auto-save directly.
           if (!editingDesignId && !isTShirt) {
             const autoName = `Design ${(gallery?.designs?.length ?? 0) + 1}`;
+            // Tag the new design with whichever catalog size the admin picked (from the size
+            // popup or the page's size row) so it only shows up under that size going forward.
+            const pickedSizeLabel = chosenAddDesignDims
+              ? (pageSizeChoices ?? sizeChoices)?.find(
+                  (s) => s.width === chosenAddDesignDims.width && s.height === chosenAddDesignDims.height
+                )?.label
+              : undefined;
             const newPayload = {
               name: autoName,
               frontImage: nextFrontImg,
@@ -1629,6 +1818,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
               ...(nextBackOverlay  ? { backOverlay:  nextBackOverlay  } : {}),
               ...(nextFrontItems.length ? { frontAdminItems: nextFrontItems } : {}),
               ...(nextBackItems.length  ? { backAdminItems:  nextBackItems  } : {}),
+              ...(pickedSizeLabel ? { sizeLabel: pickedSizeLabel } : {}),
               frontBgColor: nextFrontBg,
               backBgColor: nextBackBg,
             };
@@ -1666,6 +1856,31 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
             ...(nextBackItems.length  ? { backAdminItems:  nextBackItems  } : {}),
             ...(!isTShirt ? { frontBgColor: nextFrontBg, backBgColor: nextBackBg } : {}),
           };
+          // Editing a design while a size is checked that differs from the size it's already
+          // tagged with (or it isn't tagged at all, e.g. an old shared design shown under every
+          // size) forks a new copy tagged with that size instead of overwriting the original —
+          // otherwise the edit would change what every other size shows too.
+          const editPickedSizeLabel = chosenAddDesignDims
+            ? (pageSizeChoices ?? sizeChoices)?.find(
+                (s) => s.width === chosenAddDesignDims.width && s.height === chosenAddDesignDims.height
+              )?.label
+            : undefined;
+          if (!isTShirt && editPickedSizeLabel && editPickedSizeLabel !== editingDesignSizeLabel) {
+            fetch(`/api/products/${productSlug}/templates/${galleryId}/designs`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, sizeLabel: editPickedSizeLabel }),
+            })
+              .then(async (res) => {
+                if (!res.ok) {
+                  const errData = await res.json().catch(() => ({})) as { error?: string };
+                  flash(`Auto-save failed: ${errData.error ?? res.status}`, true);
+                } else {
+                  loadData();
+                }
+              })
+              .catch((err: unknown) => flash(`Auto-save failed: ${err instanceof Error ? err.message : "network error"}`, true));
+            return;
+          }
           fetch(`/api/products/${productSlug}/templates/${galleryId}/designs/${editingDesignId}`, {
             method: "PATCH", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -1724,7 +1939,7 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
             )}
           </div>
           <div style={{ padding: "0 1.25rem 1.25rem", display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-            <button onClick={() => { setPreviewDesign(null); void startEditDesign(previewDesign); }}
+            <button onClick={() => { const dims = chosenAddDesignDims; setPreviewDesign(null); void startEditDesign(previewDesign, dims); }}
               style={{ padding: "0.5rem 1rem", background: "#06b6d4", color: "#fff", border: "none", borderRadius: "7px", fontWeight: 700, fontSize: "0.825rem", cursor: "pointer" }}>
               Edit Design
             </button>
@@ -1737,32 +1952,47 @@ export default function AdminGalleryDetail({ productSlug, galleryId }: Props) {
       </div>
     )}
 
+    {/* Loading spinner — shown while fetching this product's Sinalite size options */}
+    {sizeChoicesLoading && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+        <div style={{ background: "#fff", borderRadius: 18, padding: "28px 32px", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", border: "3.5px solid #e5e7eb", borderTopColor: "#7c3aed", animation: "spin 0.8s linear infinite" }} />
+          <p style={{ margin: 0, fontSize: "0.875rem", fontWeight: 600, color: "#374151" }}>Loading sizes…</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )}
+
     {/* Size picker — shown before the 2D editor when this product has multiple Sinalite sizes */}
     {sizeChoices && (
       <div
         style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
         onClick={() => setSizeChoices(null)}
       >
-        <div style={{ background: "#fff", borderRadius: 18, width: "min(360px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ height: 5, background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)" }} />
-          <div style={{ padding: "22px 22px 18px" }}>
+        <div style={{ background: "#fff", borderRadius: 18, width: "min(360px,100%)", maxHeight: "min(600px, 85vh)", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ height: 5, background: "linear-gradient(135deg,#7c3aed,#db2777,#f97316)", flexShrink: 0 }} />
+          <div style={{ padding: "22px 22px 0", flexShrink: 0 }}>
             <p style={{ margin: "0 0 16px", fontSize: "0.95rem", fontWeight: 700, color: "#111827", textAlign: "center" }}>
               This product has multiple sizes — pick one for the design canvas
             </p>
+          </div>
+          <div style={{ padding: "0 22px", overflowY: "auto", flex: 1 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {sizeChoices.map((s) => (
                 <button
                   key={s.label}
                   onClick={() => pickAddDesignSize(s)}
-                  style={{ padding: "0.65rem 1rem", background: "#f9fafb", border: "1.5px solid #e5e7eb", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", color: "#374151", cursor: "pointer", textAlign: "center" }}
+                  style={{ padding: "0.65rem 1rem", background: "#f9fafb", border: "1.5px solid #e5e7eb", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", color: "#374151", cursor: "pointer", textAlign: "center", flexShrink: 0 }}
                 >
                   {s.label}
                 </button>
               ))}
             </div>
+          </div>
+          <div style={{ padding: "12px 22px 22px", flexShrink: 0 }}>
             <button
               onClick={() => setSizeChoices(null)}
-              style={{ marginTop: 12, width: "100%", padding: "0.55rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.825rem", cursor: "pointer", color: "#374151" }}
+              style={{ width: "100%", padding: "0.55rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.825rem", cursor: "pointer", color: "#374151" }}
             >
               Cancel
             </button>

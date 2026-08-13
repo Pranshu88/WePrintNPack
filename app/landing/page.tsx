@@ -430,6 +430,36 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── HOW IT WORKS ───────────────────────────────────── */}
+      <section className="lp-sec lp-how" id="lp-how">
+        <div className="lp-wrap">
+          <div className="lp-sec-head lp-centered lp-anim">
+            <h2>HOW IT WORKS</h2>
+            <div className="lp-underline-bar" />
+          </div>
+          <div className="lp-how-row">
+            {howItWorks.map((step, i) => (
+              <Fragment key={step.num}>
+                <div className={`lp-how-step lp-anim lp-anim-d${i + 1}`}>
+                  <div className="lp-how-badges">
+                    <div className="lp-how-num" style={{ background: step.color }}>
+                      {step.num}
+                    </div>
+                    <span className="lp-how-inner-dash" />
+                    <div className="lp-how-icon-ring" style={{ borderColor: step.color }}>
+                      <HowIcon num={step.num} color={step.color} />
+                    </div>
+                  </div>
+                  <strong className="lp-how-title">{step.title}</strong>
+                  <p className="lp-how-desc">{step.desc}</p>
+                </div>
+                {i < howItWorks.length - 1 && <div className="lp-how-connector" />}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── PRINT & PACKAGING ──────────────────────────────── */}
       <section className="lp-sec lp-pp" id="lp-pp">
         <div className="lp-wrap">
@@ -510,37 +540,6 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-
-      {/* ── HOW IT WORKS ───────────────────────────────────── */}
-      <section className="lp-sec lp-how" id="lp-how">
-        <div className="lp-wrap">
-          <div className="lp-sec-head lp-centered lp-anim">
-            <h2>HOW IT WORKS</h2>
-            <div className="lp-underline-bar" />
-          </div>
-          <div className="lp-how-row">
-            {howItWorks.map((step, i) => (
-              <Fragment key={step.num}>
-                <div className={`lp-how-step lp-anim lp-anim-d${i + 1}`}>
-                  <div className="lp-how-badges">
-                    <div className="lp-how-num" style={{ background: step.color }}>
-                      {step.num}
-                    </div>
-                    <span className="lp-how-inner-dash" />
-                    <div className="lp-how-icon-ring" style={{ borderColor: step.color }}>
-                      <HowIcon num={step.num} color={step.color} />
-                    </div>
-                  </div>
-                  <strong className="lp-how-title">{step.title}</strong>
-                  <p className="lp-how-desc">{step.desc}</p>
-                </div>
-                {i < howItWorks.length - 1 && <div className="lp-how-connector" />}
-              </Fragment>
-            ))}
-          </div>
-        </div>
-      </section>
-
 
       {/* ── CTA ────────────────────────────────────────────── */}
       <section className="lp-cta">

@@ -94,6 +94,16 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
     );
   }
 
+  // A gallery only offers a size picker when its specs declare a comma-separated "Size:" list
+  // (e.g. a shirt with several print sizes). Most galleries — one per fixed physical size, like
+  // each Postcards variant — have no such spec, so there's nothing to pick and "Browse Designs"
+  // must not require a selection that can never be made.
+  const gallerySizeSpec = activeGallery?.specs?.find((s) => s.toLowerCase().startsWith("size:"));
+  const gallerySizes = gallerySizeSpec
+    ? gallerySizeSpec.replace(/^size:\s*/i, "").replace(/\(.*?\)/g, "").split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  const sizeRequired = gallerySizes.length > 0;
+
   return (
     <>
       {view === "templates" && (
@@ -211,10 +221,7 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
 
               {/* Specs from gallery — size + fabric */}
               {activeGallery?.specs && activeGallery.specs.length > 0 && (() => {
-                const sizeSpec = activeGallery.specs!.find((s) => s.toLowerCase().startsWith("size:"));
-                const sizes = sizeSpec
-                  ? sizeSpec.replace(/^size:\s*/i, "").replace(/\(.*?\)/g, "").split(",").map((s) => s.trim()).filter(Boolean)
-                  : [];
+                const sizes = gallerySizes;
                 const otherSpecs = activeGallery.specs!.filter((s) => !s.toLowerCase().startsWith("size:"));
                 return (
                   <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "1rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -269,20 +276,20 @@ export default function ShirtOrderClient({ shirt, galleryId }: Props) {
                   <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                     <button
                       onClick={() => {
-                        if (!selectedSize) { setSizeError(true); return; }
+                        if (sizeRequired && !selectedSize) { setSizeError(true); return; }
                         setView("templates");
                       }}
                       style={{
                         width: "100%", padding: "0.875rem",
-                        background: selectedSize
+                        background: (!sizeRequired || selectedSize)
                           ? "linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #f97316 100%)"
                           : "#d1d5db",
-                        color: selectedSize ? "#fff" : "#9ca3af",
+                        color: (!sizeRequired || selectedSize) ? "#fff" : "#9ca3af",
                         border: "none", borderRadius: "999px",
                         fontSize: "1rem", fontWeight: 700,
-                        cursor: selectedSize ? "pointer" : "not-allowed",
+                        cursor: (!sizeRequired || selectedSize) ? "pointer" : "not-allowed",
                         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                        boxShadow: selectedSize ? "0 4px 18px rgba(124,58,237,0.35)" : "none",
+                        boxShadow: (!sizeRequired || selectedSize) ? "0 4px 18px rgba(124,58,237,0.35)" : "none",
                         transition: "background 0.2s, box-shadow 0.2s",
                       }}
                     >

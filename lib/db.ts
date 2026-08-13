@@ -193,6 +193,12 @@ async function initializeDb(client: Client): Promise<void> {
   try {
     await client.execute("ALTER TABLE gallery_templates ADD COLUMN images_json TEXT");
   } catch { /* already exists */ }
+  try {
+    // Tags a design with the catalog size it was created under (e.g. "4 x 6") when the admin
+    // picked one from the size row before adding it. Designs without a tag (everything created
+    // before this, or products with a single size) keep showing regardless of the selected size.
+    await client.execute("ALTER TABLE designs ADD COLUMN size_label TEXT");
+  } catch { /* already exists */ }
 
   // One-time data fixes — each runs at most once per database, tracked via applied_fixes.
   const hideStrayFixId = "hide-stray-seed-business-card-templates-2026-07";

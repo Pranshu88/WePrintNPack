@@ -49,6 +49,10 @@ export type DesignTemplateItem = {
   frontBgColor?: string;
   backBgColor?: string;
   colorVariants?: DesignColorVariant[];
+  // The catalog size (e.g. "4 x 6") this design was created under, when the admin picked one
+  // from the size row before adding it. Undefined for designs made before this existed, or for
+  // products with only one size — those keep showing regardless of the selected size.
+  sizeLabel?: string;
   createdAt: string;
 };
 
@@ -82,7 +86,7 @@ export type PaginatedTemplates = {
 // ─── Internal row shapes ──────────────────────────────────────────────────────
 
 type GtRow    = { id: string; product_slug: string; name: string; preview_image: string; created_at: string; price?: string | null; specs_json?: string | null; visible?: number | null; description?: string | null; sinalite_id?: string | null; sinalite_sku?: string | null; sinalite_options_json?: string | null; images_json?: string | null };
-type DesignRow = { id: string; gallery_id: string; name: string; color_hex: string | null; color_name: string | null; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; front_bg_color: string | null; back_bg_color: string | null; created_at: string };
+type DesignRow = { id: string; gallery_id: string; name: string; color_hex: string | null; color_name: string | null; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; front_bg_color: string | null; back_bg_color: string | null; size_label: string | null; created_at: string };
 type ColorRow  = { id: string; design_id: string; color_hex: string; color_name: string; front_image: string; front_overlay: string | null; back_image: string | null; back_overlay: string | null; front_admin_items: string | null; back_admin_items: string | null; created_at: string };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -97,7 +101,7 @@ function toGtRow(r: Row): GtRow {
 }
 
 function toDesignRow(r: Row): DesignRow {
-  return { id: s(r.id)!, gallery_id: s(r.gallery_id)!, name: s(r.name)!, color_hex: s(r.color_hex), color_name: s(r.color_name), front_image: s(r.front_image)!, front_overlay: s(r.front_overlay), back_image: s(r.back_image), back_overlay: s(r.back_overlay), front_admin_items: s(r.front_admin_items), back_admin_items: s(r.back_admin_items), front_bg_color: s(r.front_bg_color), back_bg_color: s(r.back_bg_color), created_at: s(r.created_at)! };
+  return { id: s(r.id)!, gallery_id: s(r.gallery_id)!, name: s(r.name)!, color_hex: s(r.color_hex), color_name: s(r.color_name), front_image: s(r.front_image)!, front_overlay: s(r.front_overlay), back_image: s(r.back_image), back_overlay: s(r.back_overlay), front_admin_items: s(r.front_admin_items), back_admin_items: s(r.back_admin_items), front_bg_color: s(r.front_bg_color), back_bg_color: s(r.back_bg_color), size_label: s(r.size_label), created_at: s(r.created_at)! };
 }
 
 function toColorRow(r: Row): ColorRow {
@@ -130,6 +134,7 @@ function rowToDesign(d: DesignRow, colors: ColorRow[]): DesignTemplateItem {
   if (d.back_overlay) item.backOverlay = d.back_overlay;
   if (d.front_bg_color) item.frontBgColor = d.front_bg_color;
   if (d.back_bg_color) item.backBgColor = d.back_bg_color;
+  if (d.size_label) item.sizeLabel = d.size_label;
   const fai = parseItems(d.front_admin_items); if (fai) item.frontAdminItems = fai;
   const bai = parseItems(d.back_admin_items);  if (bai) item.backAdminItems = bai;
   const variants = colors.map(rowToColor); if (variants.length > 0) item.colorVariants = variants;
@@ -296,12 +301,12 @@ export async function deleteGalleryTemplate(id: string): Promise<boolean> {
   return res.rowsAffected > 0;
 }
 
-export async function addDesign(galleryId: string, input: { name: string; colorHex?: string; colorName?: string; frontImage: string; frontOverlay?: string; backImage?: string; backOverlay?: string; frontAdminItems?: SerializableItem[]; backAdminItems?: SerializableItem[]; frontBgColor?: string; backBgColor?: string }): Promise<GalleryTemplate | undefined> {
+export async function addDesign(galleryId: string, input: { name: string; colorHex?: string; colorName?: string; frontImage: string; frontOverlay?: string; backImage?: string; backOverlay?: string; frontAdminItems?: SerializableItem[]; backAdminItems?: SerializableItem[]; frontBgColor?: string; backBgColor?: string; sizeLabel?: string }): Promise<GalleryTemplate | undefined> {
   const db = await getDb();
   const check = await db.execute({ sql: "SELECT id FROM gallery_templates WHERE id = ?", args: [galleryId] });
   if (check.rows.length === 0) return undefined;
   const id = uid();
-  await db.execute({ sql: `INSERT INTO designs (id, gallery_id, name, color_hex, color_name, front_image, front_overlay, back_image, back_overlay, front_admin_items, back_admin_items, front_bg_color, back_bg_color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args: [id, galleryId, input.name.trim(), input.colorHex ?? null, input.colorName ?? null, input.frontImage, input.frontOverlay ?? null, input.backImage ?? null, input.backOverlay ?? null, input.frontAdminItems ? JSON.stringify(input.frontAdminItems) : null, input.backAdminItems ? JSON.stringify(input.backAdminItems) : null, input.frontBgColor ?? null, input.backBgColor ?? null, new Date().toISOString()] });
+  await db.execute({ sql: `INSERT INTO designs (id, gallery_id, name, color_hex, color_name, front_image, front_overlay, back_image, back_overlay, front_admin_items, back_admin_items, front_bg_color, back_bg_color, size_label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args: [id, galleryId, input.name.trim(), input.colorHex ?? null, input.colorName ?? null, input.frontImage, input.frontOverlay ?? null, input.backImage ?? null, input.backOverlay ?? null, input.frontAdminItems ? JSON.stringify(input.frontAdminItems) : null, input.backAdminItems ? JSON.stringify(input.backAdminItems) : null, input.frontBgColor ?? null, input.backBgColor ?? null, input.sizeLabel ?? null, new Date().toISOString()] });
   return getGalleryTemplate(galleryId);
 }
 
