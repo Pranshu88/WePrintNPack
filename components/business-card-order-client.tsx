@@ -189,6 +189,7 @@ const zoomBtnStyle: React.CSSProperties = {
 type Props = {
   product: Product;
   galleryId: string | null;
+  savedDesignId?: string | null;
   categoryLabel?: string;
   categoryHref?: string;
   productBasePath?: string;
@@ -197,7 +198,19 @@ type Props = {
 
 const DESIGNS_PER_PAGE = 20;
 
-export default function BusinessCardOrderClient({ product, galleryId, categoryLabel = "Business Cards", categoryHref = "/products/business-cards", productBasePath, productNameOverride }: Props) {
+type SavedDesignData = {
+  id: string;
+  frontItems: SerializableItem[];
+  backItems: SerializableItem[];
+  frontTemplate: { baseImage: string; overlayImage?: string; overlayColor: string } | null;
+  backTemplate: { baseImage: string; overlayImage?: string; overlayColor: string } | null;
+  frontBgColor?: string;
+  backBgColor?: string;
+  frontBgSvg?: string;
+  backBgSvg?: string;
+};
+
+export default function BusinessCardOrderClient({ product, galleryId, savedDesignId, categoryLabel = "Business Cards", categoryHref = "/products/business-cards", productBasePath, productNameOverride }: Props) {
   const basePath = productBasePath ?? categoryHref;
   const [editorOpen, setEditorOpen] = useState(false);
   const [designsModalOpen, setDesignsModalOpen] = useState(false);
@@ -224,6 +237,20 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
   const [frontBgColor, setFrontBgColor] = useState("#ffffff");
   const [backBgColor, setBackBgColor] = useState("#ffffff");
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null);
+  const [savedDesignData, setSavedDesignData] = useState<SavedDesignData | null>(null);
+
+  // Resume a design the customer previously saved to their account
+  useEffect(() => {
+    if (!savedDesignId) return;
+    fetch(`/api/designs/${savedDesignId}`, { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d: SavedDesignData | null) => {
+        if (!d) return;
+        setSavedDesignData(d);
+        setEditorOpen(true);
+      })
+      .catch(() => {});
+  }, [savedDesignId]);
 
   // zoom / lens
   const [zoom, setZoom] = useState(1);
@@ -453,6 +480,7 @@ export default function BusinessCardOrderClient({ product, galleryId, categoryLa
         initialBackItems={backItems}
         initialFrontBgColor={frontBgColor}
         initialBackBgColor={backBgColor}
+        savedDesignData={savedDesignData}
         templateId={selectedDesignId}
         productName={displayTitle}
         pricePerUnit={displayPriceNum}

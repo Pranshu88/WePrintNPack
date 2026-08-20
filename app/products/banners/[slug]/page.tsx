@@ -10,10 +10,10 @@ export default async function BannerDetailPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ gallery?: string }>;
+  searchParams: Promise<{ gallery?: string; savedDesignId?: string }>;
 }) {
   const { slug }    = await params;
-  const { gallery } = await searchParams;
+  const { gallery, savedDesignId } = await searchParams;
   const product     = await getProductBySlug(slug);
 
   if (!product || (product.category !== "vinyl-banners" && product.category !== "roll-up-banners")) {
@@ -26,6 +26,7 @@ export default async function BannerDetailPage({
     <BusinessCardOrderClient
       product={product}
       galleryId={gallery ?? null}
+      savedDesignId={savedDesignId ?? null}
       categoryLabel="Banners"
       categoryHref="/products/banners"
       productBasePath="/products/banners"

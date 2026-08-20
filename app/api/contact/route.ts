@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
+import crypto from "crypto";
+import { put } from "@vercel/blob";
+import getDb from "@/lib/db";
+
+// Human-readable, collision-safe without needing an atomic counter — sortable by
+// date and short enough for a customer to read back over the phone.
+function generateReferenceNo(): string {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+  return `QR-${date}-${suffix}`;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +26,30 @@ export async function POST(req: NextRequest) {
 
     if (!name || !phone || !email || !product || !quantity) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
+    }
+
+    // Persist first so the request is never lost even if email sending below fails
+    // (missing env vars, provider outage, etc).
+    let fileUrl = "";
+    try {
+      if (file && file.size > 0) {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const blob = await put(file.name, buffer, { access: "public", addRandomSuffix: true });
+        fileUrl = blob.url;
+      }
+    } catch (uploadErr) {
+      console.error("Quote request file upload failed:", uploadErr);
+    }
+    const referenceNo = generateReferenceNo();
+    try {
+      const db = await getDb();
+      await db.execute({
+        sql: `INSERT INTO quote_requests (id, reference_no, name, phone, email, product, quantity, message, file_name, file_url, status, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)`,
+        args: [crypto.randomUUID(), referenceNo, name, phone, email, product, quantity, message, file?.name ?? "", fileUrl, new Date().toISOString()],
+      });
+    } catch (dbErr) {
+      console.error("Quote request DB insert failed:", dbErr);
     }
 
     const transporter = nodemailer.createTransport({
@@ -36,8 +71,9 @@ export async function POST(req: NextRequest) {
       from: `"We Print N Pack" <${process.env.GMAIL_USER}>`,
       to: process.env.CONTACT_TO_EMAIL || "pranshu@yopmail.com",
       replyTo: email,
-      subject: `Print Quote – ${product} – ${name}`,
+      subject: `Print Quote [${referenceNo}] – ${product} – ${name}`,
       text: [
+        `Reference: ${referenceNo}`,
         `Name:    ${name}`,
         `Phone:   ${phone}`,
         `Email:   ${email}`,
@@ -49,6 +85,7 @@ export async function POST(req: NextRequest) {
       html: `
         <h2 style="color:#f97316;font-family:sans-serif">New Print Quote Request</h2>
         <table style="font-family:sans-serif;font-size:15px;border-collapse:collapse">
+          <tr><td style="padding:6px 16px 6px 0;color:#555;font-weight:600">Reference</td><td><strong>${referenceNo}</strong></td></tr>
           <tr><td style="padding:6px 16px 6px 0;color:#555;font-weight:600">Name</td><td>${name}</td></tr>
           <tr><td style="padding:6px 16px 6px 0;color:#555;font-weight:600">Phone</td><td>${phone}</td></tr>
           <tr><td style="padding:6px 16px 6px 0;color:#555;font-weight:600">Email</td><td><a href="mailto:${email}">${email}</a></td></tr>
@@ -65,12 +102,15 @@ export async function POST(req: NextRequest) {
     await transporter.sendMail({
       from: `"We Print N Pack" <${process.env.GMAIL_USER}>`,
       to: email,
-      subject: "Thank you for contacting WE Print n Pack",
+      subject: `Thank you for contacting WE Print n Pack [${referenceNo}]`,
       text: [
         `Hi ${name},`,
         "",
         "Thank you for contacting WE Print n Pack.",
         "We received your quote request and our team will contact you shortly.",
+        "",
+        `Your reference number: ${referenceNo}`,
+        "Please quote this number if you contact us about this request.",
         "",
         "Here's a summary of your request:",
         `  Product:  ${product}`,
@@ -94,6 +134,10 @@ export async function POST(req: NextRequest) {
               Thank you for contacting <strong>WE Print n Pack</strong>.<br/>
               We received your quote request and our team will contact you shortly.
             </p>
+            <div style="background:#111827;padding:14px 20px;border-radius:6px;margin-bottom:20px;text-align:center">
+              <p style="margin:0;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em">Your reference number</p>
+              <p style="margin:2px 0 0;font-size:20px;font-weight:700;color:#fff;letter-spacing:0.04em">${referenceNo}</p>
+            </div>
             <div style="background:#fef9f5;border-left:4px solid #f97316;padding:16px 20px;border-radius:4px;margin-bottom:24px">
               <p style="margin:0 0 8px;font-weight:600;color:#111;font-size:14px">Your Request Summary</p>
               <table style="font-size:14px;color:#444;border-collapse:collapse;width:100%">
@@ -112,7 +156,7 @@ export async function POST(req: NextRequest) {
       `,
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, referenceNo });
   } catch (err) {
     console.error("Contact form error:", err);
     return NextResponse.json({ error: "Failed to send email." }, { status: 500 });

@@ -14,10 +14,10 @@ export default async function BusinessCardDetailPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ gallery?: string }>;
+  searchParams: Promise<{ gallery?: string; savedDesignId?: string }>;
 }) {
   const { slug } = await params;
-  const { gallery } = await searchParams;
+  const { gallery, savedDesignId } = await searchParams;
 
   // Real, standalone products (Business Cards, Flyers, Brochures, Postcards…)
   let product = await getProductBySlug(slug);
@@ -33,5 +33,5 @@ export default async function BusinessCardDetailPage({
 
   if (!product) notFound();
 
-  return <BusinessCardOrderClient product={product} galleryId={gallery ?? null} />;
+  return <BusinessCardOrderClient product={product} galleryId={gallery ?? null} savedDesignId={savedDesignId ?? null} />;
 }

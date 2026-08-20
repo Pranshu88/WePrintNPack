@@ -142,6 +142,44 @@ async function initializeDb(client: Client): Promise<void> {
       id TEXT PRIMARY KEY
     );
 
+    CREATE TABLE IF NOT EXISTS saved_designs (
+      id                TEXT PRIMARY KEY,
+      customer_id       TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      product_slug      TEXT NOT NULL,
+      product_name      TEXT NOT NULL,
+      product_path      TEXT NOT NULL,
+      size_label        TEXT,
+      front_items       TEXT NOT NULL,
+      back_items        TEXT NOT NULL,
+      front_template    TEXT,
+      back_template     TEXT,
+      front_bg_color    TEXT,
+      back_bg_color     TEXT,
+      front_bg_svg      TEXT,
+      back_bg_svg       TEXT,
+      thumbnail         TEXT,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sd_customer ON saved_designs(customer_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS quote_requests (
+      id           TEXT PRIMARY KEY,
+      reference_no TEXT UNIQUE,
+      name         TEXT NOT NULL,
+      phone        TEXT NOT NULL,
+      email        TEXT NOT NULL,
+      product      TEXT NOT NULL,
+      quantity     TEXT NOT NULL,
+      message      TEXT DEFAULT '',
+      file_name    TEXT DEFAULT '',
+      file_url     TEXT DEFAULT '',
+      status       TEXT NOT NULL DEFAULT 'new',
+      created_at   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_qr_created ON quote_requests(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS products (
       slug            TEXT PRIMARY KEY,
       name            TEXT NOT NULL,
@@ -192,6 +230,12 @@ async function initializeDb(client: Client): Promise<void> {
   } catch { /* already exists */ }
   try {
     await client.execute("ALTER TABLE gallery_templates ADD COLUMN images_json TEXT");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE quote_requests ADD COLUMN file_url TEXT DEFAULT ''");
+  } catch { /* already exists */ }
+  try {
+    await client.execute("ALTER TABLE quote_requests ADD COLUMN reference_no TEXT");
   } catch { /* already exists */ }
   try {
     // Tags a design with the catalog size it was created under (e.g. "4 x 6") when the admin

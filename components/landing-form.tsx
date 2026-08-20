@@ -23,6 +23,7 @@ export default function LandingContactForm() {
   const [form, setForm]         = useState<Form>(EMPTY);
   const [file, setFile]         = useState<File | null>(null);
   const [done, setDone]         = useState(false);
+  const [referenceNo, setReferenceNo] = useState("");
   const [busy, setBusy]         = useState(false);
   const [err,  setErr]          = useState("");
   const [drag, setDrag]         = useState(false);
@@ -66,11 +67,12 @@ export default function LandingContactForm() {
       if (file) fd.append("file", file);
 
       const res = await fetch("/api/contact", { method: "POST", body: fd });
+      const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
         setErr((j as { error?: string }).error || "Something went wrong. Please try again.");
         return;
       }
+      setReferenceNo((j as { referenceNo?: string }).referenceNo || "");
       setDone(true);
       setForm(EMPTY);
       setFile(null);
@@ -87,6 +89,12 @@ export default function LandingContactForm() {
       <span className="lp-success-ico">🎉</span>
       <h3>Request Sent!</h3>
       <p>Your quote request has been sent to {CONTACT_EMAIL}. We&apos;ll get back to you shortly.</p>
+      {referenceNo && (
+        <div style={{ margin: "14px 0", padding: "12px 20px", background: "#111827", borderRadius: 8, display: "inline-block" }}>
+          <div style={{ fontSize: "0.7rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em" }}>Your reference number</div>
+          <div style={{ fontSize: "1.15rem", fontWeight: 700, color: "#fff", letterSpacing: "0.03em" }}>{referenceNo}</div>
+        </div>
+      )}
       <button
         onClick={() => setDone(false)}
         style={{ background:"none", border:"none", color:"#2563eb", cursor:"pointer", fontWeight:600 }}

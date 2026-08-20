@@ -156,21 +156,6 @@ export default function LandingPage() {
       <WelcomePopup />
       {policyOpen && <PolicyModal type={policyOpen} onClose={() => setPolicyOpen(null)} />}
 
-      {/* ── ANNOUNCEMENT BAR ───────────────────────────────── */}
-      <div className="lp-announce-bar">
-        <div className="lp-announce-track">
-          {[0, 1].map((copy) => (
-            <span key={copy} aria-hidden={copy === 1 ? true : undefined} style={{ display: "inline-flex" }}>
-              <span className="lp-announce-item">🎉 Get 10% OFF your first order! &nbsp;|&nbsp; Use code: <strong>WELCOME10</strong></span>
-              <span className="lp-announce-item">📦 Free Shipping on orders over $200</span>
-              <span className="lp-announce-item">📞 Need help? &nbsp;<strong>+1 902-412-2133</strong></span>
-              <span className="lp-announce-item">🚀 Canada Wide Delivery</span>
-              <span className="lp-announce-item">✅ 100% Satisfaction Guaranteed</span>
-            </span>
-          ))}
-        </div>
-      </div>
-
       {/* ── HEADER ─────────────────────────────────────────── */}
       <header className="lp-header">
         <div className="lp-header-inner">
@@ -291,6 +276,26 @@ export default function LandingPage() {
                         <line x1="13" y1="15" x2="17" y2="15"/>
                       </svg>
                       My Orders
+                    </a>
+                    {/* My Designs */}
+                    <a
+                      href="/account/designs"
+                      onClick={() => setProfileOpen(false)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        width: "100%", padding: "12px 16px", background: "#fff",
+                        textDecoration: "none", fontSize: "0.88rem", fontWeight: 600,
+                        color: "#374151", borderBottom: "1px solid #f3f4f6",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                      </svg>
+                      My Designs
                     </a>
                     {/* Sign Out */}
                     <button

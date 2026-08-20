@@ -24,7 +24,11 @@ export function LandingHeader() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("wp_user");
-      if (saved) setCurrentUser(JSON.parse(saved) as Customer);
+      if (saved) {
+        const user = JSON.parse(saved) as Customer;
+        setCurrentUser(user);
+        fetch("/api/auth/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: user.id }) }).catch(() => {});
+      }
     } catch { /* ignore */ }
     const refreshCount = () => {
       try {
@@ -48,13 +52,6 @@ export function LandingHeader() {
 
   return (
     <>
-      {/* Announcement bar */}
-      <div className="lp-announce-bar">
-        <span>🎉 Get 10% OFF your first order! &nbsp;|&nbsp; Use code: <strong>WELCOME10</strong></span>
-        <span>📦 Free Shipping on orders over $200</span>
-        <span>📞 Need help? &nbsp;<strong>+1 902-412-2133</strong></span>
-      </div>
-
       {/* Main header */}
       <header className="lp-header">
         <div className="lp-header-inner">
@@ -167,6 +164,25 @@ export function LandingHeader() {
                         <line x1="13" y1="15" x2="17" y2="15"/>
                       </svg>
                       My Orders
+                    </a>
+                    <a
+                      href="/account/designs"
+                      onClick={() => setProfileOpen(false)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        width: "100%", padding: "12px 16px", background: "#fff",
+                        textDecoration: "none", fontSize: "0.88rem", fontWeight: 600,
+                        color: "#374151", borderBottom: "1px solid #f3f4f6",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                      </svg>
+                      My Designs
                     </a>
                     <button
                       onClick={() => {

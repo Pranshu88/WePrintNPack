@@ -11,10 +11,10 @@ export default async function MarketingMaterialOrderPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ gallery?: string }>;
+  searchParams: Promise<{ gallery?: string; savedDesignId?: string }>;
 }) {
   const { slug } = await params;
-  const { gallery } = await searchParams;
+  const { gallery, savedDesignId } = await searchParams;
 
   const parent = await getProductBySlug("marketing-material");
   if (!parent) notFound();
@@ -32,6 +32,7 @@ export default async function MarketingMaterialOrderPage({
     <BusinessCardOrderClient
       product={product}
       galleryId={gallery ?? null}
+      savedDesignId={savedDesignId ?? null}
       categoryLabel="Marketing Material"
       categoryHref="/products/marketing-material"
       productBasePath="/products/marketing-material"

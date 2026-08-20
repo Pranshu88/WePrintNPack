@@ -1278,6 +1278,21 @@ type Props = {
   initialBackItems?: SerializableItem[];
   initialFrontBgColor?: string;
   initialBackBgColor?: string;
+  // A design the customer previously saved to their account (via "Save Design"),
+  // fetched by the wrapper page from /api/designs/[id] and handed in to restore
+  // the exact canvas state (distinct from initialFrontItems/initialBackItems,
+  // which are gallery/admin templates, not a customer's own saved snapshot).
+  savedDesignData?: {
+    id: string;
+    frontItems: SerializableItem[];
+    backItems: SerializableItem[];
+    frontTemplate: Template | null;
+    backTemplate: Template | null;
+    frontBgColor?: string;
+    backBgColor?: string;
+    frontBgSvg?: string;
+    backBgSvg?: string;
+  } | null;
   // Colors configured on the gallery template's own Color spec (via the admin swatch
   // picker) — shown as the pickable "Background Color" swatches instead of the generic
   // BG_COLOR_PRESETS list, so the editor offers exactly the colors admin curated.
@@ -1490,6 +1505,7 @@ export default function DesignEditorShell({
   initialBackItems,
   initialFrontBgColor,
   initialBackBgColor,
+  savedDesignData,
   materialColors,
   onSaveAdmin,
   onSaveAndContinue,
@@ -1646,6 +1662,10 @@ export default function DesignEditorShell({
   // Auth + checkout
   const [cartUser, setCartUser] = useState<AuthCustomer | null>(null);
   const [authForCartOpen, setAuthForCartOpen] = useState(false);
+  const [authForSaveOpen, setAuthForSaveOpen] = useState(false);
+  const [savingDesign, setSavingDesign] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [loadedSavedDesignId, setLoadedSavedDesignId] = useState<string | null>(savedDesignData?.id ?? null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; sinaliteId?: string; sinaliteOptions?: Record<string, string>; frontFileUrl?: string; backFileUrl?: string };
@@ -2034,6 +2054,92 @@ export default function DesignEditorShell({
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Restore a design the customer previously saved to their account
+  useEffect(() => {
+    if (adminMode || !savedDesignData) return;
+    setSides({
+      front: { items: (savedDesignData.frontItems ?? []) as CanvasItem[], template: savedDesignData.frontTemplate ?? null },
+      back: { items: (savedDesignData.backItems ?? []) as CanvasItem[], template: savedDesignData.backTemplate ?? null },
+    });
+    setBgColors({ front: savedDesignData.frontBgColor ?? "#ffffff", back: savedDesignData.backBgColor ?? "#ffffff" });
+    setBgSvg({ front: savedDesignData.frontBgSvg ?? "", back: savedDesignData.backBgSvg ?? "" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function doSaveDesign(retried = false): Promise<void> {
+    setSavingDesign(true);
+    setSaveMessage("");
+    try {
+      let fp = previewFrontPng;
+      let bp = previewBackPng;
+      if (!fp) fp = await generateSidePreviewPNG("front", sides as Parameters<typeof generateSidePreviewPNG>[1], bgColors, bgSvg, dims, 2);
+      if (!bp && sides.back.template) bp = await generateSidePreviewPNG("back", sides as Parameters<typeof generateSidePreviewPNG>[1], bgColors, bgSvg, dims, 2);
+      const thumb = await new Promise<string>((resolve) => {
+        if (!fp) { resolve(""); return; }
+        const img = new window.Image();
+        img.onload = () => {
+          try {
+            const ratio = img.naturalWidth / img.naturalHeight;
+            const maxW = 320, maxH = 320;
+            let w = img.naturalWidth, h = img.naturalHeight;
+            if (w > maxW) { w = maxW; h = Math.round(maxW / ratio); }
+            if (h > maxH) { h = maxH; w = Math.round(maxH * ratio); }
+            const c = document.createElement("canvas");
+            c.width = w; c.height = h;
+            c.getContext("2d")?.drawImage(img, 0, 0, w, h);
+            resolve(c.toDataURL("image/jpeg", 0.85));
+          } catch { resolve(""); }
+        };
+        img.onerror = () => resolve("");
+        img.src = fp;
+      });
+
+      const res = await fetch("/api/designs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: loadedSavedDesignId ?? undefined,
+          name: productName ?? "Custom Design",
+          productSlug: productSlug ?? shirt?.slug ?? "",
+          productName: productName ?? "Custom Print",
+          productPath: typeof window !== "undefined" ? window.location.pathname : "",
+          sizeLabel: customDimsInches ? `${customDimsInches.width} x ${customDimsInches.height}` : undefined,
+          frontItems: sides.front.items,
+          backItems: sides.back.items,
+          frontTemplate: sides.front.template,
+          backTemplate: sides.back.template,
+          frontBgColor: bgColors.front,
+          backBgColor: bgColors.back,
+          frontBgSvg: bgSvg.front,
+          backBgSvg: bgSvg.back,
+          thumbnail: thumb,
+        }),
+      });
+      // Accounts that signed in before customer_session cookies existed have no
+      // cookie yet — silently re-mint one from the known customer id and retry once.
+      if (res.status === 401 && !retried && cartUser) {
+        const sessionRes = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: cartUser.id }),
+        });
+        if (sessionRes.ok) { await doSaveDesign(true); return; }
+      }
+      const data = await res.json() as { ok?: boolean; id?: string; error?: string };
+      if (data.ok && data.id) {
+        setLoadedSavedDesignId(data.id);
+        setSaveMessage("Design saved to your account");
+      } else {
+        setSaveMessage(data.error || "Could not save design");
+      }
+    } catch {
+      setSaveMessage("Could not save design");
+    } finally {
+      setSavingDesign(false);
+      setTimeout(() => setSaveMessage(""), 4000);
+    }
+  }
 
   // Fetch templates and auto-apply selected template (customer mode)
   useEffect(() => {
@@ -3216,6 +3322,24 @@ export default function DesignEditorShell({
               Preview
             </button>
           )}
+          {!adminMode && (
+            <button
+              disabled={savingDesign}
+              onClick={() => {
+                if (!cartUser) { setAuthForSaveOpen(true); return; }
+                void doSaveDesign();
+              }}
+              style={{
+                display: "flex", alignItems: "center", gap: "6px",
+                padding: "0.45rem 1.1rem", border: "1.5px solid #7c3aed",
+                borderRadius: "999px", background: "#fff",
+                cursor: savingDesign ? "not-allowed" : "pointer",
+                fontSize: "0.875rem", fontWeight: 700, color: "#7c3aed",
+                opacity: savingDesign ? 0.7 : 1,
+              }}>
+              {savingDesign ? "Saving…" : (loadedSavedDesignId ? "Update Saved Design" : "Save")}
+            </button>
+          )}
           <button
             onClick={adminMode && onSaveAdmin
               ? async () => {
@@ -3267,7 +3391,7 @@ export default function DesignEditorShell({
               fontSize: "0.875rem", fontWeight: 700,
               boxShadow: "0 4px 14px rgba(124,58,237,0.4)",
             }}>
-            {adminMode ? "Save Design" : "Save & Continue →"}
+            {adminMode ? "Save Design" : "Continue →"}
           </button>
         </div>
       </div>
@@ -3616,9 +3740,15 @@ export default function DesignEditorShell({
             height: CANVAS_H,
           }}>
 
-            {/* Safety area / Bleed legend — top right, above the card */}
+            {/* Safety area / Bleed legend — top right, above the card.
+                Inverse-scaled against the canvas's zoom transform (and its position
+                pre-compensated the same way) so it renders at one fixed, medium size
+                regardless of the product's auto-fit zoom level — otherwise small-canvas
+                products (business cards) zoom in a lot and blow this legend up huge,
+                while large-canvas products (posters/banners) zoom out and shrink it. */}
             <div style={{
-              position: "absolute", top: -60, right: 0,
+              position: "absolute", top: -60 / zoom, right: 0,
+              transform: `scale(${1 / zoom})`, transformOrigin: "top right",
               display: "flex", gap: 12, pointerEvents: "none", zIndex: 10,
             }}>
               <span style={{
@@ -4134,6 +4264,11 @@ export default function DesignEditorShell({
             Pages
           </p>
           {(["front", "back"] as Side[]).filter((side) => !(isSingleSide && side === "back")).map((side, idx) => {
+            // TEMP: "back" page (thumbnail + "Change Back" button) hidden per request.
+            // To restore, delete this line. (Widened to `string` so this early return
+            // doesn't narrow `side`'s type away from "back" for the rest of the map body.)
+            const sideStr: string = side;
+            if (sideStr === "back") return null;
             const isActive = activeSide === side;
             const sd = sides[side];
             const thumbBg = isFlatArt ? bgColors[side] : (shirtColor.hex === "#ffffff" ? "#f3f4f6" : shirtColor.hex);
@@ -4212,14 +4347,16 @@ export default function DesignEditorShell({
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "contain" }}
                     />
-                  ) : sd.template?.baseImage ? (
-                    /* Full original SVG — shows all design elements (bg, shapes, text) at correct scale */
-                    <img src={sd.template.baseImage} alt="" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
                   ) : bgSvg[side] ? (
+                    /* Colored/patched background SVG — matches the main canvas, which also
+                       prefers this over the template's raw (uncolored) baseImage. */
                     <div
                       dangerouslySetInnerHTML={{ __html: bgSvg[side] }}
                       style={{ width: "100%", height: "100%", pointerEvents: "none" }}
                     />
+                  ) : sd.template?.baseImage ? (
+                    /* Full original SVG — shows all design elements (bg, shapes, text) at correct scale */
+                    <img src={sd.template.baseImage} alt="" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
                   ) : !isBusinessCard && shirt?.images[0] ? (
                     <img src={shirt.images[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45, mixBlendMode: "multiply" }} />
                   ) : null}
@@ -4977,6 +5114,31 @@ export default function DesignEditorShell({
               </label>
             </div>
 
+            {/* Save Design to account */}
+            <button
+              type="button"
+              disabled={savingDesign}
+              onClick={() => {
+                if (!cartUser) { setAuthForSaveOpen(true); return; }
+                void doSaveDesign();
+              }}
+              style={{
+                width: "100%", padding: "12px", marginBottom: 10,
+                background: "#fff", border: "2px solid #7c3aed", borderRadius: 14,
+                cursor: savingDesign ? "not-allowed" : "pointer",
+                color: "#7c3aed", fontSize: "0.92rem", fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                opacity: savingDesign ? 0.7 : 1,
+              }}
+            >
+              {savingDesign
+                ? "Saving…"
+                : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> {loadedSavedDesignId ? "Update Saved Design" : "Save Design to My Account"}</>}
+            </button>
+            {saveMessage && (
+              <p style={{ textAlign: "center", marginBottom: 10, fontSize: "0.8rem", fontWeight: 600, color: saveMessage.includes("saved") ? "#16a34a" : "#dc2626" }}>{saveMessage}</p>
+            )}
+
             {/* Add to Cart button */}
             <button
               disabled={!designApproved || effectiveQty < 1}
@@ -5121,6 +5283,18 @@ export default function DesignEditorShell({
         </div>
       </div>
     )}
+
+    {/* ── Auth gate for saving a design to the account ────────────────────── */}
+    <AuthModal
+      open={authForSaveOpen}
+      onClose={() => setAuthForSaveOpen(false)}
+      onSignedIn={(customer) => {
+        setCartUser(customer);
+        try { localStorage.setItem("wp_user", JSON.stringify(customer)); } catch { /* ignore */ }
+        setAuthForSaveOpen(false);
+        void doSaveDesign();
+      }}
+    />
 
     {/* ── Auth gate for cart ───────────────────────────────────────────── */}
     <AuthModal
@@ -5984,16 +6158,43 @@ export default function DesignEditorShell({
               Design Preview
             </span>
           </div>
-          <button
-            onClick={() => setPreviewOpen(false)}
-            style={{
-              background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
-              borderRadius: "50%", width: 36, height: 36,
-              cursor: "pointer", color: "#fff", fontSize: "1rem",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontWeight: 700,
-            }}
-          >✕</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={() => {
+                const normalized = ((previewRotRef.current % 360) + 360) % 360;
+                const backVisible = Math.abs(normalized - 180) < 90;
+                const src = backVisible && previewBackPng ? previewBackPng : previewFrontPng;
+                if (!src) return;
+                const a = document.createElement("a");
+                a.href = src;
+                a.download = `${(productName ?? "design").replace(/[^a-z0-9]+/gi, "-")}-${backVisible ? "back" : "front"}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }}
+              disabled={previewLoading || (!previewFrontPng && !previewBackPng)}
+              style={{
+                background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
+                borderRadius: "999px", padding: "0 16px", height: 36,
+                cursor: previewLoading ? "not-allowed" : "pointer", color: "#fff", fontSize: "0.85rem",
+                display: "flex", alignItems: "center", gap: 6,
+                fontWeight: 700, opacity: previewLoading ? 0.6 : 1,
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download PNG
+            </button>
+            <button
+              onClick={() => setPreviewOpen(false)}
+              style={{
+                background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
+                borderRadius: "50%", width: 36, height: 36,
+                cursor: "pointer", color: "#fff", fontSize: "1rem",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontWeight: 700,
+              }}
+            >✕</button>
+          </div>
         </div>
 
         {/* ── Body ── */}

@@ -264,6 +264,7 @@ export function AdminOrdersPage() {
       items: [
         { label: "Orders", icon: "🛒", href: "/admin/orders", active: pathname === "/admin/orders", count: null },
         { label: "Customers", icon: "👥", href: "/admin/customers", active: pathname === "/admin/customers", count: null },
+        { label: "Quotes", icon: "📝", href: "/admin/quotes", active: pathname === "/admin/quotes", count: null },
         { label: "Analytics", icon: "📊", href: "#", active: false, count: null },
       ],
     },
@@ -715,15 +716,46 @@ export function AdminOrdersPage() {
                 — {previewItem.name}
               </span>
             </div>
-            <button
-              onClick={() => setPreviewItem(null)}
-              style={{
-                background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
-                borderRadius: "50%", width: 36, height: 36,
-                cursor: "pointer", color: "#fff", fontSize: "1rem",
-                display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700,
-              }}
-            >✕</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {!previewItem.name.toLowerCase().includes("box") && (() => {
+                const normalized = ((previewRotY % 360) + 360) % 360;
+                const backVisible = Math.abs(normalized - 180) < 90;
+                const currentSrc = backVisible ? previewItem.backPreview : (previewItem.frontPreview ?? previewItem.thumb);
+                return (
+                <button
+                  onClick={() => {
+                    if (!currentSrc) return;
+                    const a = document.createElement("a");
+                    a.href = currentSrc;
+                    a.download = `${previewItem.name.replace(/[^a-z0-9]+/gi, "-")}-${backVisible ? "back" : "front"}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }}
+                  disabled={!currentSrc}
+                  style={{
+                    background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
+                    borderRadius: "999px", padding: "0 16px", height: 36,
+                    cursor: currentSrc ? "pointer" : "not-allowed", color: "#fff", fontSize: "0.85rem",
+                    display: "flex", alignItems: "center", gap: 6, fontWeight: 700,
+                    opacity: currentSrc ? 1 : 0.5,
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Download {backVisible ? "Back" : "Front"} PNG
+                </button>
+                );
+              })()}
+              <button
+                onClick={() => setPreviewItem(null)}
+                style={{
+                  background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
+                  borderRadius: "50%", width: 36, height: 36,
+                  cursor: "pointer", color: "#fff", fontSize: "1rem",
+                  display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700,
+                }}
+              >✕</button>
+            </div>
           </div>
 
           {/* Body */}

@@ -120,6 +120,7 @@ export function AdminReviewsPage() {
       items: [
         { label: "Orders", icon: "🛒", href: "/admin/orders", active: pathname === "/admin/orders" },
         { label: "Customers", icon: "👥", href: "/admin/customers", active: pathname === "/admin/customers" },
+        { label: "Quotes", icon: "📝", href: "/admin/quotes", active: pathname === "/admin/quotes" },
         { label: "Analytics", icon: "📊", href: "#", active: false },
       ],
     },

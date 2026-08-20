@@ -132,9 +132,10 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     totalOrdersAll: number;
     revenueToday: number;
     totalOrders: number;
+    newQuotes: number;
     recentOrders: Array<{ customer_name: string; customer_email: string; amount_total: number; production_status: string; created_at: string; stripe_session_id: string | null; id: string }>;
   };
-  const [stats, setStats] = useState<StatsData>({ ordersToday: 0, revenueToday: 0, totalOrders: 0, totalOrdersAll: 0, recentOrders: [] });
+  const [stats, setStats] = useState<StatsData>({ ordersToday: 0, revenueToday: 0, totalOrders: 0, totalOrdersAll: 0, newQuotes: 0, recentOrders: [] });
 
   const loadStats = useCallback(async () => {
     try {
@@ -363,6 +364,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
             {[
               { label: "Orders", icon: "🛒", count: stats.totalOrdersAll || null, href: "/admin/orders" },
               { label: "Customers", icon: "👥", count: null, href: "/admin/customers" },
+              { label: "Quotes", icon: "📝", count: stats.newQuotes || null, href: "/admin/quotes" },
               { label: "Analytics", icon: "📊", count: null, href: "#" },
             ].map((item) => (
               <a key={item.label} href={item.href} style={S.navItem(false)}>

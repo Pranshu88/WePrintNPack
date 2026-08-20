@@ -165,6 +165,7 @@ export function AdminCustomersPage() {
       items: [
         { label: "Orders", icon: "🛒", href: "/admin/orders", active: pathname === "/admin/orders", count: null },
         { label: "Customers", icon: "👥", href: "/admin/customers", active: pathname === "/admin/customers", count: null },
+        { label: "Quotes", icon: "📝", href: "/admin/quotes", active: pathname === "/admin/quotes", count: null },
         { label: "Analytics", icon: "📊", href: "#", active: false, count: null },
       ],
     },

@@ -78,6 +78,7 @@ export function AdminTemplatesPage() {
       items: [
         { label: "Orders", icon: "🛒", href: "/admin/orders", active: false, count: orderCount },
         { label: "Customers", icon: "👥", href: "/admin/customers", active: false, count: null },
+        { label: "Quotes", icon: "📝", href: "/admin/quotes", active: false, count: null },
         { label: "Analytics", icon: "📊", href: "#", active: false, count: null },
       ],
     },

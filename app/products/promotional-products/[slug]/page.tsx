@@ -10,10 +10,10 @@ export default async function PromotionalProductsOrderPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ gallery?: string }>;
+  searchParams: Promise<{ gallery?: string; savedDesignId?: string }>;
 }) {
   const { slug } = await params;
-  const { gallery } = await searchParams;
+  const { gallery, savedDesignId } = await searchParams;
 
   const parent = await getProductBySlug("promotional-products");
   if (!parent) notFound();
@@ -27,6 +27,7 @@ export default async function PromotionalProductsOrderPage({
     <BusinessCardOrderClient
       product={product}
       galleryId={gallery ?? null}
+      savedDesignId={savedDesignId ?? null}
       categoryLabel="Promotional Products"
       categoryHref="/products/promotional-products"
       productBasePath="/products/promotional-products"
