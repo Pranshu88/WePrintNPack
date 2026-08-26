@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import InvoiceModal from "@/components/invoice-modal";
 
 type Customer = { id: string; firstName: string; lastName: string; email: string };
 
@@ -220,6 +221,7 @@ export default function MyOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [reviewOrder, setReviewOrder] = useState<Order | null>(null);
   const [reviewDone, setReviewDone] = useState<string | null>(null); // order id
+  const [invoiceOrderId, setInvoiceOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -384,8 +386,18 @@ export default function MyOrdersPage() {
                     ))}
                   </div>
 
-                  {/* Review button */}
-                  <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                  {/* Invoice + review buttons */}
+                  <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                    <button
+                      onClick={() => setInvoiceOrderId(order.id)}
+                      style={{
+                        padding: "9px 16px", borderRadius: 8, border: "none",
+                        background: "linear-gradient(90deg,#7c3aed,#db2777)", color: "#fff",
+                        fontWeight: 700, fontSize: "0.82rem", cursor: "pointer",
+                      }}
+                    >
+                      View Invoice
+                    </button>
                     {isReviewed ? (
                       <span style={{
                         display: "inline-flex", alignItems: "center", gap: 6,
@@ -429,6 +441,10 @@ export default function MyOrdersPage() {
           onClose={() => setReviewOrder(null)}
           onDone={() => handleReviewDone(reviewOrder.id)}
         />
+      )}
+
+      {invoiceOrderId && customer && (
+        <InvoiceModal orderId={invoiceOrderId} email={customer.email} onClose={() => setInvoiceOrderId(null)} />
       )}
     </div>
   );

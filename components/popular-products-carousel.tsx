@@ -436,7 +436,7 @@ export default function PopularProductsCarousel({
                       onClick={saveScroll}
                       style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", color: "#dc2626", fontWeight: 600, fontSize: "0.85rem", textDecoration: "none", marginTop: "0.6rem" }}
                     >
-                      View Details →
+                      Shop Now →
                     </Link>
                   </>
                 ) : (

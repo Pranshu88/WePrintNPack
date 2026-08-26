@@ -1317,6 +1317,9 @@ type Props = {
   // "Configure Your Order" + live Sinalite price panel used on the order page.
   sinaliteId?: string;
   sinaliteOptions?: SinaliteSelectedOption[];
+  // Carries over the option picks (e.g. "Sides") the customer already made on the
+  // order page, so the editor doesn't silently default them to the API's first option.
+  initialSinaliteSelections?: Record<string, string>;
 };
 
 // ─── SidebarIcon ──────────────────────────────────────────────────────────────
@@ -1514,6 +1517,7 @@ export default function DesignEditorShell({
   customDimsInches,
   sinaliteId,
   sinaliteOptions,
+  initialSinaliteSelections,
 }: Props) {
   type AuthCustomer = { id: string; firstName: string; lastName: string; email: string };
   const isBusinessCard  = productType === "business-card";
@@ -1531,7 +1535,7 @@ export default function DesignEditorShell({
   const isLabel            = productType === "sticker-label";
   const isYardSign         = productType === "yard-sign";
   const isFlatArt          = isBusinessCard || isFlyer || isPosterSmall || isPosterLarge || isBanner || isLabel || isYardSign;
-  const isSingleSide       = isPosterSmall || isPosterLarge || isBanner || isLabel || isYardSign;
+  const isSingleSideProduct = isPosterSmall || isPosterLarge || isBanner || isLabel || isYardSign;
   const colorPresets = materialColors && materialColors.length > 0
     ? materialColors.map((hex) => ({ label: hex, value: hex }))
     : BG_COLOR_PRESETS;
@@ -1613,12 +1617,25 @@ export default function DesignEditorShell({
     return groups;
   })();
 
+  // "Sides" stock option (e.g. "14PT Printed 1 Side (4/0)" vs "14PT Printed 2 Sides (4/4)")
+  // controls whether the back page shows in the Pages panel at all.
+  const sinaliteSidesGroupKey = Object.keys(sinaliteOptionGroups).find((key) =>
+    sinaliteOptionGroups[key].some((o) => /\bsides?\b/i.test(o.name))
+  );
+  const isDoubleSidedStock = sinaliteSidesGroupKey
+    ? /2\s*sides?|4\s*\/\s*4/i.test(selectedSinaliteOptions[sinaliteSidesGroupKey] ?? "")
+    : true;
+  const isSingleSide = isSingleSideProduct || !isDoubleSidedStock;
+
   useEffect(() => {
     if (!sinaliteOptions?.length) return;
     setSelectedSinaliteOptions((prev) => {
       const next = { ...prev };
       for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
-        if (!next[key] && opts[0]) next[key] = opts[0].name;
+        if (next[key]) continue;
+        const carriedOver = initialSinaliteSelections?.[key];
+        if (carriedOver && opts.some((o) => o.name === carriedOver)) { next[key] = carriedOver; continue; }
+        if (opts[0]) next[key] = opts[0].name;
       }
       return next;
     });
@@ -1668,7 +1685,8 @@ export default function DesignEditorShell({
   const [loadedSavedDesignId, setLoadedSavedDesignId] = useState<string | null>(savedDesignData?.id ?? null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; sinaliteId?: string; sinaliteOptions?: Record<string, string>; frontFileUrl?: string; backFileUrl?: string };
+  const [currentItemRemoved, setCurrentItemRemoved] = useState(false);
+  type SavedCartItem = { id: string; name: string; qty: number; pricePerUnit: number; total: number; thumb?: string; doubleSided?: boolean; sinaliteId?: string; sinaliteOptions?: Record<string, string>; sinaliteOptionLabels?: Record<string, string>; frontFileUrl?: string; backFileUrl?: string };
   const [existingCartItems, setExistingCartItems] = useState<SavedCartItem[]>([]);
   const [checkoutForm, setCheckoutForm] = useState({ houseNo: "", flat: "", city: "", state: "", postalCode: "", country: "CA", phone: "" });
   const [checkoutError, setCheckoutError] = useState("");
@@ -1739,6 +1757,18 @@ export default function DesignEditorShell({
       if (match) options[match.label] = String(match.id);
     }
     return options;
+  }
+
+  // Human-readable version of buildSinaliteChosenOptions (group label -> selected
+  // option name) for display purposes, e.g. on the admin order detail page.
+  function buildSinaliteOptionLabels(): Record<string, string> {
+    const labels: Record<string, string> = {};
+    for (const [key, opts] of Object.entries(sinaliteOptionGroups)) {
+      const chosenName = selectedSinaliteOptions[key];
+      const match = opts.find((o) => o.name === chosenName) ?? opts[0];
+      if (match) labels[match.label] = match.name;
+    }
+    return labels;
   }
 
   // Fetch live carrier rates from Sinalite for every Sinalite-linked item being
@@ -4264,11 +4294,6 @@ export default function DesignEditorShell({
             Pages
           </p>
           {(["front", "back"] as Side[]).filter((side) => !(isSingleSide && side === "back")).map((side, idx) => {
-            // TEMP: "back" page (thumbnail + "Change Back" button) hidden per request.
-            // To restore, delete this line. (Widened to `string` so this early return
-            // doesn't narrow `side`'s type away from "back" for the rest of the map body.)
-            const sideStr: string = side;
-            if (sideStr === "back") return null;
             const isActive = activeSide === side;
             const sd = sides[side];
             const thumbBg = isFlatArt ? bgColors[side] : (shirtColor.hex === "#ffffff" ? "#f3f4f6" : shirtColor.hex);
@@ -4643,16 +4668,6 @@ export default function DesignEditorShell({
             <div style={{ width: 36, height: 4, borderRadius: 2, background: "#d1d5db", margin: "0 auto 16px" }} />
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
               <h2 style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#111827" }}>Change the Back</h2>
-              {pricePerUnit !== undefined && pricePerUnit > 0 && (
-                <span style={{
-                  background: "linear-gradient(135deg, #7c3aed, #db2777)",
-                  color: "#fff", fontSize: "0.78rem", fontWeight: 700,
-                  padding: "3px 10px", borderRadius: "999px",
-                  whiteSpace: "nowrap",
-                }}>
-                  +${(pricePerUnit * 0.7).toFixed(2)} for Back
-                </span>
-              )}
             </div>
             <p style={{ margin: 0, fontSize: "0.85rem", color: "#6b7280" }}>Choose a template for the back of your card</p>
           </div>
@@ -5144,26 +5159,34 @@ export default function DesignEditorShell({
               disabled={!designApproved || effectiveQty < 1}
               onClick={() => {
                 if (!designApproved || effectiveQty < 1) return;
-                const cartId = Date.now().toString();
-                pendingCartIdRef.current = cartId;
-                // Save base item immediately so checkout/auth can open without waiting
+                // Re-editing after "Back" from checkout: update the item we already
+                // added instead of pushing a duplicate.
+                const existingPendingId = pendingCartIdRef.current;
+                let cartId = Date.now().toString();
                 try {
                   const existing = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<Record<string, unknown>>;
+                  const idx = existingPendingId ? existing.findIndex((i) => i.id === existingPendingId) : -1;
                   const hasBackCart = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
                   const total = sinaliteId ? (sinalitePrice?.price ?? 0) : ((pricePerUnit ?? 0) + (hasBackCart ? (pricePerUnit ?? 0) * 0.7 : 0)) * effectiveQty;
                   const effectivePpu = sinaliteId ? (effectiveQty > 0 ? total / effectiveQty : 0) : (pricePerUnit ?? 0) + (hasBackCart ? (pricePerUnit ?? 0) * 0.7 : 0);
-                  existing.push({
-                    id: cartId,
+                  const fields = {
                     name: productName ?? "Custom Print",
                     qty: effectiveQty,
                     pricePerUnit: effectivePpu,
                     total,
                     doubleSided: !!sides.back.template,
-                    ...(sinaliteId ? { sinaliteId, sinaliteOptions: buildSinaliteChosenOptions() } : {}),
-                  });
+                    ...(sinaliteId ? { sinaliteId, sinaliteOptions: buildSinaliteChosenOptions(), sinaliteOptionLabels: buildSinaliteOptionLabels() } : {}),
+                  };
+                  if (idx >= 0) {
+                    cartId = existingPendingId as string;
+                    existing[idx] = { ...existing[idx], ...fields };
+                  } else {
+                    existing.push({ id: cartId, ...fields });
+                  }
                   localStorage.setItem("wp_cart", JSON.stringify(existing));
                   localStorage.setItem("wp_cart_count", String(existing.length));
                 } catch { /* ignore */ }
+                pendingCartIdRef.current = cartId;
                 // Async: generate thumb + admin previews then patch cart entry in localStorage
                 void (async () => {
                   try {
@@ -5236,6 +5259,7 @@ export default function DesignEditorShell({
                     }
                   } catch { /* ignore */ }
                 })();
+                setCurrentItemRemoved(false);
                 if (!cartUser) {
                   setAuthForCartOpen(true);
                 } else {
@@ -5266,7 +5290,7 @@ export default function DesignEditorShell({
               }}
             >
               {designApproved && effectiveQty >= 1
-                ? <><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Add to Cart</>
+                ? <><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Proceed to Buy</>
                 : !designApproved
                   ? "Please approve your design to continue"
                   : "Enter a quantity to continue"}
@@ -5329,9 +5353,9 @@ export default function DesignEditorShell({
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {/* Back → home */}
+            {/* Back → Finalize your order screen */}
             <button
-              onClick={() => { window.location.href = "/"; }}
+              onClick={() => setCheckoutOpen(false)}
               style={{
                 background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
                 borderRadius: 10, height: 36, padding: "0 12px", cursor: "pointer",
@@ -5394,10 +5418,11 @@ export default function DesignEditorShell({
                 <span style={{
                   background: "#f3f0ff", color: "#7c3aed", fontSize: "0.75rem",
                   fontWeight: 700, padding: "3px 10px", borderRadius: 999,
-                }}>{1 + existingCartItems.length} {1 + existingCartItems.length === 1 ? "Item" : "Items"}</span>
+                }}>{(currentItemRemoved ? 0 : 1) + existingCartItems.length} {(currentItemRemoved ? 0 : 1) + existingCartItems.length === 1 ? "Item" : "Items"}</span>
               </div>
 
               {/* Item card */}
+              {!currentItemRemoved && (
               <div style={{
                 border: "1.5px solid #e5e7eb", borderRadius: 14, padding: "16px 20px",
                 display: "flex", alignItems: "center", gap: 18, background: "#fff",
@@ -5455,6 +5480,7 @@ export default function DesignEditorShell({
                   </svg>
                 </button>
               </div>
+              )}
 
               {/* Previously saved cart items — same card UI as current item */}
               {existingCartItems.length > 0 && (
@@ -5532,14 +5558,14 @@ export default function DesignEditorShell({
                   {/* Summary rows */}
                   {(() => {
                     const hasBackSummary = (isBusinessCard || isFlyer) && !!(bgSvg.back || sides.back.template?.baseImage);
-                    const currentTotal = sinaliteId
+                    const currentTotal = currentItemRemoved ? 0 : sinaliteId
                       ? (sinalitePrice?.price ?? 0)
                       : pricePerUnit !== undefined
                         ? (pricePerUnit + (hasBackSummary ? pricePerUnit * 0.7 : 0)) * effectiveQty
                         : 0;
                     const existingTotal = existingCartItems.reduce((s, i) => s + i.total, 0);
                     const subtotal = currentTotal + existingTotal;
-                    const totalItemCount = 1 + existingCartItems.length;
+                    const totalItemCount = (currentItemRemoved ? 0 : 1) + existingCartItems.length;
                     const shippingCost = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
                     const total = subtotal + shippingCost;
                     return (
@@ -5979,7 +6005,7 @@ export default function DesignEditorShell({
                       const effectivePpu2 = sinaliteId
                         ? (effectiveQty > 0 ? total2 / effectiveQty : 0)
                         : (pricePerUnit ?? 0) + (hasBackCart2 ? (pricePerUnit ?? 0) * 0.7 : 0);
-                      const currentItem = pricePerUnit && pricePerUnit > 0 && effectiveQty > 0
+                      const currentItem = !currentItemRemoved && pricePerUnit && pricePerUnit > 0 && effectiveQty > 0
                         ? {
                             id: pendingCartIdRef.current ?? Date.now().toString(),
                             name: productName ?? "Custom Print",
@@ -5990,16 +6016,16 @@ export default function DesignEditorShell({
                             thumb: currentThumb,
                             frontPreview: currentFrontPreview,
                             backPreview: currentBackPreview,
-                            ...(sinaliteId ? { sinaliteId, sinaliteOptions: buildSinaliteChosenOptions() } : {}),
+                            ...(sinaliteId ? { sinaliteId, sinaliteOptions: buildSinaliteChosenOptions(), sinaliteOptionLabels: buildSinaliteOptionLabels() } : {}),
                             ...(currentFrontFileUrl ? { frontFileUrl: currentFrontFileUrl } : {}),
                             ...(currentBackFileUrl ? { backFileUrl: currentBackFileUrl } : {}),
                           }
                         : null;
 
                       const otherItems = existingCartItems
-                        .map(({ id, name, qty, pricePerUnit: ppu, total, doubleSided, thumb, sinaliteId: sid, sinaliteOptions: sopts, frontFileUrl, backFileUrl }) => ({
+                        .map(({ id, name, qty, pricePerUnit: ppu, total, doubleSided, thumb, sinaliteId: sid, sinaliteOptions: sopts, sinaliteOptionLabels: soptLabels, frontFileUrl, backFileUrl }) => ({
                           id, name, qty, pricePerUnit: ppu ?? 0, total: total ?? 0, doubleSided: doubleSided ?? false, thumb,
-                          ...(sid ? { sinaliteId: sid, sinaliteOptions: sopts } : {}),
+                          ...(sid ? { sinaliteId: sid, sinaliteOptions: sopts, sinaliteOptionLabels: soptLabels } : {}),
                           ...(frontFileUrl ? { frontFileUrl } : {}),
                           ...(backFileUrl ? { backFileUrl } : {}),
                         }))
@@ -6015,6 +6041,7 @@ export default function DesignEditorShell({
 
                       try {
                         const shippingMethod = selectedShippingIdx != null ? shippingOptions[selectedShippingIdx]?.service : "";
+                        const shippingCostToSend = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
                         const res = await fetch("/api/checkout/create-session", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -6028,6 +6055,7 @@ export default function DesignEditorShell({
                               firstName: cartUser?.firstName ?? "", lastName: cartUser?.lastName ?? "", email: cartUser?.email ?? "",
                               addr: flat, addr2: houseNo, city, state: regionCode(state), zip: postalCode, country, phone,
                               method: shippingMethod ?? "",
+                              cost: shippingCostToSend,
                             },
                           }),
                         });
@@ -6101,15 +6129,15 @@ export default function DesignEditorShell({
                   <button
                     onClick={() => {
                       if (deleteConfirmId === "__current__") {
-                        // Remove the current item from localStorage and close checkout
+                        // Remove the current item from localStorage but stay on the checkout screen
                         try {
                           const cart = JSON.parse(localStorage.getItem("wp_cart") ?? "[]") as Array<{ id: string }>;
                           const updated = cart.filter(i => i.id !== pendingCartIdRef.current);
                           localStorage.setItem("wp_cart", JSON.stringify(updated));
                           localStorage.setItem("wp_cart_count", String(updated.length));
                         } catch { /* ignore */ }
+                        setCurrentItemRemoved(true);
                         setDeleteConfirmId(null);
-                        setCheckoutOpen(false);
                       } else {
                         const updated = existingCartItems.filter(i => i.id !== deleteConfirmId);
                         setExistingCartItems(updated);

@@ -69,8 +69,7 @@ export function AdminApparelPage() {
         { label: "Apparel", icon: "👕", href: "/admin/apparel", active: pathname === "/admin/apparel", count: null },
         { label: "Packaging", icon: "📦", href: "/admin/packaging", active: pathname === "/admin/packaging", count: null },
         { label: "Mockup", icon: "🖼️", href: "/admin/mockup", active: pathname === "/admin/mockup", count: null },
-        { label: "Reviews", icon: "💬", href: "/admin/reviews", active: pathname === "/admin/reviews", count: null },
-      ],
+        { label: "Reviews", icon: "💬", href: "/admin/reviews", active: pathname === "/admin/reviews", count: null },      ],
     },
     {
       title: "Commerce",

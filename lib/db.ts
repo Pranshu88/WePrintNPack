@@ -195,6 +195,15 @@ async function initializeDb(client: Client): Promise<void> {
       created_at      TEXT NOT NULL,
       updated_at      TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS product_guidelines (
+      id           TEXT PRIMARY KEY,
+      product_slug TEXT NOT NULL,
+      label        TEXT NOT NULL,
+      file_url     TEXT NOT NULL,
+      created_at   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pg_product ON product_guidelines(product_slug);
   `);
 
   // Migrations — add columns if missing

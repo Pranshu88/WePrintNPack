@@ -7,7 +7,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-05
 
 type CartItem = {
   id: string; name: string; qty: number; pricePerUnit: number; total: number; doubleSided?: boolean;
-  sinaliteId?: string; sinaliteOptions?: Record<string, string>;
+  sinaliteId?: string; sinaliteOptions?: Record<string, string>; sinaliteOptionLabels?: Record<string, string>;
   thumb?: string; frontPreview?: string; backPreview?: string;
   frontFileUrl?: string; backFileUrl?: string;
 };
@@ -15,6 +15,7 @@ type ShippingDetails = {
   firstName: string; lastName: string; email: string;
   addr: string; addr2: string; city: string; state: string; zip: string; country: string; phone: string;
   method: string;
+  cost?: number;
 };
 
 export async function POST(req: NextRequest) {
@@ -46,7 +47,8 @@ export async function POST(req: NextRequest) {
     }
     const cleanItems = Array.from(deduped.values());
 
-    const amountTotal = cleanItems.reduce((s, i) => s + i.total, 0);
+    const shippingCost = shipping?.cost ?? 0;
+    const amountTotal = cleanItems.reduce((s, i) => s + i.total, 0) + shippingCost;
 
     const orderId = randomUUID();
     const db = await getDb();
@@ -59,17 +61,29 @@ export async function POST(req: NextRequest) {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
-      line_items: cleanItems.map((item) => ({
-        price_data: {
-          currency: "cad",
-          product_data: {
-            name: item.name,
-            description: `${item.qty} ${item.qty === 1 ? "copy" : "copies"}${item.doubleSided ? " · Double-sided" : ""}`,
+      line_items: [
+        ...cleanItems.map((item) => ({
+          price_data: {
+            currency: "cad",
+            product_data: {
+              name: item.name,
+              description: `${item.qty} ${item.qty === 1 ? "copy" : "copies"}${item.doubleSided ? " · Double-sided" : ""}`,
+            },
+            unit_amount: Math.round(item.total * 100),
           },
-          unit_amount: Math.round(item.pricePerUnit * 100),
-        },
-        quantity: item.qty,
-      })),
+          quantity: 1,
+        })),
+        ...(shippingCost > 0 ? [{
+          price_data: {
+            currency: "cad",
+            product_data: {
+              name: `Shipping${shipping?.method ? ` (${shipping.method})` : ""}`,
+            },
+            unit_amount: Math.round(shippingCost * 100),
+          },
+          quantity: 1,
+        }] : []),
+      ],
       customer_email: customerEmail || undefined,
       metadata: { order_id: orderId },
       success_url: `${siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,

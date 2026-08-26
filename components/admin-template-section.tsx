@@ -976,6 +976,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 sinaliteId={g.sinaliteId}
                 sinaliteOptions={g.sinaliteOptions}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
+                onAddGuideline={() => router.push(`/admin/guidelines?slug=premium-business-cards&sinaliteId=${g.sinaliteId ?? ""}`)}
                 onEdit={(updated) => {
                   void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
                     method: "PATCH",
@@ -996,6 +997,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 images={pkg.images ?? []}
                 description={visibleGalleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${pkg.id}`)}
+                onAddGuideline={() => router.push("/admin/guidelines?slug=premium-business-cards")}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
@@ -1024,6 +1026,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   sinaliteId={g.sinaliteId}
                   sinaliteOptions={g.sinaliteOptions}
                   onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
+                  onAddGuideline={() => router.push(`/admin/guidelines?slug=premium-business-cards&sinaliteId=${g.sinaliteId ?? ""}`)}
                   onEdit={(updated) => {
                     void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
                       method: "PATCH",
@@ -1063,6 +1066,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 sinaliteId={g.sinaliteId}
                 sinaliteOptions={g.sinaliteOptions}
                 onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${g.id}`)}
+                onAddGuideline={() => router.push(`/admin/guidelines?slug=bold-flyers&sinaliteId=${g.sinaliteId ?? ""}`)}
                 onEdit={(updated) => {
                   void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
                     method: "PATCH",
@@ -1083,6 +1087,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 images={pkg.images ?? []}
                 description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${pkg.id}`)}
+                onAddGuideline={() => router.push("/admin/guidelines?slug=bold-flyers")}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
@@ -1111,6 +1116,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   sinaliteId={g.sinaliteId}
                   sinaliteOptions={g.sinaliteOptions}
                   onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${g.id}`)}
+                  onAddGuideline={() => router.push(`/admin/guidelines?slug=bold-flyers&sinaliteId=${g.sinaliteId ?? ""}`)}
                   onEdit={(updated) => {
                     void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
                       method: "PATCH",
@@ -1147,6 +1153,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteId={g.sinaliteId}
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/stickers-and-labels/${g.id}`)}
+                    onAddGuideline={() => router.push(`/admin/guidelines?slug=stickers-and-labels&sinaliteId=${g.sinaliteId ?? ""}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setStickerImages((prev) => ({ ...prev, [g.id]: updated.image }));
@@ -1187,6 +1194,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteId={g.sinaliteId}
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/yard-signs/${g.id}`)}
+                    onAddGuideline={() => router.push(`/admin/guidelines?slug=yard-signs&sinaliteId=${g.sinaliteId ?? ""}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setYardSignImages((prev) => ({ ...prev, [g.id]: updated.image }));
@@ -1227,6 +1235,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteId={g.sinaliteId}
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/posters/${g.id}`)}
+                    onAddGuideline={() => router.push(`/admin/guidelines?slug=posters&sinaliteId=${g.sinaliteId ?? ""}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setPosterImages((prev) => ({ ...prev, [g.id]: updated.image }));
@@ -1256,6 +1265,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 image={pkg.image || (selectedProduct?.image ?? "")}
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/pizza-boxes/${pkg.id}`)}
+                onAddGuideline={() => router.push("/admin/guidelines?slug=pizza-boxes")}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
@@ -1278,6 +1288,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 image={pkg.image || (selectedProduct?.image ?? "")}
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/shipping-boxes/${pkg.id}`)}
+                onAddGuideline={() => router.push("/admin/guidelines?slug=shipping-boxes")}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
@@ -1300,6 +1311,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 image={pkg.image || (selectedProduct?.image ?? "")}
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/mailer-boxes/${pkg.id}`)}
+                onAddGuideline={() => router.push("/admin/guidelines?slug=mailer-boxes")}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
@@ -1322,6 +1334,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 image={pkg.image || (selectedProduct?.image ?? "")}
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/square-shipping-boxes/${pkg.id}`)}
+                onAddGuideline={() => router.push("/admin/guidelines?slug=square-shipping-boxes")}
                 onEdit={(updated) => {
                   void saveBcImage(pkg.id, updated.image);
                   void saveBcImages(pkg.id, updated.images);
@@ -1355,6 +1368,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteId={g.sinaliteId}
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/vinyl-banners/${g.id}`)}
+                    onAddGuideline={() => router.push(`/admin/guidelines?slug=vinyl-banners&sinaliteId=${g.sinaliteId ?? ""}`)}
                     onEdit={(updated) => {
                       void saveBcImage(g.id, updated.image);
                       setBannerImages((prev) => ({ ...prev, [g.id]: updated.image }));
@@ -1398,6 +1412,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                         sinaliteId={g.sinaliteId}
                         sinaliteOptions={g.sinaliteOptions}
                         onBrowseDesigns={() => router.push(`/admin/templates/${effectiveSlug}/${g.id}`)}
+                        onAddGuideline={() => router.push(`/admin/guidelines?slug=${effectiveSlug}&sinaliteId=${g.sinaliteId ?? ""}`)}
                         onEdit={(updated) => {
                           void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
                             method: "PATCH",
@@ -1422,6 +1437,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                       onEdit={() => openEditModal(g)}
                       onDelete={() => void deleteGallery(g.id)}
                       onManage={() => router.push(`/admin/templates/${effectiveSlug}/${g.id}`)}
+                      onAddGuideline={() => router.push(`/admin/guidelines?slug=${effectiveSlug}&sinaliteId=${g.sinaliteId ?? ""}`)}
                     />
                   );
                 })}
@@ -1706,6 +1722,7 @@ function GalleryCard({
   onEdit,
   onDelete,
   onManage,
+  onAddGuideline,
 }: {
   gallery: GalleryTemplate;
   productSlug: string;
@@ -1714,6 +1731,7 @@ function GalleryCard({
   onEdit: () => void;
   onDelete: () => void;
   onManage: () => void;
+  onAddGuideline: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [popup, setPopup] = useState(false);
@@ -1769,6 +1787,7 @@ function GalleryCard({
         <p style={{ margin: "0 0 14px", fontSize: "0.78rem", color: "#9ca3af", fontWeight: 500 }}>
           {gallery.designs.length > 0 ? `${gallery.designs.length} design option${gallery.designs.length !== 1 ? "s" : ""}` : "No designs yet"}
         </p>
+        <button onClick={onAddGuideline} style={{ width: "100%", marginBottom: 8, padding: "7px 0", borderRadius: 8, border: "none", background: "linear-gradient(90deg,#7c3aed,#db2777)", color: "#fff", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>+ Add Guideline</button>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={onManage} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #06b6d4", background: "#ecfeff", color: "#0891b2", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>Designs</button>
           <button onClick={onEdit} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Edit</button>
@@ -1878,13 +1897,14 @@ type BcEditPayload = { title: string; price: string; specs: string[]; image: str
 type SinaliteOptionFetched = { id: number; group: string; name: string; hidden: number };
 
 function BusinessCardPricingCard({
-  title, price, specs, image, images, description, sinaliteId, sinaliteOptions, onBrowseDesigns, onEdit, onDelete,
+  title, price, specs, image, images, description, sinaliteId, sinaliteOptions, onBrowseDesigns, onEdit, onDelete, onAddGuideline,
 }: {
   title: string; price: string; specs: string[]; image: string; images?: string[]; description?: string;
   sinaliteId?: string; sinaliteOptions?: SinaliteSelectedOption[];
   onBrowseDesigns: () => void;
   onEdit: (updated: BcEditPayload) => void;
   onDelete: () => void;
+  onAddGuideline: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [popup, setPopup] = useState(false);
@@ -2005,6 +2025,7 @@ function BusinessCardPricingCard({
         </div>
         <div style={{ padding: "4px 18px 20px" }}>
           <p style={{ margin: "0 0 14px", fontWeight: 700, fontSize: "0.95rem", color: "#111827" }}>{title}</p>
+          <button onClick={onAddGuideline} style={{ width: "100%", marginBottom: 8, padding: "7px 0", borderRadius: 8, border: "none", background: "linear-gradient(90deg,#7c3aed,#db2777)", color: "#fff", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>+ Add Guideline</button>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={onBrowseDesigns} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #06b6d4", background: "#ecfeff", color: "#0891b2", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>Designs</button>
             <button onClick={openEdit} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1.5px solid #d1d5db", background: "#fff", color: "#374151", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}>Edit</button>

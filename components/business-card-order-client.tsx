@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Product } from "@/lib/types";
 import type { GalleryTemplate, DesignTemplateItem, SerializableItem } from "@/lib/template-data";
 import DesignEditorShell from "./design-editor-shell";
+import { jsPDF } from "jspdf";
 
 const LENS_SIZE = 140;
 const ZOOM_FACTOR = 2.5;
@@ -17,6 +18,59 @@ function parseSinaliteSizeToInches(sizeName: string | undefined): { width: numbe
   const m = sizeName.match(/^\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*$/i);
   if (!m) return undefined;
   return { width: parseFloat(m[1]), height: parseFloat(m[2]) };
+}
+
+// Standard bleed/safe offsets: 1/16" bleed beyond the cut line on every edge, 1/8"
+// safe margin inside the cut line on every edge — matches the industry-standard
+// print bleed guide shown to customers before they upload artwork.
+const GUIDELINE_KIND_BUTTONS: { key: string; title: string; display: (size: string) => string }[] = [
+  { key: "square", title: "Square", display: (size) => size || "Square Template" },
+  { key: "rounded", title: "Rounded", display: (size) => (size ? `${size} rounded corners` : "Rounded Corners Template") },
+  { key: "vertical", title: "Vertical", display: () => "Vertical Template" },
+];
+
+const BLEED_INSET = 0.0625;
+const SAFE_INSET = 0.125;
+
+function bleedDims(cutW: number, cutH: number) {
+  return {
+    cutW, cutH,
+    bleedW: cutW + BLEED_INSET * 2,
+    bleedH: cutH + BLEED_INSET * 2,
+    safeW: cutW - SAFE_INSET * 2,
+    safeH: cutH - SAFE_INSET * 2,
+  };
+}
+
+// Draws the same bleed/cut/safe-line diagram as BleedGuideDiagram but with jsPDF's
+// vector primitives, so the "PDF" button always matches what's shown on screen —
+// generated on the fly from the selected size, no per-size file to maintain.
+function downloadBleedGuidePdf(cutW: number, cutH: number, title: string) {
+  const { bleedW, bleedH, safeW, safeH } = bleedDims(cutW, cutH);
+  const margin = 0.5;
+  const pdf = new jsPDF({ unit: "in", format: [bleedW + margin * 2, bleedH + margin * 2] });
+  const cx = (bleedW + margin * 2) / 2;
+  const cy = (bleedH + margin * 2) / 2;
+
+  const drawRect = (w: number, h: number, color: [number, number, number]) => {
+    pdf.setDrawColor(...color);
+    pdf.setLineDashPattern([0.04, 0.03], 0);
+    pdf.rect(cx - w / 2, cy - h / 2, w, h);
+  };
+
+  pdf.setFontSize(10);
+  pdf.text(title, cx, margin * 0.6, { align: "center" });
+  drawRect(bleedW, bleedH, [156, 163, 175]);
+  drawRect(cutW, cutH, [239, 68, 68]);
+  drawRect(safeW, safeH, [34, 197, 94]);
+
+  pdf.setLineDashPattern([], 0);
+  pdf.setFontSize(9);
+  pdf.setTextColor(107, 114, 128);
+  pdf.text(`Final Cut Size: ${cutW.toFixed(2)} x ${cutH.toFixed(2)} (Inch)`, cx, cy - 0.08, { align: "center" });
+  pdf.text(`Artwork with Bleed: ${bleedW.toFixed(2)} x ${bleedH.toFixed(2)} (Inch)`, cx, cy + 0.1, { align: "center" });
+
+  pdf.save(`${title.replace(/[^a-z0-9]+/gi, "_")}_bleed_guide.pdf`);
 }
 
 // Detects the auto-generated grey-box placeholder that sinalite-category-sync.ts's
@@ -124,24 +178,6 @@ function getBcPackageData(gallery: GalleryTemplate | null): (typeof BC_PACKAGE_D
   if (!gallery) return null;
   const byId = gallery.sinaliteId ? SINALITE_ID_TO_BC_NAME[gallery.sinaliteId] : undefined;
   return BC_PACKAGE_DATA[byId ?? gallery.name] ?? null;
-}
-
-// Gallery template specs are stored as "Label: value" strings (set via the admin
-// Add/Edit Gallery Template modal's Size/Color/Paper Type/Finishing/Quantities fields).
-// These four are always shown on every product page — regardless of what the gallery
-// template or the static product data has — so the spec block stays consistent
-// across templates. Missing values show as "—" instead of being hidden.
-const DISPLAY_SPEC_KEYS = ["Size", "Color", "Paper Type", "Finishing"];
-
-function parseGallerySpecs(specs: string[] | undefined): { label: string; value: string }[] {
-  const byLabel = new Map<string, string>();
-  (specs ?? []).forEach((s) => {
-    const idx = s.indexOf(":");
-    if (idx === -1) return;
-    byLabel.set(s.slice(0, idx).trim(), s.slice(idx + 1).trim());
-  });
-
-  return DISPLAY_SPEC_KEYS.map((label) => ({ label, value: byLabel.get(label) ?? "" }));
 }
 
 // Only the hex codes from the gallery's Color spec are usable as swatch values in the
@@ -257,6 +293,11 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
   const [lensPos, setLensPos] = useState<{ x: number; y: number } | null>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [infoTab, setInfoTab] = useState<"description" | "guides">("description");
+  const [guidesSize, setGuidesSize] = useState("");
+  const [guidePreviewOpen, setGuidePreviewOpen] = useState(false);
+  const [guidelines, setGuidelines] = useState<{ id: string; label: string; fileUrl: string }[]>([]);
+  const [guidelinesLoading, setGuidelinesLoading] = useState(true);
 
   useEffect(() => {
     setActiveImage(null);
@@ -359,7 +400,6 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
   const displayPrice = bcData?.price ?? galleryPrice?.price ?? adminPrice ?? product.startingPrice;
   const displayPriceNote = bcData?.priceNote ?? galleryPrice?.priceNote ?? (adminPrice ? "+ tax · per set" : "per set · No setup fee");
   const displayPriceNum = parseFloat(displayPrice.replace(/[^0-9.]/g, "")) || undefined;
-  const displaySpecs = parseGallerySpecs(gallery?.specs);
   const displayDescription = gallery?.description || product.description;
   // Sinalite catalog sync auto-generates a plain grey placeholder box (see placeholderImage()
   // in lib/sinalite-category-sync.ts) for any SKU it can't find a real photo for — that's not
@@ -395,6 +435,28 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
       .finally(() => { if (!cancelled) setLiveSinaliteOptionsLoading(false); });
     return () => { cancelled = true; };
   }, [gallery?.id, gallery?.sinaliteId, gallery?.sinaliteOptions?.length]);
+
+  // Guides tab: default the size dropdown to whatever the customer already picked
+  // in Configure Your Order, falling back to the first available size.
+  useEffect(() => {
+    const sizeOpts = sinaliteOptionGroups["size"];
+    if (!sizeOpts?.length) return;
+    setGuidesSize((prev) => (prev && sizeOpts.some((o) => o.name === prev)) ? prev : (selectedSinaliteOptions["size"] ?? sizeOpts[0].name));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gallery?.id, selectedSinaliteOptions["size"]]);
+
+  // Guides tab: admin-uploaded print-ready template PDFs for this product.
+  useEffect(() => {
+    let cancelled = false;
+    setGuidelinesLoading(true);
+    fetch(`/api/products/${product.slug}/guidelines`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ guidelines?: { id: string; label: string; fileUrl: string }[] }>)
+      .then((d) => { if (!cancelled) setGuidelines(d.guidelines ?? []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setGuidelinesLoading(false); });
+    return () => { cancelled = true; };
+  }, [product.slug]);
+
   useEffect(() => {
     if (!effectiveSinaliteOptions.length) return;
     setSelectedSinaliteOptions((prev) => {
@@ -487,6 +549,7 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
         materialColors={materialColors.length > 0 ? materialColors : undefined}
         sinaliteId={gallery?.sinaliteId}
         sinaliteOptions={effectiveSinaliteOptions}
+        initialSinaliteSelections={selectedSinaliteOptions}
         customDimsInches={parseSinaliteSizeToInches(selectedSinaliteOptions["size"])}
         onClose={() => setEditorOpen(false)}
       />
@@ -626,6 +689,149 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
                 Template: {gallery.name}
               </div>
             )}
+
+            {/* Description / Guides tabs */}
+            <div style={{ marginTop: "1.75rem", borderBottom: "1px solid #e5e7eb", display: "flex", gap: "1.5rem" }}>
+              {(["description", "guides"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setInfoTab(tab)}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    padding: "0 0 0.85rem", marginBottom: "-1px",
+                    fontSize: "1.1rem", fontWeight: 600,
+                    color: infoTab === tab ? "#111827" : "#2563eb",
+                    borderBottom: infoTab === tab ? "2px solid #111827" : "2px solid transparent",
+                  }}
+                >
+                  {tab === "description" ? "Description" : "Guides"}
+                </button>
+              ))}
+            </div>
+
+            {infoTab === "description" ? (
+              <div style={{ padding: "1.25rem 0" }}>
+                {displayDescription && (
+                  <p style={{ margin: "0 0 1.25rem", fontSize: "1rem", color: "#6b7280", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                    {displayDescription}
+                  </p>
+                )}
+
+                {sinalitePrice && Object.keys(sinalitePrice.productOptions).length > 0 && (
+                  <div style={{ background: "#fff7f7", border: "1px solid #fecaca", borderRadius: "12px", padding: "1.25rem" }}>
+                    <p style={{ margin: "0 0 0.75rem", fontSize: "0.75rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Configuration Summary
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      {Object.entries(sinalitePrice.productOptions).map(([label, value]) => (
+                        <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem" }}>
+                          <span style={{ color: "#2563eb", fontWeight: 600 }}>{label}</span>
+                          <span style={{ fontWeight: 700, color: "#111827" }}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: "1.25rem 0" }}>
+                <h3 style={{ margin: "0 0 0.5rem", fontSize: "1.1rem", fontWeight: 800, color: "#111827" }}>
+                  Ready to create your product design?
+                </h3>
+                <p style={{ margin: "0 0 1.25rem", fontSize: "0.92rem", color: "#6b7280", lineHeight: 1.6 }}>
+                  To start, select the product size, preview the design guidelines, download the guidelines for reference, and proceed with the customization options.
+                </p>
+
+                {(() => {
+                  const sizeOpts = sinaliteOptionGroups["size"];
+                  const dims = parseSinaliteSizeToInches(guidesSize) ?? (sizeOpts?.[0] ? parseSinaliteSizeToInches(sizeOpts[0].name) : undefined);
+                  if (!sizeOpts?.length || !dims) return null;
+                  const previewMatch = guidelines.find((g) => {
+                    const [size, kind] = g.label.split("—").map((s) => s.trim().toLowerCase());
+                    return kind === "preview" && (!guidesSize || size === guidesSize.toLowerCase());
+                  });
+                  return (
+                    <>
+                      <div style={{ display: "flex", alignItems: "flex-end", gap: "0.6rem", marginBottom: "1.25rem" }}>
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 700, color: "#2563eb", marginBottom: 4 }}>Size</label>
+                          <select
+                            value={guidesSize}
+                            onChange={(e) => setGuidesSize(e.target.value)}
+                            style={{ padding: "0.55rem 0.8rem", border: "1.5px solid #e5e7eb", borderRadius: 10, fontSize: "0.9rem", color: "#111827", background: "#fff", minWidth: 160 }}
+                          >
+                            {sizeOpts.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => downloadBleedGuidePdf(dims.width, dims.height, `${displayTitle} ${guidesSize}`)}
+                          title="Download bleed guide PDF"
+                          style={{ width: 46, height: 46, borderRadius: 10, border: "none", background: "linear-gradient(135deg,#7c3aed,#db2777)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                        >
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGuidePreviewOpen(true)}
+                          title="Preview design guidelines"
+                          style={{ width: 46, height: 46, borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                      </div>
+
+                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.5rem", display: "flex", justifyContent: "center" }}>
+                        {previewMatch ? (
+                          <img src={previewMatch.fileUrl} alt={`${displayTitle} preview`} style={{ maxWidth: "100%", maxHeight: 420, objectFit: "contain", borderRadius: 8 }} />
+                        ) : (
+                          <div style={{ padding: "3.5rem 1rem", color: "#9ca3af", fontSize: "0.95rem", fontWeight: 600 }}>No Preview Image</div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* Download Product Guideline */}
+                <div style={{ marginTop: "1.75rem", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ background: "#f9fafb", padding: "1rem 1.25rem" }}>
+                    <h4 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#374151" }}>Download Product Guideline</h4>
+                  </div>
+                  <div style={{ padding: "1.25rem" }}>
+                    {guidelinesLoading ? (
+                      <p style={{ margin: 0, color: "#9ca3af", fontSize: "0.88rem" }}>Loading guidelines…</p>
+                    ) : (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0.9rem 1.5rem" }}>
+                        {GUIDELINE_KIND_BUTTONS.map(({ key, title, display }) => {
+                          const match = guidelines.find((g) => {
+                            const [size, kind] = g.label.split("—").map((s) => s.trim().toLowerCase());
+                            return kind === key && (!guidesSize || size === guidesSize.toLowerCase());
+                          });
+                          return (
+                            <a
+                              key={key}
+                              href={match?.fileUrl}
+                              target={match ? "_blank" : undefined}
+                              rel="noreferrer"
+                              onClick={(e) => {
+                                if (!match) {
+                                  e.preventDefault();
+                                  window.alert(`No ${title} guideline has been uploaded for this size yet.`);
+                                }
+                              }}
+                              style={{ display: "flex", alignItems: "center", gap: "0.6rem", textDecoration: "none", cursor: "pointer" }}
+                            >
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                              <span style={{ color: "#2563eb", fontWeight: 600, fontSize: "0.9rem" }}>{display(guidesSize)}</span>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* RIGHT: Product info + CTAs */}
@@ -633,12 +839,9 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
 
             {/* Title + description */}
             <div style={{ paddingBottom: "1.25rem" }}>
-              <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+              <h1 style={{ margin: 0, fontSize: "1.75rem", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
                 {displayHeading}
               </h1>
-              {displayDescription && (
-                <p style={{ margin: 0, fontSize: "0.95rem", color: "#6b7280", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{displayDescription}</p>
-              )}
             </div>
 
             {/* Price — hidden for Sinalite-linked products; pricing will come from Sinalite's own API in a later phase */}
@@ -649,37 +852,6 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
                   {displayPrice}
                 </div>
                 <div style={{ fontSize: "0.875rem", color: "#9ca3af", marginTop: "5px" }}>{displayPriceNote}</div>
-              </div>
-            )}
-
-            {/* Specs — dropped for Sinalite-linked products; replaced by Configure Your Order below */}
-            {!gallery?.sinaliteId && displaySpecs.length > 0 && (
-              <div style={{ borderTop: "1px solid #f3f4f6", padding: "1.25rem 0", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                {displaySpecs.map((s) => (
-                  <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.875rem" }}>
-                    <span style={{ color: "#9ca3af" }}>{s.label}</span>
-                    {s.label === "Color" && s.value ? (
-                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                        {s.value.split(",").map((c) => c.trim()).filter(Boolean).map((color) => (
-                          <span
-                            key={color}
-                            title={color}
-                            style={{
-                              width: "18px", height: "18px", borderRadius: "50%",
-                              background: color.startsWith("#") ? color : undefined,
-                              border: "1.5px solid #d1d5db", flexShrink: 0,
-                              display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            }}
-                          >
-                            {!color.startsWith("#") && <span style={{ fontSize: "0.5rem", fontWeight: 700, color: "#374151" }}>{color.slice(0, 2).toUpperCase()}</span>}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: s.value ? "#111827" : "#d1d5db", fontWeight: 700 }}>{s.value || "—"}</span>
-                    )}
-                  </div>
-                ))}
               </div>
             )}
 
@@ -756,21 +928,6 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
                     {sinalitePriceLoading ? "…" : `$${sinalitePrice?.price.toFixed(2)}`}
                   </span>
                 </div>
-                {sinalitePrice && Object.keys(sinalitePrice.productOptions).length > 0 && (
-                  <>
-                    <p style={{ margin: "1rem 0 0.6rem", fontSize: "0.75rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", borderTop: "1px solid #fde2e2", paddingTop: "0.9rem" }}>
-                      Configuration Summary
-                    </p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                      {Object.entries(sinalitePrice.productOptions).map(([label, value]) => (
-                        <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem" }}>
-                          <span style={{ color: "#9ca3af" }}>{label}</span>
-                          <span style={{ fontWeight: 700, color: "#111827" }}>{value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
               </div>
             )}
 
@@ -892,6 +1049,31 @@ export default function BusinessCardOrderClient({ product, galleryId, savedDesig
         </div>
       </div>
     )}
+
+    {guidePreviewOpen && (() => {
+      const previewMatch = guidelines.find((g) => {
+        const [size, kind] = g.label.split("—").map((s) => s.trim().toLowerCase());
+        return kind === "preview" && (!guidesSize || size === guidesSize.toLowerCase());
+      });
+      return (
+        <>
+          <div onClick={() => setGuidePreviewOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, backdropFilter: "blur(2px)" }} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1001, background: "#fff", borderRadius: 16, padding: "1.75rem", width: "min(560px, 92vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 800, color: "#111827" }}>{displayTitle} — {guidesSize}</h3>
+              <button onClick={() => setGuidePreviewOpen(false)} style={{ width: 34, height: 34, borderRadius: 8, border: "none", background: "#f3f4f6", color: "#374151", fontSize: "1rem", cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              {previewMatch ? (
+                <img src={previewMatch.fileUrl} alt={`${displayTitle} preview`} style={{ maxWidth: "100%", maxHeight: 480, borderRadius: 12, objectFit: "contain" }} />
+              ) : (
+                <div style={{ padding: "3.5rem 1rem", color: "#9ca3af", fontSize: "0.95rem", fontWeight: 600 }}>No Preview Image</div>
+              )}
+            </div>
+          </div>
+        </>
+      );
+    })()}
     </>
   );
 }

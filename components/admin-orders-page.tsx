@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import AdminNotificationBell from "./admin-notification-bell";
+import InvoiceModal from "./invoice-modal";
 
 type CartItem = {
   id: string;
@@ -17,6 +18,7 @@ type CartItem = {
   backPreview?: string;
   boxFaceColors?: Record<string, string>;
   boxFaceImages?: { front?: string; right?: string; top?: string };
+  sinaliteOptionLabels?: Record<string, string>;
 };
 
 type Order = {
@@ -256,8 +258,7 @@ export function AdminOrdersPage() {
         { label: "Apparel", icon: "👕", href: "/admin/apparel", active: pathname === "/admin/apparel", count: null },
         { label: "Packaging", icon: "📦", href: "/admin/packaging", active: pathname === "/admin/packaging", count: null },
         { label: "Mockup", icon: "🖼️", href: "/admin/mockup", active: pathname === "/admin/mockup", count: null },
-        { label: "Reviews", icon: "💬", href: "/admin/reviews", active: pathname === "/admin/reviews", count: null },
-      ],
+        { label: "Reviews", icon: "💬", href: "/admin/reviews", active: pathname === "/admin/reviews", count: null },      ],
     },
     {
       title: "Commerce",
@@ -276,6 +277,7 @@ export function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [invoiceOrderId, setInvoiceOrderId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<CartItem | null>(null);
   const [previewRotY, setPreviewRotY] = useState(0);
@@ -489,15 +491,25 @@ export function AdminOrdersPage() {
                       <code style={{ fontSize: "0.85rem", color: "#7c3aed", background: "#ede9fe", padding: "4px 10px", borderRadius: 8, fontWeight: 700 }}>
                         #{selectedOrder.stripe_session_id?.slice(-12) ?? selectedOrder.id.slice(0, 12)}
                       </code>
-                      <span style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
-                        {formatDate(selectedOrder.created_at)} · {formatTime(selectedOrder.created_at)}
-                      </span>
+                      <button
+                        onClick={() => setInvoiceOrderId(selectedOrder.id)}
+                        style={{
+                          fontSize: "0.75rem", fontWeight: 700, color: "#fff",
+                          background: "linear-gradient(90deg,#7c3aed,#db2777)",
+                          border: "none", padding: "5px 12px", borderRadius: 8,
+                          cursor: "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        View Invoice
+                      </button>
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: 6 }}>
+                      {formatDate(selectedOrder.created_at)} · {formatTime(selectedOrder.created_at)}
                     </div>
                   </div>
 
                   {/* Status selector */}
                   <div>
-                    <div style={{ fontSize: "0.72rem", color: "#9ca3af", fontWeight: 500, marginBottom: 6, textAlign: "right" }}>PRODUCTION STATUS</div>
                     <div style={{ display: "flex", gap: 6 }}>
                       {(["pending", "production", "completed"] as ProductionStatus[]).map((s) => {
                         const cfg = STATUS_CONFIG[s];
@@ -505,24 +517,21 @@ export function AdminOrdersPage() {
                         return (
                           <button
                             key={s}
+                            title={cfg.label}
                             disabled={updatingId === selectedOrder.id}
                             onClick={() => updateStatus(selectedOrder.id, s)}
                             style={{
-                              padding: "6px 14px",
+                              padding: "8px",
                               borderRadius: 20,
                               border: isActive ? `2px solid ${cfg.dot}` : "2px solid #e5e7eb",
                               background: isActive ? cfg.bg : "#fff",
-                              color: isActive ? cfg.color : "#6b7280",
-                              fontWeight: isActive ? 700 : 500,
-                              fontSize: "0.78rem",
                               cursor: updatingId === selectedOrder.id ? "not-allowed" : "pointer",
-                              display: "flex", alignItems: "center", gap: 5,
+                              display: "flex", alignItems: "center", justifyContent: "center",
                               transition: "all 0.15s",
                               opacity: updatingId === selectedOrder.id ? 0.6 : 1,
                             }}
                           >
                             <span style={{ width: 7, height: 7, borderRadius: "50%", background: cfg.dot, flexShrink: 0 }} />
-                            {cfg.label}
                           </button>
                         );
                       })}
@@ -641,6 +650,22 @@ export function AdminOrdersPage() {
                               </span>
                             )}
                           </div>
+                          {item.sinaliteOptionLabels && Object.keys(item.sinaliteOptionLabels).length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                              {Object.entries(item.sinaliteOptionLabels).map(([label, value]) => (
+                                <span
+                                  key={label}
+                                  style={{
+                                    fontSize: "0.72rem", color: "#374151",
+                                    background: "#f3f4f6", borderRadius: 8,
+                                    padding: "3px 9px",
+                                  }}
+                                >
+                                  <span style={{ color: "#9ca3af" }}>{label}:</span> <strong>{value}</strong>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Item total */}
@@ -937,6 +962,10 @@ export function AdminOrdersPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {invoiceOrderId && (
+        <InvoiceModal orderId={invoiceOrderId} onClose={() => setInvoiceOrderId(null)} />
       )}
     </div>
   );

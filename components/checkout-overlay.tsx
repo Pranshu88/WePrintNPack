@@ -86,6 +86,7 @@ export default function CheckoutOverlay({
   const [shippingLoading, setShippingLoading] = useState(false);
   const [shippingError, setShippingError] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [currentItemRemoved, setCurrentItemRemoved] = useState(false);
   const [hasSavedAddress, setHasSavedAddress] = useState(false);
   const autoFetchedRef = useRef(false);
 
@@ -220,9 +221,9 @@ export default function CheckoutOverlay({
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {/* Back → home */}
+            {/* Back → previous screen */}
             <button
-              onClick={() => { window.location.href = "/"; }}
+              onClick={onClose}
               style={{
                 background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)",
                 borderRadius: 10, height: 36, padding: "0 12px", cursor: "pointer",
@@ -285,10 +286,11 @@ export default function CheckoutOverlay({
                 <span style={{
                   background: "#f3f0ff", color: "#7c3aed", fontSize: "0.75rem",
                   fontWeight: 700, padding: "3px 10px", borderRadius: 999,
-                }}>{1 + existingCartItems.length} {1 + existingCartItems.length === 1 ? "Item" : "Items"}</span>
+                }}>{(currentItemRemoved ? 0 : 1) + existingCartItems.length} {(currentItemRemoved ? 0 : 1) + existingCartItems.length === 1 ? "Item" : "Items"}</span>
               </div>
 
               {/* Current item card */}
+              {!currentItemRemoved && (
               <div style={{
                 border: "1.5px solid #e5e7eb", borderRadius: 14, padding: "16px 20px",
                 display: "flex", alignItems: "center", gap: 18, background: "#fff",
@@ -373,6 +375,7 @@ export default function CheckoutOverlay({
                   </svg>
                 </button>
               </div>
+              )}
 
               {/* Previously saved cart items */}
               {existingCartItems.length > 0 && (
@@ -451,10 +454,10 @@ export default function CheckoutOverlay({
 
                   {/* Summary rows */}
                   {(() => {
-                    const currentTotal = pricePerUnit * selectedQty;
+                    const currentTotal = currentItemRemoved ? 0 : pricePerUnit * selectedQty;
                     const existingTotal = existingCartItems.reduce((s, i) => s + i.total, 0);
                     const subtotal = currentTotal + existingTotal;
-                    const totalItemCount = 1 + existingCartItems.length;
+                    const totalItemCount = (currentItemRemoved ? 0 : 1) + existingCartItems.length;
                     const shippingCost = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
                     const total = subtotal + shippingCost;
                     return (
@@ -817,7 +820,7 @@ export default function CheckoutOverlay({
                         }).catch(() => {});
                       }
                       setStripeLoading(true);
-                      const currentItem = pricePerUnit > 0 && selectedQty > 0 ? {
+                      const currentItem = !currentItemRemoved && pricePerUnit > 0 && selectedQty > 0 ? {
                         id: pendingCartId ?? Date.now().toString(),
                         name: productName,
                         qty: selectedQty,
@@ -832,6 +835,7 @@ export default function CheckoutOverlay({
                       if (!cartItems.length) { setStripeLoading(false); setCheckoutError("No valid items to checkout."); return; }
                       try {
                         const shippingMethod = selectedShippingIdx != null ? shippingOptions[selectedShippingIdx]?.service : "";
+                        const shippingCostToSend = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
                         const res = await fetch("/api/checkout/create-session", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -845,6 +849,7 @@ export default function CheckoutOverlay({
                               firstName: cartUser?.firstName ?? "", lastName: cartUser?.lastName ?? "", email: cartUser?.email ?? "",
                               addr: flat, addr2: houseNo, city, state: regionCode(state), zip: postalCode, country, phone,
                               method: shippingMethod ?? "",
+                              cost: shippingCostToSend,
                             },
                           }),
                         });
@@ -918,7 +923,8 @@ export default function CheckoutOverlay({
                           localStorage.setItem("wp_cart_count", String(updated.length));
                         } catch { /* ignore */ }
                         setDeleteConfirmId(null);
-                        onClose();
+                        setCurrentItemRemoved(true);
+                        if (existingCartItems.length === 0) onClose();
                       } else {
                         const updated = existingCartItems.filter(i => i.id !== deleteConfirmId);
                         setExistingCartItems(updated);

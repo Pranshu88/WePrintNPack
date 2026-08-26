@@ -185,6 +185,7 @@ export default function CartPage() {
     try {
       const { houseNo, flat, city, state, postalCode, country, phone } = checkoutForm;
       const shippingMethod = selectedShippingIdx != null ? shippingOptions[selectedShippingIdx]?.service : "";
+      const shippingCostToSend = selectedShippingIdx != null ? (shippingOptions[selectedShippingIdx]?.price ?? 0) : 0;
       const res = await fetch("/api/checkout/create-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,6 +199,7 @@ export default function CartPage() {
             firstName: user?.firstName ?? "", lastName: user?.lastName ?? "", email: user?.email ?? "",
             addr: flat, addr2: houseNo, city, state: regionCode(state), zip: postalCode, country, phone,
             method: shippingMethod ?? "",
+            cost: shippingCostToSend,
           },
         }),
       });

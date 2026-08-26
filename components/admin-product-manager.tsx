@@ -320,8 +320,7 @@ export function AdminProductManager({ initialProducts }: AdminProductManagerProp
     { label: "Apparel", href: "/admin/apparel", count: null, active: pathname === "/admin/apparel" },
     { label: "Packaging", href: "/admin/packaging", count: null, active: pathname === "/admin/packaging" },
     { label: "Mockup", href: "/admin/mockup", count: null, active: pathname === "/admin/mockup" },
-    { label: "Reviews", href: "/admin/reviews", count: null, active: pathname === "/admin/reviews" },
-  ];
+    { label: "Reviews", href: "/admin/reviews", count: null, active: pathname === "/admin/reviews" },  ];
 
   const metrics = [
     { label: "Total Products", value: productCount, icon: "🛍️", color: "#7c3aed", iconBg: "#f5f3ff", trend: `${productCount} active listings`, trendColor: "#22c55e" },
