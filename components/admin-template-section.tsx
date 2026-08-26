@@ -6,13 +6,48 @@ import type { GalleryTemplate, SinaliteSelectedOption } from "@/lib/template-dat
 import { categories, LISTING_ALLOWED_CATEGORIES, LEGACY_SUBPRODUCT_SLUGS, slugifyLabel, CATEGORY_SUBPRODUCT_OPTIONS } from "@/lib/data";
 import type { Product } from "@/lib/types";
 
+// Reads an admin-uploaded image and, when it's large (e.g. a raw phone photo),
+// downsizes it via canvas before returning a data URL. These data URLs get
+// embedded directly in a JSON PATCH body, and Vercel's serverless functions
+// reject request bodies over ~4.5MB — an unresized photo silently failed the
+// entire save (including unrelated fields like the description) in production.
 async function readFile(file: File): Promise<string> {
-  return new Promise((res, rej) => {
+  const raw: string = await new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(r.result as string);
     r.onerror = () => rej(new Error("Cannot read file."));
     r.readAsDataURL(file);
   });
+
+  const MAX_BYTES = 1_500_000; // ~1.5MB, safely under the platform's request-body limit
+  if (raw.length <= MAX_BYTES) return raw;
+
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const el = new Image();
+      el.onload = () => res(el);
+      el.onerror = () => rej(new Error("Cannot decode image."));
+      el.src = raw;
+    });
+    let maxDim = 1600;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const ratio = img.naturalWidth / img.naturalHeight;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > maxDim) { w = maxDim; h = Math.round(maxDim / ratio); }
+      if (h > maxDim) { h = maxDim; w = Math.round(maxDim * ratio); }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return raw;
+      ctx.drawImage(img, 0, 0, w, h);
+      const resized = canvas.toDataURL("image/jpeg", 0.85);
+      if (resized.length <= MAX_BYTES || maxDim <= 400) return resized;
+      maxDim = Math.round(maxDim * 0.7);
+    }
+    return raw;
+  } catch {
+    return raw;
+  }
 }
 
 function openBcDB(): Promise<IDBDatabase> {
