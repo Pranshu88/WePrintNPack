@@ -1013,7 +1013,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
                 onAddGuideline={() => router.push(`/admin/guidelines?slug=premium-business-cards&sinaliteId=${g.sinaliteId ?? ""}`)}
                 onEdit={(updated) => {
-                  void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
+                  return fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1033,12 +1033,12 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 description={visibleGalleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${pkg.id}`)}
                 onAddGuideline={() => router.push("/admin/guidelines?slug=premium-business-cards")}
-                onEdit={(updated) => {
-                  void saveBcImage(pkg.id, updated.image);
-                  void saveBcImages(pkg.id, updated.images);
+                onEdit={async (updated) => {
+                  await saveBcImage(pkg.id, updated.image);
+                  await saveBcImages(pkg.id, updated.images);
                   setBcPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                   const realId = visibleGalleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
-                  void fetch(`/api/products/premium-business-cards/templates/${realId}`, {
+                  await fetch(`/api/products/premium-business-cards/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, images: updated.images, description: updated.description }),
@@ -1063,7 +1063,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   onBrowseDesigns={() => router.push(`/admin/templates/premium-business-cards/${g.id}`)}
                   onAddGuideline={() => router.push(`/admin/guidelines?slug=premium-business-cards&sinaliteId=${g.sinaliteId ?? ""}`)}
                   onEdit={(updated) => {
-                    void fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
+                    return fetch(`/api/products/premium-business-cards/templates/${g.id}`, {
                       method: "PATCH",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1103,7 +1103,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${g.id}`)}
                 onAddGuideline={() => router.push(`/admin/guidelines?slug=bold-flyers&sinaliteId=${g.sinaliteId ?? ""}`)}
                 onEdit={(updated) => {
-                  void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
+                  return fetch(`/api/products/bold-flyers/templates/${g.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1123,12 +1123,12 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 description={galleryList.find((g) => g.name === pkg.title)?.description ?? ""}
                 onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${pkg.id}`)}
                 onAddGuideline={() => router.push("/admin/guidelines?slug=bold-flyers")}
-                onEdit={(updated) => {
-                  void saveBcImage(pkg.id, updated.image);
-                  void saveBcImages(pkg.id, updated.images);
+                onEdit={async (updated) => {
+                  await saveBcImage(pkg.id, updated.image);
+                  await saveBcImages(pkg.id, updated.images);
                   setFlyPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                   const realId = galleryList.find((g) => g.name === updated.title)?.id ?? pkg.id;
-                  void fetch(`/api/products/bold-flyers/templates/${realId}`, {
+                  await fetch(`/api/products/bold-flyers/templates/${realId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ price: updated.price, specs: updated.specs, previewImage: updated.image, images: updated.images, description: updated.description }),
@@ -1153,7 +1153,7 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                   onBrowseDesigns={() => router.push(`/admin/templates/bold-flyers/${g.id}`)}
                   onAddGuideline={() => router.push(`/admin/guidelines?slug=bold-flyers&sinaliteId=${g.sinaliteId ?? ""}`)}
                   onEdit={(updated) => {
-                    void fetch(`/api/products/bold-flyers/templates/${g.id}`, {
+                    return fetch(`/api/products/bold-flyers/templates/${g.id}`, {
                       method: "PATCH",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1189,11 +1189,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/stickers-and-labels/${g.id}`)}
                     onAddGuideline={() => router.push(`/admin/guidelines?slug=stickers-and-labels&sinaliteId=${g.sinaliteId ?? ""}`)}
-                    onEdit={(updated) => {
-                      void saveBcImage(g.id, updated.image);
+                    onEdit={async (updated) => {
+                      await saveBcImage(g.id, updated.image);
                       setStickerImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setStickerMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
-                      void fetch(`/api/products/stickers-and-labels/templates/${g.id}`, {
+                      await fetch(`/api/products/stickers-and-labels/templates/${g.id}`, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1230,11 +1230,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/yard-signs/${g.id}`)}
                     onAddGuideline={() => router.push(`/admin/guidelines?slug=yard-signs&sinaliteId=${g.sinaliteId ?? ""}`)}
-                    onEdit={(updated) => {
-                      void saveBcImage(g.id, updated.image);
+                    onEdit={async (updated) => {
+                      await saveBcImage(g.id, updated.image);
                       setYardSignImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setYardSignMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
-                      void fetch(`/api/products/yard-signs/templates/${g.id}`, {
+                      await fetch(`/api/products/yard-signs/templates/${g.id}`, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1271,11 +1271,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/posters/${g.id}`)}
                     onAddGuideline={() => router.push(`/admin/guidelines?slug=posters&sinaliteId=${g.sinaliteId ?? ""}`)}
-                    onEdit={(updated) => {
-                      void saveBcImage(g.id, updated.image);
+                    onEdit={async (updated) => {
+                      await saveBcImage(g.id, updated.image);
                       setPosterImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setPosterMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
-                      void fetch(`/api/products/posters/templates/${g.id}`, {
+                      await fetch(`/api/products/posters/templates/${g.id}`, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1301,9 +1301,9 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/pizza-boxes/${pkg.id}`)}
                 onAddGuideline={() => router.push("/admin/guidelines?slug=pizza-boxes")}
-                onEdit={(updated) => {
-                  void saveBcImage(pkg.id, updated.image);
-                  void saveBcImages(pkg.id, updated.images);
+                onEdit={async (updated) => {
+                  await saveBcImage(pkg.id, updated.image);
+                  await saveBcImages(pkg.id, updated.images);
                   setPizzaBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setPizzaBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1324,9 +1324,9 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/shipping-boxes/${pkg.id}`)}
                 onAddGuideline={() => router.push("/admin/guidelines?slug=shipping-boxes")}
-                onEdit={(updated) => {
-                  void saveBcImage(pkg.id, updated.image);
-                  void saveBcImages(pkg.id, updated.images);
+                onEdit={async (updated) => {
+                  await saveBcImage(pkg.id, updated.image);
+                  await saveBcImages(pkg.id, updated.images);
                   setShippingBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setShippingBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1347,9 +1347,9 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/mailer-boxes/${pkg.id}`)}
                 onAddGuideline={() => router.push("/admin/guidelines?slug=mailer-boxes")}
-                onEdit={(updated) => {
-                  void saveBcImage(pkg.id, updated.image);
-                  void saveBcImages(pkg.id, updated.images);
+                onEdit={async (updated) => {
+                  await saveBcImage(pkg.id, updated.image);
+                  await saveBcImages(pkg.id, updated.images);
                   setMailerBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setMailerBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1370,9 +1370,9 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                 images={pkg.images ?? []}
                 onBrowseDesigns={() => router.push(`/admin/templates/square-shipping-boxes/${pkg.id}`)}
                 onAddGuideline={() => router.push("/admin/guidelines?slug=square-shipping-boxes")}
-                onEdit={(updated) => {
-                  void saveBcImage(pkg.id, updated.image);
-                  void saveBcImages(pkg.id, updated.images);
+                onEdit={async (updated) => {
+                  await saveBcImage(pkg.id, updated.image);
+                  await saveBcImages(pkg.id, updated.images);
                   setSquareShippingBoxPackages((prev) => prev.map((p) => p.id === pkg.id ? { ...p, ...updated } : p));
                 }}
                 onDelete={() => setSquareShippingBoxPackages((prev) => prev.filter((p) => p.id !== pkg.id))}
@@ -1404,11 +1404,11 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                     sinaliteOptions={g.sinaliteOptions}
                     onBrowseDesigns={() => router.push(`/admin/templates/vinyl-banners/${g.id}`)}
                     onAddGuideline={() => router.push(`/admin/guidelines?slug=vinyl-banners&sinaliteId=${g.sinaliteId ?? ""}`)}
-                    onEdit={(updated) => {
-                      void saveBcImage(g.id, updated.image);
+                    onEdit={async (updated) => {
+                      await saveBcImage(g.id, updated.image);
                       setBannerImages((prev) => ({ ...prev, [g.id]: updated.image }));
                       setBannerMeta((prev) => ({ ...prev, [g.id]: { price: updated.price, specs: updated.specs } }));
-                      void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
+                      await fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1448,8 +1448,8 @@ export function AdminTemplateSection({ products, openAddRef, onlyCategory, exclu
                         sinaliteOptions={g.sinaliteOptions}
                         onBrowseDesigns={() => router.push(`/admin/templates/${effectiveSlug}/${g.id}`)}
                         onAddGuideline={() => router.push(`/admin/guidelines?slug=${effectiveSlug}&sinaliteId=${g.sinaliteId ?? ""}`)}
-                        onEdit={(updated) => {
-                          void fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
+                        onEdit={async (updated) => {
+                          await fetch(`/api/products/${effectiveSlug}/templates/${g.id}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ name: updated.title, previewImage: updated.image, images: updated.images, price: updated.price, specs: updated.specs, description: updated.description, sinaliteOptions: updated.sinaliteOptions }),
@@ -1937,13 +1937,14 @@ function BusinessCardPricingCard({
   title: string; price: string; specs: string[]; image: string; images?: string[]; description?: string;
   sinaliteId?: string; sinaliteOptions?: SinaliteSelectedOption[];
   onBrowseDesigns: () => void;
-  onEdit: (updated: BcEditPayload) => void;
+  onEdit: (updated: BcEditPayload) => void | Promise<unknown>;
   onDelete: () => void;
   onAddGuideline: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [popup, setPopup] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [eTitle, setETitle] = useState("");
   const [ePrice, setEPrice] = useState("");
   const [eSpecs, setESpecs] = useState<{ key: string; value: string }[]>([]);
@@ -2010,21 +2011,26 @@ function BusinessCardPricingCard({
     setEImages((prev) => prev.filter((_, j) => j !== i));
   }
 
-  function saveEdit() {
+  async function saveEdit() {
     // No admin selection step — every fetched (non-hidden) Sinalite option is offered as-is.
     const chosenOptions: SinaliteSelectedOption[] = Object.values(optGroups)
       .flat()
       .map((o) => ({ id: o.id, group: o.group, name: o.name }));
-    onEdit({
-      title: eTitle.trim() || title,
-      price: formatPriceValue(ePrice) || price,
-      images: eImages,
-      specs: eSpecs.filter((s) => s.value.trim()).map(formatSpecEntry),
-      image: eImage,
-      description: eDescription.trim(),
-      ...(sinaliteId ? { sinaliteOptions: chosenOptions } : {}),
-    });
-    setEditOpen(false);
+    setSavingEdit(true);
+    try {
+      await onEdit({
+        title: eTitle.trim() || title,
+        price: formatPriceValue(ePrice) || price,
+        images: eImages,
+        specs: eSpecs.filter((s) => s.value.trim()).map(formatSpecEntry),
+        image: eImage,
+        description: eDescription.trim(),
+        ...(sinaliteId ? { sinaliteOptions: chosenOptions } : {}),
+      });
+    } finally {
+      setSavingEdit(false);
+      setEditOpen(false);
+    }
   }
 
   return (
@@ -2111,14 +2117,15 @@ function BusinessCardPricingCard({
       {editOpen && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
-          onClick={() => setEditOpen(false)}
+          onClick={() => { if (!savingEdit) setEditOpen(false); }}
         >
+          <style>{`@keyframes bc-edit-spin { to { transform: rotate(360deg); } }`}</style>
           <div style={{ background: "#fff", borderRadius: 18, width: "min(480px,100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ height: 5, background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)" }} />
             <div style={{ padding: "20px 22px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 800, color: "#111827" }}>Edit Card</h3>
-                <button onClick={() => setEditOpen(false)} style={{ width: 30, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: "1rem", color: "#6b7280" }}>✕</button>
+                <button onClick={() => { if (!savingEdit) setEditOpen(false); }} disabled={savingEdit} style={{ width: 30, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: savingEdit ? "not-allowed" : "pointer", fontSize: "1rem", color: "#6b7280", opacity: savingEdit ? 0.5 : 1 }}>✕</button>
               </div>
               {!sinaliteId && (
                 <>
@@ -2275,14 +2282,29 @@ function BusinessCardPricingCard({
               )}
               <div style={{ display: "flex", gap: 8 }}>
                 <button
-                  onClick={saveEdit}
-                  style={{ flex: 1, padding: "0.65rem 1rem", background: "linear-gradient(135deg,#f97316,#ef4444,#6366f1)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem", cursor: "pointer" }}
+                  onClick={() => void saveEdit()}
+                  disabled={savingEdit}
+                  style={{
+                    flex: 1, padding: "0.65rem 1rem",
+                    background: savingEdit ? "#d1d5db" : "linear-gradient(135deg,#f97316,#ef4444,#6366f1)",
+                    color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: "0.875rem",
+                    cursor: savingEdit ? "not-allowed" : "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  }}
                 >
-                  Save
+                  {savingEdit && (
+                    <span style={{
+                      width: 14, height: 14, borderRadius: "50%",
+                      border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff",
+                      animation: "bc-edit-spin 0.7s linear infinite",
+                    }} />
+                  )}
+                  {savingEdit ? "Saving…" : "Save"}
                 </button>
                 <button
                   onClick={() => setEditOpen(false)}
-                  style={{ padding: "0.65rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.875rem", cursor: "pointer", color: "#374151" }}
+                  disabled={savingEdit}
+                  style={{ padding: "0.65rem 1rem", background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: "0.875rem", cursor: savingEdit ? "not-allowed" : "pointer", color: "#374151", opacity: savingEdit ? 0.6 : 1 }}
                 >
                   Cancel
                 </button>
